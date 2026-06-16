@@ -1,0 +1,15 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated data (regenerable via data/generate_data.py)
+data/output/
+
+# Local Claude Code config (machine-specific; launch.json is kept/shared)
+.claude/settings.local.json
+.claude/*.lock

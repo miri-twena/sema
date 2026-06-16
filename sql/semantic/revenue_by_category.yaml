@@ -1,0 +1,32 @@
+name: revenue_by_category
+label: Revenue by Category
+description: >
+  Revenue broken down by product category. Unlike the headline Revenue
+  metric (which uses the stored order total_amount), category-level revenue
+  must be computed from order_items as quantity * unit_price, joined to
+  products for the category, because a single order can span multiple
+  categories.
+grain: one row per order line item
+sql: |
+  SELECT
+      p.category,
+      ROUND(SUM(oi.quantity * oi.unit_price), 2) AS revenue,
+      SUM(oi.quantity) AS units_sold
+  FROM order_items oi
+  JOIN orders o ON o.order_id = oi.order_id
+  JOIN products p ON p.product_id = oi.product_id
+  WHERE o.status = 'completed'
+  GROUP BY p.category
+  ORDER BY revenue DESC
+dimensions:
+  - name: category
+    sql: "products.category"
+  - name: month
+    sql: "DATE_TRUNC('month', orders.order_date)"
+filters:
+  completed_only: "orders.status = 'completed'"
+examples:
+  - question: "Show revenue by product category"
+    approach: "Sum quantity * unit_price from order_items, grouped by category."
+  - question: "Which category declined most in March 2026?"
+    approach: "Category revenue by month, compare March 2026 to a baseline month."

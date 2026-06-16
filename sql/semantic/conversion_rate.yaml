@@ -1,0 +1,29 @@
+name: conversion_rate
+label: Conversion Rate
+description: >
+  The share of website sessions that converted into a purchase, expressed
+  as a percentage. Based on website_sessions.converted. Measures how
+  effectively site traffic turns into orders.
+grain: one row per website session
+sql: |
+  SELECT
+      ROUND(
+          100.0 * SUM(CASE WHEN converted THEN 1 ELSE 0 END) / COUNT(*),
+          2
+      ) AS conversion_rate_pct
+  FROM website_sessions
+dimensions:
+  - name: traffic_source
+    sql: "website_sessions.traffic_source"
+  - name: device_type
+    sql: "website_sessions.device_type"
+  - name: month
+    sql: "DATE_TRUNC('month', session_start)"
+filters: {}
+examples:
+  - question: "What is our conversion rate?"
+    approach: "Converted sessions divided by total sessions, as a percentage."
+  - question: "Which traffic source converts best?"
+    approach: "Conversion rate grouped by traffic_source, ordered descending."
+  - question: "Conversion rate on mobile vs desktop"
+    approach: "Conversion rate grouped by device_type."

@@ -1,0 +1,32 @@
+name: revenue
+label: Revenue
+description: >
+  Total monetary value of completed orders, using the stored order
+  total_amount (which already includes discounts and shipping). Refunded
+  and cancelled orders are excluded. This is the headline top-line metric.
+grain: one row per order
+sql: |
+  SELECT SUM(total_amount) AS revenue
+  FROM orders
+  WHERE status = 'completed'
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', order_date)"
+  - name: traffic_source
+    sql: "orders.traffic_source"
+  - name: category
+    sql: "products.category"
+    requires_join: [order_items, products]
+    note: >
+      For category-level revenue, compute from order_items
+      (quantity * unit_price) joined to products -- see the
+      revenue_by_category metric.
+filters:
+  completed_only: "status = 'completed'"
+examples:
+  - question: "Show revenue trend by month"
+    approach: "Revenue grouped by the month dimension, ordered by month."
+  - question: "Why did revenue drop in March 2026?"
+    approach: >
+      Compare monthly revenue around March 2026, then break the dip down
+      by category, traffic_source, and customer segment.

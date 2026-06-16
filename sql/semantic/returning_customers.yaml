@@ -1,0 +1,35 @@
+name: returning_customers
+label: Returning Customers
+description: >
+  Customers who have made more than one completed purchase -- i.e. they came
+  back at least once. The primary definition counts customers with 2+
+  completed orders (a live, behavior-based definition). A stored alternative
+  is customers.segment = 'Returning'. Repeat purchasing is a key signal of
+  retention and product-market fit.
+grain: one row per customer
+sql: |
+  SELECT
+      customer_id,
+      COUNT(*) AS completed_orders,
+      ROUND(SUM(total_amount), 2) AS lifetime_revenue
+  FROM orders
+  WHERE status = 'completed'
+  GROUP BY customer_id
+  HAVING COUNT(*) >= 2
+  ORDER BY completed_orders DESC
+dimensions:
+  - name: segment
+    sql: "customers.segment"
+    requires_join: [customers]
+  - name: acquisition_channel
+    sql: "customers.acquisition_channel"
+    requires_join: [customers]
+alternative_definition: "SELECT customer_id FROM customers WHERE segment = 'Returning'"
+filters:
+  completed_only: "status = 'completed'"
+  repeat_buyer: "COUNT(completed orders) >= 2"
+examples:
+  - question: "How many returning customers do we have?"
+    approach: "Count customers with 2 or more completed orders."
+  - question: "What share of customers are repeat buyers?"
+    approach: "Returning customers divided by all customers who have ordered."

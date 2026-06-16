@@ -1,0 +1,33 @@
+name: campaign_roi
+label: Campaign ROI (ROAS)
+description: >
+  Return on marketing spend per campaign: attributed completed revenue
+  divided by spend (also known as ROAS, return on ad spend). Revenue is
+  attributed to a campaign via orders.campaign_id. A value of 1.0 means the
+  campaign broke even on a revenue basis; below 1.0 means it returned less
+  revenue than it cost.
+grain: one row per campaign
+sql: |
+  SELECT
+      c.campaign_id,
+      c.campaign_name,
+      c.channel,
+      c.spend,
+      ROUND(COALESCE(SUM(o.total_amount), 0), 2) AS attributed_revenue,
+      COUNT(o.order_id) AS attributed_orders,
+      ROUND(COALESCE(SUM(o.total_amount), 0) / NULLIF(c.spend, 0), 2) AS roi
+  FROM marketing_campaigns c
+  LEFT JOIN orders o
+      ON o.campaign_id = c.campaign_id AND o.status = 'completed'
+  GROUP BY c.campaign_id, c.campaign_name, c.channel, c.spend
+  ORDER BY roi DESC NULLS LAST
+dimensions:
+  - name: channel
+    sql: "marketing_campaigns.channel"
+filters:
+  completed_only: "orders.status = 'completed'"
+examples:
+  - question: "Which campaign performs best?"
+    approach: "Rank campaigns by roi (ROAS) descending."
+  - question: "Which campaigns are losing money?"
+    approach: "Filter to campaigns with roi < 1.0."

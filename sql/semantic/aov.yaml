@@ -1,0 +1,27 @@
+name: aov
+label: Average Order Value (AOV)
+description: >
+  The average value of a completed order -- total revenue divided by the
+  number of completed orders. A core efficiency metric: it tells you how
+  much customers spend per purchase, independent of how many orders there
+  are.
+grain: one row per order
+sql: |
+  SELECT ROUND(AVG(total_amount), 2) AS aov
+  FROM orders
+  WHERE status = 'completed'
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', order_date)"
+  - name: segment
+    sql: "customers.segment"
+    requires_join: [customers]
+  - name: traffic_source
+    sql: "orders.traffic_source"
+filters:
+  completed_only: "status = 'completed'"
+examples:
+  - question: "What is our average order value?"
+    approach: "AVG(total_amount) over completed orders."
+  - question: "How does AOV differ by customer segment?"
+    approach: "AOV grouped by the segment dimension (join customers)."

@@ -1,0 +1,46 @@
+name: churn_risk
+label: Churn Risk (At-Risk Customers)
+description: >
+  Customers who have purchased before but have placed NO completed order in
+  the last 90 days -- they are disengaging and at risk of churning. As with
+  active_customers, the 90-day window is anchored to the dataset's most
+  recent completed order date, not the real calendar date. Prioritize
+  win-back by lifetime_revenue.
+grain: one row per customer
+sql: |
+  WITH last_order AS (
+      SELECT
+          customer_id,
+          MAX(order_date) AS last_order_date,
+          COUNT(*) AS completed_orders,
+          ROUND(SUM(total_amount), 2) AS lifetime_revenue
+      FROM orders
+      WHERE status = 'completed'
+      GROUP BY customer_id
+  )
+  SELECT
+      lo.customer_id,
+      c.first_name || ' ' || c.last_name AS customer_name,
+      c.segment,
+      lo.last_order_date::date AS last_order_date,
+      lo.completed_orders,
+      lo.lifetime_revenue
+  FROM last_order lo
+  JOIN customers c ON c.customer_id = lo.customer_id
+  WHERE lo.last_order_date <= (
+      SELECT MAX(order_date) FROM orders WHERE status = 'completed'
+  ) - INTERVAL '90 days'
+  ORDER BY lo.lifetime_revenue DESC
+dimensions:
+  - name: segment
+    sql: "customers.segment"
+  - name: acquisition_channel
+    sql: "customers.acquisition_channel"
+filters:
+  completed_only: "status = 'completed'"
+  inactivity_window: "last completed order <= (dataset max order date) - INTERVAL '90 days'"
+examples:
+  - question: "Which customers are at risk?"
+    approach: "List at-risk customers ordered by lifetime_revenue (highest value first)."
+  - question: "How much revenue is at risk from churn?"
+    approach: "Sum lifetime_revenue across the at-risk set."

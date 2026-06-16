@@ -1,0 +1,45 @@
+name: vip_customers
+label: VIP Customers
+description: >
+  The company's highest-value customers. The primary definition uses the
+  stored customers.segment = 'VIP' label (computed from order history at
+  data-generation time). An alternative, live definition is the top 5% of
+  customers by lifetime completed revenue -- useful when you want a
+  revenue-concentration view rather than the stored label.
+grain: one row per customer
+sql: |
+  SELECT
+      c.customer_id,
+      c.first_name || ' ' || c.last_name AS customer_name,
+      c.acquisition_channel,
+      c.country,
+      COUNT(o.order_id) AS completed_orders,
+      ROUND(SUM(o.total_amount), 2) AS lifetime_revenue
+  FROM customers c
+  JOIN orders o ON o.customer_id = c.customer_id AND o.status = 'completed'
+  WHERE c.segment = 'VIP'
+  GROUP BY c.customer_id, c.first_name, c.last_name, c.acquisition_channel, c.country
+  ORDER BY lifetime_revenue DESC
+dimensions:
+  - name: acquisition_channel
+    sql: "customers.acquisition_channel"
+  - name: country
+    sql: "customers.country"
+alternative_definition: |
+  -- Top 5% of customers by lifetime completed revenue (live Pareto view):
+  WITH customer_revenue AS (
+      SELECT customer_id, SUM(total_amount) AS revenue
+      FROM orders WHERE status = 'completed' GROUP BY customer_id
+  ), ranked AS (
+      SELECT customer_id, revenue,
+             PERCENT_RANK() OVER (ORDER BY revenue DESC) AS pct_rank
+      FROM customer_revenue
+  )
+  SELECT customer_id, revenue FROM ranked WHERE pct_rank <= 0.05;
+filters:
+  vip_label: "customers.segment = 'VIP'"
+examples:
+  - question: "Who are our most valuable customers?"
+    approach: "List VIP customers ordered by lifetime_revenue."
+  - question: "What share of revenue comes from the top 5% of customers?"
+    approach: "Use the alternative top-5% definition and compare to total revenue."

@@ -1,0 +1,17 @@
+# SEMA - Python dependencies
+#
+# Database + data generation (this step):
+pandas==2.2.3          # data manipulation; builds the synthetic tables
+numpy==1.26.4           # random number generation (with a fixed seed for reproducibility)
+faker==24.4.0            # realistic-looking fake names, emails, etc.
+psycopg2-binary==2.9.9   # PostgreSQL driver, used for bulk-loading via COPY
+python-dotenv==1.0.1     # loads connection settings from .env
+
+# Phase 1 UI:
+streamlit==1.40.0        # chat-style web UI (>=1.39 for st-key-* CSS classes)
+plotly==5.24.1           # interactive charts
+
+# Agent layer:
+pyyaml==6.0.2            # loads the semantic layer (sql/semantic/*.yaml)
+sqlglot==25.24.0         # parses/validates agent SQL (SELECT-only, auto-limit)
+anthropic==0.109.1       # Claude API client (the agent's LLM)

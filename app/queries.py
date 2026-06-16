@@ -1,0 +1,90 @@
+"""
+SEMA: saved report library.
+
+Each function below loads one .sql file from sql/queries/ and runs it
+through db.run_query(). Think of this module as a set of stored procedures
+you can call from Python -- the SQL itself lives in sql/queries/*.sql so it
+can be read, reviewed, and edited like any other query file.
+
+Results are cached for a short time with st.cache_data so that re-running
+the same report (e.g. clicking a suggested question twice) doesn't hit the
+database again immediately.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+from db import run_query
+
+QUERIES_DIR = Path(__file__).resolve().parent.parent / "sql" / "queries"
+
+
+def _load_sql(filename: str) -> str:
+    return (QUERIES_DIR / filename).read_text(encoding="utf-8")
+
+
+def _run(filename: str) -> pd.DataFrame:
+    """Run a saved query and normalize any 'month' column to datetime64.
+
+    Postgres ::date columns come back from psycopg2 as Python date objects
+    (pandas dtype "object"), which don't compare equal to pd.Timestamp. We
+    convert once here so every chart/insight can rely on datetime64 months.
+    """
+    df = run_query(_load_sql(filename))
+    if "month" in df.columns:
+        df["month"] = pd.to_datetime(df["month"])
+    return df
+
+
+@st.cache_data(ttl=300)
+def get_revenue_by_month() -> pd.DataFrame:
+    return _run("revenue_by_month.sql")
+
+
+@st.cache_data(ttl=300)
+def get_revenue_by_category_by_month() -> pd.DataFrame:
+    return _run("revenue_by_category_by_month.sql")
+
+
+@st.cache_data(ttl=300)
+def get_traffic_source_by_month() -> pd.DataFrame:
+    return _run("traffic_source_by_month.sql")
+
+
+@st.cache_data(ttl=300)
+def get_segment_orders_by_month() -> pd.DataFrame:
+    return _run("segment_orders_by_month.sql")
+
+
+@st.cache_data(ttl=300)
+def get_revenue_by_category() -> pd.DataFrame:
+    return _run("revenue_by_category.sql")
+
+
+@st.cache_data(ttl=300)
+def get_top_customers() -> pd.DataFrame:
+    return _run("top_customers.sql")
+
+
+@st.cache_data(ttl=300)
+def get_top5pct_revenue_share() -> pd.DataFrame:
+    return _run("top5pct_revenue_share.sql")
+
+
+@st.cache_data(ttl=300)
+def get_campaign_performance() -> pd.DataFrame:
+    return _run("campaign_performance.sql")
+
+
+@st.cache_data(ttl=300)
+def get_at_risk_customers() -> pd.DataFrame:
+    return _run("at_risk_customers.sql")
+
+
+@st.cache_data(ttl=300)
+def get_at_risk_session_trend() -> pd.DataFrame:
+    return _run("at_risk_session_trend.sql")
