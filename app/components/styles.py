@@ -187,21 +187,82 @@ h1, h2, h3 {
 }
 .sema-insight { color: $text; font-size: 0.95rem; line-height: 1.7; }
 
+/* ---- Answer typography ----
+   The insight is plain markdown, so we style its real elements (headings,
+   paragraphs, lists, tables) for a calm, readable hierarchy instead of
+   Streamlit's oversized defaults. Scoped to the response card via the border
+   wrapper, so the page title and sidebar are untouched. The KPI/action cards
+   inside the card use <div> classes (not <p>/<h2>), so these rules don't
+   reach them. */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] li {
+    font-size: 0.94rem;
+    line-height: 1.65;
+    color: $text;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] li {
+    margin-bottom: 0.18rem;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h2 {
+    font-size: 1.18rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    margin: 0.2rem 0 0.5rem 0;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h3 {
+    font-size: 1.0rem;
+    font-weight: 600;
+    color: $primary_dark;
+    margin: 1rem 0 0.35rem 0;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] strong {
+    font-weight: 600;
+    color: $text;
+}
+/* Markdown tables the agent sometimes emits inside an answer */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.86rem;
+    margin: 0.4rem 0 0.7rem 0;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] th {
+    background: $surface_alt;
+    color: $label;
+    font-weight: 600;
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid $border;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] td {
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid $border_soft;
+}
+
 /* ---- KPI cards ---- */
 .sema-kpi {
     border-radius: $radius;
-    padding: 0.85rem 1rem;
+    padding: 0.9rem 1rem 1rem 1rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    border: 1px solid rgba(30, 41, 59, 0.04);
 }
 .sema-kpi-label {
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 0.3rem;
+    line-height: 1.3;
+    /* reserve space so values line up across cards even when a label wraps */
+    min-height: 2.2em;
+    margin-bottom: 0.4rem;
 }
 .sema-kpi-value {
     /* clamp() scales the number down on narrow cards so a long value can
        never spill outside its tile (4 KPIs in a row get quite narrow). */
-    font-size: clamp(1.05rem, 2.1vw, 1.55rem);
+    font-size: clamp(1.1rem, 2.1vw, 1.6rem);
     font-weight: 600;
     color: $text;
     line-height: 1.1;

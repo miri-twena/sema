@@ -1,0 +1,49 @@
+name: retention_rate
+label: Retention / Renewal Rate
+description: >
+  The share of policies due for renewal that were actually renewed -- the
+  insurance version of retention (and its inverse, churn). When an annual auto
+  policy reaches expiry, the customer either renews (retained) or lapses
+  (churned). We look at policies whose term has ended and check whether a
+  successor policy points back to them via previous_policy_id. High retention
+  is the cheapest growth there is, because keeping a policy costs far less
+  than acquiring a new one.
+grain: one row per expiring policy
+sql: |
+  SELECT ROUND(
+             100.0 * COUNT(*) FILTER (WHERE renewed)
+             / NULLIF(COUNT(*), 0), 1
+         ) AS renewal_rate_pct
+  FROM (
+      SELECT prior.policy_id,
+             prior.end_date,
+             EXISTS (
+                 SELECT 1 FROM policies nxt
+                 WHERE nxt.previous_policy_id = prior.policy_id
+             ) AS renewed
+      FROM policies prior
+      WHERE prior.end_date < CURRENT_DATE          -- term has already ended
+  ) t
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', t.end_date)"
+    note: "Retention by the month the prior policy expired."
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+  - name: region
+    sql: "policyholders.region"
+    requires_join: [policyholders]
+  - name: agent_channel
+    sql: "agents.channel"
+    requires_join: [agents]
+examples:
+  - question: "What's our renewal rate?"
+    approach: "Share of expired policies that have a successor renewal policy."
+  - question: "Which channel retains customers best?"
+    approach: >
+      Renewal rate grouped by agent_channel -- tied agents often retain better
+      than aggregator/price-comparison business.
+alternative_definition: >
+  A premium-weighted retention rate (renewed premium / expiring premium)
+  rewards keeping high-value policies, vs this simple policy-count version.

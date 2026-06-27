@@ -28,12 +28,24 @@ load_dotenv()
 warnings.filterwarnings("ignore", message="pandas only supports SQLAlchemy")
 
 
+def _db_name() -> str:
+    """Which database to connect to, based on the active client.
+
+    SEMA_CLIENT=insurance -> insurance_db; otherwise the default ecommerce DB.
+    This is the database half of the multi-client switch (the semantic-layer
+    half lives in agent/semantic.py).
+    """
+    if os.environ.get("SEMA_CLIENT", "").strip().lower() == "insurance":
+        return os.environ.get("POSTGRES_DB_INSURANCE", "insurance_db")
+    return os.environ.get("POSTGRES_DB", "sema_db")
+
+
 @st.cache_resource
 def get_connection() -> "psycopg2.extensions.connection":
     return psycopg2.connect(
         host=os.environ.get("POSTGRES_HOST", "localhost"),
         port=os.environ.get("POSTGRES_PORT", "5432"),
-        dbname=os.environ.get("POSTGRES_DB", "sema_db"),
+        dbname=_db_name(),
         user=os.environ.get("POSTGRES_USER", "sema_user"),
         password=os.environ.get("POSTGRES_PASSWORD", "sema_password"),
     )
@@ -80,7 +92,7 @@ def get_readonly_connection() -> "psycopg2.extensions.connection":
     conn = psycopg2.connect(
         host=os.environ.get("POSTGRES_HOST", "localhost"),
         port=os.environ.get("POSTGRES_PORT", "5432"),
-        dbname=os.environ.get("POSTGRES_DB", "sema_db"),
+        dbname=_db_name(),
         user=os.environ.get("POSTGRES_READONLY_USER", "sema_readonly"),
         password=os.environ.get("POSTGRES_READONLY_PASSWORD", "sema_readonly_pw"),
         options=f"-c statement_timeout={READONLY_TIMEOUT_MS}",

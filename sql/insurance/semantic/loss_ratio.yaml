@@ -1,0 +1,58 @@
+name: loss_ratio
+label: Loss Ratio
+description: >
+  Incurred claims divided by earned premium, as a percentage -- the single
+  most important profitability metric in insurance. It answers: of every
+  dollar of premium we earned, how much went straight back out as claims? A
+  motor book is typically healthy below ~70%; above 100% means claims alone
+  exceed premium (before even counting expenses). For a true period figure,
+  BOTH the claims (by claim_date) and the earned premium (by earning month)
+  must be filtered to the same period.
+grain: aggregate ratio over a period
+sql: |
+  WITH earned AS (
+      SELECT SUM(p.annual_premium / 12.0) AS earned_premium
+      FROM policies p
+      CROSS JOIN LATERAL generate_series(
+          DATE_TRUNC('month', p.start_date),
+          DATE_TRUNC('month', p.end_date - INTERVAL '1 day'),
+          INTERVAL '1 month'
+      ) AS m
+      -- WHERE m BETWEEN <from> AND <to>   -- add to scope to a period
+  ),
+  losses AS (
+      SELECT SUM(paid_amount) AS incurred_claims
+      FROM claims
+      WHERE status IN ('Approved', 'Paid', 'Closed')
+      -- AND claim_date BETWEEN <from> AND <to>   -- match the same period
+  )
+  SELECT losses.incurred_claims,
+         earned.earned_premium,
+         ROUND(100.0 * losses.incurred_claims
+               / NULLIF(earned.earned_premium, 0), 1) AS loss_ratio_pct
+  FROM earned, losses
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', claim_date) / DATE_TRUNC('month', m)"
+    note: >
+      To trend the loss ratio, compute earned premium per month and incurred
+      claims per month separately, then divide month by month.
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+    note: "Join products in both the earned and losses CTEs to split by tier."
+filters:
+  settled_claims_only: "claims.status IN ('Approved', 'Paid', 'Closed')"
+examples:
+  - question: "What is our loss ratio this year?"
+    approach: >
+      Sum incurred claims and earned premium for the year, divide. Flag if it
+      is trending toward or above the ~70% health threshold.
+  - question: "Which coverage type is least profitable?"
+    approach: >
+      Loss ratio split by coverage_type: the tier with the highest ratio is
+      eroding margin the most.
+alternative_definition: >
+  Some carriers report loss ratio on WRITTEN premium (simpler, but mismatches
+  claims and premium in time) instead of EARNED premium. Earned is the
+  actuarially correct denominator and the default here.

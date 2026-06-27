@@ -1,0 +1,46 @@
+name: average_premium
+label: Average Premium
+description: >
+  The average annual premium per policy -- the typical price point of the
+  book. Rising average premium can mean rate increases or a shift toward
+  richer coverage; falling can mean discounting or a mix shift to cheaper
+  tiers. Read it alongside policy count so growth in premium can be split into
+  "more policies" vs "higher price".
+grain: one row per policy
+sql: |
+  SELECT ROUND(AVG(annual_premium), 0) AS average_premium
+  FROM policies
+dimensions:
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+  - name: age_band
+    sql: |
+      CASE
+        WHEN date_part('year', age(drivers.date_of_birth)) < 26 THEN '18-25'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 36 THEN '26-35'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 46 THEN '36-45'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 56 THEN '46-55'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 66 THEN '56-65'
+        ELSE '65+'
+      END
+    requires_join: [drivers]
+    note: >
+      Primary driver's age band. Join drivers on
+      policies.primary_driver_id = drivers.driver_id, then bucket the age.
+      Order the result 18-25, 26-35, ... so the bands read youngest-first.
+  - name: business_type
+    sql: "policies.business_type"
+  - name: vehicle_category
+    sql: "vehicles.vehicle_category"
+    requires_join: [vehicles]
+  - name: region
+    sql: "policyholders.region"
+    requires_join: [policyholders]
+  - name: month
+    sql: "DATE_TRUNC('month', start_date)"
+examples:
+  - question: "What's our average premium by coverage type?"
+    approach: "Average annual_premium grouped by coverage_type."
+  - question: "Is our average premium rising over time?"
+    approach: "Average annual_premium by start_date month, as a trend."

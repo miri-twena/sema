@@ -1,0 +1,30 @@
+name: claims_severity
+label: Claims Severity
+description: >
+  The average cost of a claim when one occurs -- mean paid_amount over settled
+  claims (paid_amount > 0). This is the "how expensive" lever, the partner to
+  Claims Frequency. A book can have low frequency but high severity (e.g. few
+  but catastrophic collisions) or the reverse (many cheap glass claims).
+grain: one row per settled claim
+sql: |
+  SELECT ROUND(AVG(paid_amount), 0) AS avg_claim_severity
+  FROM claims
+  WHERE status IN ('Approved', 'Paid', 'Closed')
+    AND paid_amount > 0
+dimensions:
+  - name: claim_type
+    sql: "claims.claim_type"
+  - name: month
+    sql: "DATE_TRUNC('month', claim_date)"
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [policies, products]
+filters:
+  settled_with_payment: "status IN ('Approved', 'Paid', 'Closed') AND paid_amount > 0"
+examples:
+  - question: "What's the average claim size?"
+    approach: "Mean paid_amount over settled, paid claims."
+  - question: "Which claim type is most expensive per claim?"
+    approach: >
+      Average severity grouped by claim_type. Theft and Collision usually
+      dwarf Glass/Windshield -- useful for reserving and reinsurance.

@@ -1,0 +1,43 @@
+name: earned_premium
+label: Earned Premium
+description: >
+  The portion of written premium that has actually been "earned" by providing
+  coverage over elapsed time. A 12-month policy earns its premium gradually,
+  one month at a time -- so at any point only the expired part is earned and
+  the rest is unearned (a liability). Earned premium is the correct
+  denominator for the Loss Ratio, because it matches premium to the same
+  period as the claims it has to cover. This definition uses straight-line
+  monthly earning (annual_premium / 12 per active month); a more precise
+  version pro-rates by exact days.
+grain: one row per policy-month of active coverage
+sql: |
+  -- Each policy earns annual_premium / 12 for every month its coverage
+  -- period overlaps. generate_series expands a policy into one row per
+  -- active month; summing gives earned premium recognised in each month.
+  SELECT DATE_TRUNC('month', m)::date AS month,
+         SUM(p.annual_premium / 12.0) AS earned_premium
+  FROM policies p
+  CROSS JOIN LATERAL generate_series(
+      DATE_TRUNC('month', p.start_date),
+      DATE_TRUNC('month', p.end_date - INTERVAL '1 day'),
+      INTERVAL '1 month'
+  ) AS m
+  GROUP BY 1
+  ORDER BY 1
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', m)"
+    note: "The earning month, not the policy start month."
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+filters:
+  earned_in_period: "the generated month m BETWEEN <from> AND <to>"
+examples:
+  - question: "What was our earned premium in Q1 2026?"
+    approach: "Sum earned_premium for the months Jan-Mar 2026."
+  - question: "Compare written vs earned premium this year"
+    approach: >
+      Written premium (by start_date) grows with sales; earned premium lags
+      it because premium is recognised over the policy term. Plot both by
+      month to show the gap.

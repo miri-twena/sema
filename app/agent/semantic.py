@@ -13,11 +13,20 @@ Claude API key -- it works whether or not the key is configured.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 
-SEMANTIC_DIR = Path(__file__).resolve().parent.parent.parent / "sql" / "semantic"
+# Pick the semantic layer for the active client. SEMA_CLIENT=insurance points
+# the agent at the auto-insurance metrics; anything else uses the ecommerce
+# layer. This is the semantic-layer half of the multi-client switch (the DB
+# half lives in db.py) -- same agent, different "governed measures" folder.
+load_dotenv()
+_SQL_DIR = Path(__file__).resolve().parent.parent.parent / "sql"
+_CLIENT = os.environ.get("SEMA_CLIENT", "ecommerce").strip().lower()
+SEMANTIC_DIR = _SQL_DIR / "insurance" / "semantic" if _CLIENT == "insurance" else _SQL_DIR / "semantic"
 
 # Every metric file must define these keys, or we consider it malformed.
 REQUIRED_KEYS = {"name", "label", "description", "grain", "sql", "dimensions", "examples"}

@@ -1,0 +1,36 @@
+name: written_premium
+label: Written Premium
+description: >
+  Total annual premium of policies written (incepted) in the period, keyed by
+  policy start_date. This is the insurance equivalent of "bookings": the full
+  contracted premium at the moment a policy is sold or renewed, regardless of
+  how much has actually been earned over time or collected in cash yet. It is
+  the headline top-line growth metric.
+grain: one row per policy
+sql: |
+  SELECT SUM(annual_premium) AS written_premium
+  FROM policies
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', start_date)"
+  - name: business_type
+    sql: "policies.business_type"
+    note: "New Business vs Renewal -- isolates growth from retention."
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+  - name: agent_channel
+    sql: "agents.channel"
+    requires_join: [agents]
+  - name: region
+    sql: "policyholders.region"
+    requires_join: [policyholders]
+filters:
+  written_in_period: "start_date BETWEEN <from> AND <to>"
+examples:
+  - question: "Show written premium by month"
+    approach: "Sum annual_premium grouped by the month dimension on start_date."
+  - question: "How much new business premium did we write last quarter?"
+    approach: >
+      Written premium filtered to business_type = 'New Business' over the
+      quarter, optionally split by coverage_type or agent_channel.

@@ -7,8 +7,9 @@ __pycache__/
 .venv/
 venv/
 
-# Generated data (regenerable via data/generate_data.py)
+# Generated data (regenerable via the generators)
 data/output/
+data/insurance/output/
 
 # Local Claude Code config (machine-specific; launch.json is kept/shared)
 .claude/settings.local.json

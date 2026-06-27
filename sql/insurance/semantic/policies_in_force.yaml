@@ -1,0 +1,34 @@
+name: policies_in_force
+label: Policies In Force
+description: >
+  The number of active policies as of a reference date (default: today) -- the
+  size of the book of business. This is the insurance analogue of "active
+  subscriptions" in SaaS: a point-in-time count, not a period sum. A policy is
+  in force if its status is Active and the reference date falls within its
+  coverage period.
+grain: one row per policy (point-in-time count)
+sql: |
+  SELECT COUNT(*) AS policies_in_force
+  FROM policies
+  WHERE status = 'Active'
+    AND CURRENT_DATE BETWEEN start_date AND end_date
+dimensions:
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+  - name: region
+    sql: "policyholders.region"
+    requires_join: [policyholders]
+  - name: agent_channel
+    sql: "agents.channel"
+    requires_join: [agents]
+filters:
+  in_force_today: "status = 'Active' AND CURRENT_DATE BETWEEN start_date AND end_date"
+examples:
+  - question: "How many policies do we have in force?"
+    approach: "Count active policies covering today's date."
+  - question: "What's our in-force split by coverage type?"
+    approach: "Policies in force grouped by coverage_type (join products)."
+alternative_definition: >
+  For an as-of-month-end view, replace CURRENT_DATE with the chosen date so
+  the count reflects the book at that historical point.

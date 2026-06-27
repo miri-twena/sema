@@ -1,0 +1,34 @@
+name: incurred_claims
+label: Incurred Claims (Losses)
+description: >
+  Total amount actually paid out on claims -- the carrier's cost of risk. We
+  use claims.paid_amount and count only claims that reached a settled state
+  (Approved / Paid / Closed), so open reserves and rejected claims don't
+  inflate the figure. Keyed by claim_date (date of loss). This is the
+  numerator of the Loss Ratio and the core cost line of the business.
+grain: one row per claim
+sql: |
+  SELECT SUM(paid_amount) AS incurred_claims
+  FROM claims
+  WHERE status IN ('Approved', 'Paid', 'Closed')
+dimensions:
+  - name: month
+    sql: "DATE_TRUNC('month', claim_date)"
+  - name: claim_type
+    sql: "claims.claim_type"
+    note: "Collision, Third-Party Liability, Theft, Fire, Weather, Glass, Vandalism."
+  - name: at_fault
+    sql: "claims.at_fault"
+  - name: incident_region
+    sql: "claims.incident_region"
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [policies, products]
+filters:
+  settled_only: "status IN ('Approved', 'Paid', 'Closed')"
+  loss_in_period: "claim_date BETWEEN <from> AND <to>"
+examples:
+  - question: "What did we pay out in claims last month?"
+    approach: "Sum paid_amount for settled claims with claim_date in the month."
+  - question: "Which claim type costs us the most?"
+    approach: "Incurred claims grouped by claim_type, ordered descending."

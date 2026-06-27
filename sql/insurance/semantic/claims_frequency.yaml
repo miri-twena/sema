@@ -1,0 +1,52 @@
+name: claims_frequency
+label: Claims Frequency
+description: >
+  How often policies produce a claim, expressed as claims per 100 policies.
+  Together with Claims Severity it decomposes the loss cost: Frequency x
+  Severity ~= average loss per policy. Frequency is the "how often" lever that
+  underwriting and pricing try to control (e.g. by driver age, region, usage).
+grain: aggregate ratio (claims relative to policy count)
+sql: |
+  SELECT ROUND(
+             100.0 * COUNT(c.claim_id)::numeric
+             / NULLIF(COUNT(DISTINCT p.policy_id), 0), 2
+         ) AS claims_per_100_policies
+  FROM policies p
+  LEFT JOIN claims c ON c.policy_id = p.policy_id
+dimensions:
+  - name: coverage_type
+    sql: "products.coverage_type"
+    requires_join: [products]
+  - name: age_band
+    sql: |
+      CASE
+        WHEN date_part('year', age(drivers.date_of_birth)) < 26 THEN '18-25'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 36 THEN '26-35'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 46 THEN '36-45'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 56 THEN '46-55'
+        WHEN date_part('year', age(drivers.date_of_birth)) < 66 THEN '56-65'
+        ELSE '65+'
+      END
+    requires_join: [drivers]
+    note: >
+      Primary driver's age band. Join drivers on
+      drivers.driver_id = p.primary_driver_id (policies is aliased p in the
+      base query). This is the canonical young-driver-risk cut.
+  - name: vehicle_category
+    sql: "vehicles.vehicle_category"
+    requires_join: [vehicles]
+  - name: region
+    sql: "policyholders.region"
+    requires_join: [policyholders]
+  - name: month
+    sql: "DATE_TRUNC('month', c.claim_date)"
+    note: "Frequency over time keys claims by claim_date."
+examples:
+  - question: "Which vehicle category has the highest claims frequency?"
+    approach: >
+      Claims per 100 policies grouped by vehicle_category (join vehicles),
+      ordered descending -- the riskiest segment to write.
+  - question: "Are young drivers claiming more often?"
+    approach: >
+      Bucket the primary driver's age (from drivers.date_of_birth) and compare
+      claims frequency across age bands.
