@@ -63,8 +63,10 @@ COLUMN_LABELS: dict[str, str] = {
     "claim_count": "מספר תביעות",
     "total_claims": "סך תביעות",
     "claims_per_100_policies": "תביעות ל-100 פוליסות",
+    "claims_per_100": "תביעות ל-100 פוליסות",
     "claims_frequency": "תדירות תביעות",
     "avg_claim_severity": "חומרת תביעה ממוצעת",
+    "avg_severity": "חומרת תביעה ממוצעת",
     "claim_severity": "חומרת תביעה",
     "loss_ratio": "יחס נזק",
     "loss_ratio_pct": "יחס נזק (%)",
@@ -91,18 +93,39 @@ COLUMN_LABELS: dict[str, str] = {
 }
 
 
+# Unit suffixes the agent often appends to a metric alias (e.g. written_premium_k).
+# We strip these, translate the base, and re-attach a Hebrew unit hint -- so we
+# don't need a dict entry for every "_k" / "_pct" variant.
+_UNIT_SUFFIXES: list[tuple[str, str]] = [
+    ("_pct", " (%)"),
+    ("_percent", " (%)"),
+    ("_k", " (אלפים)"),
+    ("_thousands", " (אלפים)"),
+    ("_m", " (מיליונים)"),
+    ("_millions", " (מיליונים)"),
+]
+
+
 def _pretty_fallback(name: str) -> str:
     """Tidy an unknown column name: underscores -> spaces, words capitalised."""
     return name.replace("_", " ").strip().title()
 
 
+def _label(name: str) -> str:
+    """Hebrew header for one column: exact match, then suffix-stripped match,
+    then a tidied fallback so an unknown column never breaks the table."""
+    key = str(name).lower().strip()
+    if key in COLUMN_LABELS:
+        return COLUMN_LABELS[key]
+    for suffix, hint in _UNIT_SUFFIXES:
+        if key.endswith(suffix) and key[: -len(suffix)] in COLUMN_LABELS:
+            return COLUMN_LABELS[key[: -len(suffix)]] + hint
+    return _pretty_fallback(str(name))
+
+
 def _to_hebrew_headers(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of df with headers relabelled to Hebrew where known."""
-    rename = {
-        col: COLUMN_LABELS.get(str(col).lower(), _pretty_fallback(str(col)))
-        for col in df.columns
-    }
-    return df.rename(columns=rename)
+    return df.rename(columns={col: _label(col) for col in df.columns})
 
 
 def render(df: pd.DataFrame, title: str | None = None, rtl: bool = False) -> None:
