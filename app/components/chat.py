@@ -65,7 +65,7 @@ def render_assistant_message(response: dict, rtl: bool = False) -> None:
             st.plotly_chart(fig, use_container_width=True)
 
         if response.get("table") is not None:
-            tables.render(response["table"], response.get("table_title"))
+            tables.render(response["table"], response.get("table_title"), rtl=rtl)
 
         if response.get("recommended_actions"):
             actions.render(response["recommended_actions"])
