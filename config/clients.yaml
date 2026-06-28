@@ -1,0 +1,31 @@
+# SEMA client registry.
+#
+# Each entry is one business client SEMA can serve. A client has its own
+# database and its own semantic layer (governed metric definitions). Adding a
+# new client is a config change here -- no code change:
+#   id                 unique key (also the default db name: "<id>_db")
+#   label              display name (shown in the sidebar / admin page)
+#   db_env             env var (in .env) holding this client's database name
+#   semantic_dir       path (from project root) to the client's *.yaml metrics
+#   suggested_questions starter questions shown in the sidebar + empty state
+
+clients:
+  - id: ecommerce
+    label: "🛍️ E-Commerce"
+    db_env: POSTGRES_DB
+    semantic_dir: sql/semantic
+    suggested_questions:
+      - "Show revenue trend by month."
+      - "Who are our most valuable customers?"
+      - "Why did revenue drop in March 2026?"
+      - "Which campaign performs best?"
+
+  - id: insurance
+    label: "🚗 Auto Insurance"
+    db_env: POSTGRES_DB_INSURANCE
+    semantic_dir: sql/insurance/semantic
+    suggested_questions:
+      - "What is our loss ratio?"
+      - "Which coverage type is least profitable?"
+      - "Show policies in force by region."
+      - "Which channel retains customers best?"

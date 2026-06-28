@@ -30,3 +30,27 @@ examples:
     approach: >
       Compare monthly revenue around March 2026, then break the dip down
       by category, traffic_source, and customer segment.
+alerts:
+  - id: revenue_mom_drop
+    label: "Revenue Drop"
+    condition: mom_pct_change < -8
+    severity: critical
+    sql: |
+      WITH monthly AS (
+          SELECT DATE_TRUNC('month', order_date) AS month,
+                 SUM(total_amount) AS revenue
+          FROM orders
+          WHERE status = 'completed'
+          GROUP BY 1
+      ),
+      ranked AS (
+          SELECT revenue, ROW_NUMBER() OVER (ORDER BY month DESC) AS rn
+          FROM monthly
+      )
+      SELECT ROUND(
+          (MAX(revenue) FILTER (WHERE rn = 1) - MAX(revenue) FILTER (WHERE rn = 2))
+          / NULLIF(MAX(revenue) FILTER (WHERE rn = 2), 0) * 100
+      , 1) AS mom_pct_change
+      FROM ranked
+      WHERE rn <= 2
+    message_template: "Revenue ירד {value}% MoM — חריג מעל ל-8%"

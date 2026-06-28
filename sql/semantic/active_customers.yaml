@@ -28,3 +28,16 @@ examples:
     approach: "Count distinct customers with a completed order in the last 90 days."
   - question: "Active customers by acquisition channel"
     approach: "Same recency filter, grouped by acquisition_channel (join customers)."
+alerts:
+  - id: active_customers_drop
+    label: "Active Customers Drop"
+    condition: active_count < 400
+    severity: warning
+    sql: |
+      SELECT COUNT(DISTINCT customer_id) AS active_count
+      FROM orders
+      WHERE status = 'completed'
+        AND order_date > (
+            SELECT MAX(order_date) FROM orders WHERE status = 'completed'
+        ) - INTERVAL '90 days'
+    message_template: "רק {value} לקוחות פעילים ב-90 יום האחרונים"

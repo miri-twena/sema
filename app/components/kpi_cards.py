@@ -41,7 +41,10 @@ def _format_value(value, fmt: str) -> str:
     return str(value)
 
 
-def render(kpis: list[dict]) -> None:
+def render(kpis: list[dict], msg_idx: int = 0, on_context=None) -> None:
+    """Render KPI cards. `on_context`, if given, is called with a widget-context
+    dict when a card's 💬 button is clicked (passed in by chat.py, so this stays
+    a pure renderer with no dependency on chat -- avoids a circular import)."""
     if not kpis:
         return
 
@@ -50,6 +53,7 @@ def render(kpis: list[dict]) -> None:
         bg, label_color = KPI_TINTS[i % len(KPI_TINTS)]
         value_str = _format_value(kpi["value"], kpi.get("format", "text"))
 
+        delta_str = ""  # for the context label / agent prefix
         delta_html = ""
         if "delta" in kpi:
             delta = kpi["delta"]
@@ -57,6 +61,7 @@ def render(kpis: list[dict]) -> None:
             arrow = "▲" if up else "▼"
             cls = "up" if up else "down"
             delta_label = kpi.get("delta_label", "")
+            delta_str = f", {arrow}{abs(delta):.1f}% {delta_label}".rstrip()
             delta_html = (
                 f'<div class="sema-kpi-delta {cls}">'
                 f"{arrow} {abs(delta):.1f}% {delta_label}"
@@ -74,3 +79,15 @@ def render(kpis: list[dict]) -> None:
                 """,
                 unsafe_allow_html=True,
             )
+            if on_context and st.button("💬", key=f"ctx_kpi_{msg_idx}_{i}", help=f"שאל על {kpi['label']}"):
+                on_context(
+                    {
+                        "type": "kpi",
+                        "label": f"{kpi['label']} — {value_str}{delta_str}",
+                        "agent_prefix": (
+                            "[Context: The user is asking about a specific KPI from the previous answer.\n"
+                            f"KPI: {kpi['label']}, Value: {value_str}{delta_str}.\n"
+                            "Focus your analysis on this metric specifically.]"
+                        ),
+                    }
+                )

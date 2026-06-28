@@ -25,3 +25,26 @@ examples:
     approach: "AVG(total_amount) over completed orders."
   - question: "How does AOV differ by customer segment?"
     approach: "AOV grouped by the segment dimension (join customers)."
+alerts:
+  - id: aov_drop
+    label: "AOV Drop"
+    condition: mom_aov_change < -5
+    severity: warning
+    sql: |
+      WITH monthly_aov AS (
+          SELECT DATE_TRUNC('month', order_date) AS month,
+                 AVG(total_amount) AS aov
+          FROM orders WHERE status = 'completed'
+          GROUP BY 1
+      ),
+      ranked AS (
+          SELECT aov, ROW_NUMBER() OVER (ORDER BY month DESC) AS rn
+          FROM monthly_aov
+      )
+      SELECT ROUND(
+          (MAX(aov) FILTER (WHERE rn = 1) - MAX(aov) FILTER (WHERE rn = 2))
+          / NULLIF(MAX(aov) FILTER (WHERE rn = 2), 0) * 100
+      , 1) AS mom_aov_change
+      FROM ranked
+      WHERE rn <= 2
+    message_template: "AOV ירד {value}% MoM"

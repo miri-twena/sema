@@ -325,6 +325,41 @@ h1, h2, h3 {
     direction: rtl;
     text-align: right;
 }
+
+/* Ensure the floating alerts panel (position:fixed) is never clipped by an
+   overflow on the app containers. */
+.stApp { overflow: visible !important; }
+section[data-testid="stAppViewContainer"] { overflow: visible !important; }
+
+/* ---- Widget sub-conversations ---- */
+/* Context chip shown above the chat input when a widget is focused. */
+.sema-ctx-chip {
+    background: $lav_tint;
+    color: $primary_dark;
+    border: 1px solid $primary;
+    border-radius: 999px;
+    padding: 0.35rem 1rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    display: inline-block;
+    margin-bottom: 0.4rem;
+}
+/* The 💬 context buttons. Streamlit adds an "st-key-<key>" class to each keyed
+   widget's container, so we target our ctx_* keys by prefix -- far more stable
+   across Streamlit versions than the internal button testid/kind classes. */
+[class*="st-key-ctx_"] button {
+    background: transparent;
+    border: none;
+    color: $muted;
+    font-size: 0.85rem;
+    padding: 0.05rem 0.35rem;
+    min-height: unset;
+    box-shadow: none;
+}
+[class*="st-key-ctx_"] button:hover {
+    color: $primary;
+    background: $lav_tint;
+}
 </style>
 """
 ).substitute(TOKENS)

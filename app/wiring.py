@@ -27,11 +27,16 @@ FALLBACK_NOTE = (
 )
 
 
-def get_response(question: str) -> dict:
-    """Return the response dict for a question (agent first, router fallback)."""
+def get_response(question: str, history: list[dict] | None = None) -> dict:
+    """Return the response dict for a question (agent first, router fallback).
+
+    `history` is the prior conversation (Claude API format) for multi-turn
+    follow-ups; it's only used by the agent. The rule-based fallback answers
+    each known question standalone, so it ignores history.
+    """
     if agent.api_key_configured():
         try:
-            return agent.run(question)
+            return agent.run(question, history=history)
         except Exception:
             pass  # fall through to the rule-based router below
 

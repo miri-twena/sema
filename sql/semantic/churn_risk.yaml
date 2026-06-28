@@ -44,3 +44,38 @@ examples:
     approach: "List at-risk customers ordered by lifetime_revenue (highest value first)."
   - question: "How much revenue is at risk from churn?"
     approach: "Sum lifetime_revenue across the at-risk set."
+alerts:
+  - id: churn_risk_count
+    label: "At-Risk Customers"
+    condition: at_risk_count > 300
+    severity: warning
+    sql: |
+      SELECT COUNT(*) AS at_risk_count
+      FROM (
+          SELECT customer_id, MAX(order_date) AS last_order
+          FROM orders WHERE status = 'completed'
+          GROUP BY customer_id
+      ) t
+      WHERE last_order <= (
+          SELECT MAX(order_date) FROM orders WHERE status = 'completed'
+      ) - INTERVAL '90 days'
+    message_template: "{value} לקוחות ב-churn risk — מעל לסף 300"
+
+  - id: churn_risk_high_value
+    label: "VIP Churn Risk"
+    condition: high_value_at_risk > 50
+    severity: critical
+    sql: |
+      SELECT COUNT(*) AS high_value_at_risk
+      FROM (
+          SELECT o.customer_id,
+                 MAX(o.order_date) AS last_order,
+                 SUM(o.total_amount) AS ltv
+          FROM orders o WHERE o.status = 'completed'
+          GROUP BY o.customer_id
+      ) t
+      WHERE last_order <= (
+          SELECT MAX(order_date) FROM orders WHERE status = 'completed'
+      ) - INTERVAL '90 days'
+        AND ltv > 500
+    message_template: "{value} לקוחות VIP ב-churn risk (LTV > $500)"

@@ -13,23 +13,24 @@ Claude API key -- it works whether or not the key is configured.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml
-from dotenv import load_dotenv
 
-# Pick the semantic layer for the active client. SEMA_CLIENT=insurance points
-# the agent at the auto-insurance metrics; anything else uses the ecommerce
-# layer. This is the semantic-layer half of the multi-client switch (the DB
-# half lives in db.py) -- same agent, different "governed measures" folder.
-load_dotenv()
-_SQL_DIR = Path(__file__).resolve().parent.parent.parent / "sql"
-_CLIENT = os.environ.get("SEMA_CLIENT", "ecommerce").strip().lower()
-SEMANTIC_DIR = _SQL_DIR / "insurance" / "semantic" if _CLIENT == "insurance" else _SQL_DIR / "semantic"
+from client_registry import PROJECT_ROOT, active_client_id, get_client_by_id
 
 # Every metric file must define these keys, or we consider it malformed.
 REQUIRED_KEYS = {"name", "label", "description", "grain", "sql", "dimensions", "examples"}
+
+
+def semantic_dir(client_id: str | None = None) -> Path:
+    """Folder of *.yaml metric files for the active (or given) client.
+
+    Resolved at call time (not import time) so switching clients in the UI
+    immediately changes which semantic layer the agent is grounded in.
+    """
+    client = get_client_by_id(client_id or active_client_id())
+    return PROJECT_ROOT / client["semantic_dir"]
 
 
 class SemanticLayerError(Exception):
@@ -50,17 +51,18 @@ def _load_one(path: Path) -> dict:
     return data
 
 
-def load_semantic_layer() -> list[dict]:
-    """Return every metric definition as a list of dicts, sorted by name.
+def load_semantic_layer(client_id: str | None = None) -> list[dict]:
+    """Return every metric definition for the active (or given) client.
 
     Raises SemanticLayerError if the folder is empty or any file is invalid.
     """
-    if not SEMANTIC_DIR.exists():
-        raise SemanticLayerError(f"semantic layer folder not found: {SEMANTIC_DIR}")
+    folder = semantic_dir(client_id)
+    if not folder.exists():
+        raise SemanticLayerError(f"semantic layer folder not found: {folder}")
 
-    files = sorted(SEMANTIC_DIR.glob("*.yaml"))
+    files = sorted(folder.glob("*.yaml"))
     if not files:
-        raise SemanticLayerError(f"no .yaml metric files found in {SEMANTIC_DIR}")
+        raise SemanticLayerError(f"no .yaml metric files found in {folder}")
 
     metrics = [_load_one(path) for path in files]
 
@@ -73,9 +75,9 @@ def load_semantic_layer() -> list[dict]:
     return metrics
 
 
-def get_metric(name: str) -> dict | None:
+def get_metric(name: str, client_id: str | None = None) -> dict | None:
     """Look up a single metric by its name, or None if not found."""
-    for metric in load_semantic_layer():
+    for metric in load_semantic_layer(client_id):
         if metric["name"] == name:
             return metric
     return None

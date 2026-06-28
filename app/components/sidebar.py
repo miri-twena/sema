@@ -1,17 +1,19 @@
 """
 SEMA: sidebar.
 
-Brand mark, a live (real, not hardcoded) data-source connection status,
-clickable suggested-question chips, and session history.
+Brand mark, the active client (with a live connection status and a link to
+the admin page to switch), clickable suggested-question chips for that client,
+and session history. Everything client-specific now comes from the client
+registry, so the sidebar adapts automatically when you switch clients.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
+import client_registry
 from components.theme import connected_flow_logo
 from db import check_connection
-from query_router import SUGGESTED_QUESTIONS
 
 
 def render() -> None:
@@ -27,24 +29,36 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
+        client = client_registry.get_active_client()
         connected = check_connection()
         status_cls = "connected" if connected else "disconnected"
         status_text = "Connected" if connected else "Disconnected"
         st.markdown(
             f"""
-            <div class="sema-section-label">Data sources</div>
+            <div class="sema-section-label">Active client</div>
             <div class="sema-source">
-                <div class="sema-source-name">Synthetic E-commerce Database</div>
+                <div class="sema-source-name">{client["label"]}</div>
                 <div class="sema-status {status_cls}"><span class="dot"></span>{status_text}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        # Link to the admin page where clients are listed and switched.
+        st.page_link("pages/admin.py", label="⚙ Switch client", use_container_width=True)
+
+        # Start a fresh conversation: clears both the UI transcript and the
+        # agent's multi-turn memory so follow-ups don't carry over.
+        if st.button("✦ New conversation", key="new_conversation", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.agent_history = []
+            st.session_state.history = []
+            st.session_state.pending_question = None
+            st.rerun()
 
         st.markdown('<div class="sema-section-label">Suggested questions</div>', unsafe_allow_html=True)
-        # Show a short, curated set in the sidebar (the rest still work when
-        # typed). Keys sq0.. drive the per-chip pastel colors in styles.py.
-        for i, question in enumerate(SUGGESTED_QUESTIONS[:4]):
+        # Per-client starter questions. Keys sq0.. drive the pastel chip colors
+        # in styles.py.
+        for i, question in enumerate(client.get("suggested_questions", [])[:4]):
             if st.button(question, key=f"sq{i}", use_container_width=True):
                 st.session_state.pending_question = question
                 st.rerun()

@@ -36,7 +36,8 @@ ALL_TOOLS = TOOL_SCHEMAS + [PRESENT_ANSWER_TOOL]
 
 MODEL = "claude-sonnet-4-6"
 MAX_ITERATIONS = 8       # safety cap on tool-use rounds
-MAX_TOKENS = 2000
+MAX_TOKENS = 4000        # larger: multi-turn conversations carry more context
+MAX_HISTORY_TURNS = 10   # keep at most the last 10 turns (20 user/assistant entries)
 
 # The response dict shape the UI renders (same contract as insight_builder).
 NOT_CONFIGURED_MESSAGE = "Claude API key is not configured yet."
@@ -81,11 +82,14 @@ def not_configured_response() -> dict:
     return resp
 
 
-def run(question: str, client=None) -> dict:
+def run(question: str, history: list[dict] | None = None, client=None) -> dict:
     """Answer a business question via the agent loop.
 
-    `client` is injectable for testing; in production it's built from the
-    ANTHROPIC_API_KEY. Returns the response dict the UI renders.
+    `history` is the prior conversation in Claude API format (alternating
+    user/assistant text turns), so follow-up questions like "break that down
+    by category" have context. `client` is injectable for testing; in
+    production it's built from the ANTHROPIC_API_KEY. Returns the response
+    dict the UI renders.
     """
     # Missing-key guard: only relevant when we'd build a real client.
     if client is None and not api_key_configured():
@@ -98,7 +102,14 @@ def run(question: str, client=None) -> dict:
         client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     tools = AgentTools()
-    messages: list[dict] = [{"role": "user", "content": question}]
+    # Start from the prior turns, capped to the most recent ones so a long
+    # session can't blow the context window. History is whole turns (each a
+    # user+assistant pair), so slicing an even count keeps it starting on a
+    # user message -- which the Claude API requires.
+    prior = list(history or [])
+    if len(prior) > MAX_HISTORY_TURNS * 2:
+        prior = prior[-(MAX_HISTORY_TURNS * 2):]
+    messages: list[dict] = prior + [{"role": "user", "content": question}]
 
     for _ in range(MAX_ITERATIONS):
         response = client.messages.create(

@@ -140,6 +140,48 @@ below are PowerShell (Windows).
    Then open http://localhost:8501. `PYTHONPATH=app` is required because the
    app modules import as top-level packages.
 
+2b. **Load the insurance client data** (second client; same container, the
+   `insurance_db` database):
+   ```powershell
+   .venv\Scripts\python.exe data\insurance\load_data.py
+   ```
+
 Environment variables are read at startup, so **restart Streamlit after
 editing `.env`**. See [`docs/project_vision.md`](docs/project_vision.md) and
 [`docs/architecture.md`](docs/architecture.md) for the full design.
+
+## Multi-client
+
+SEMA serves multiple business clients, each with its own database and its own
+semantic layer — same agent, safety, and UI, different governed dataset behind
+it. Clients are declared in [`config/clients.yaml`](config/clients.yaml):
+
+```yaml
+clients:
+  - id: ecommerce
+    label: "🛍️ E-Commerce"
+    db_env: POSTGRES_DB              # env var holding the DB name
+    semantic_dir: sql/semantic
+    suggested_questions: [ ... ]
+  - id: insurance
+    label: "🚗 Auto Insurance"
+    db_env: POSTGRES_DB_INSURANCE
+    semantic_dir: sql/insurance/semantic
+    suggested_questions: [ ... ]
+```
+
+**Adding a client is a YAML change, not a code change**: add an entry, point
+`db_env` at its database, drop its metric `.yaml` files in `semantic_dir`.
+
+How it works:
+- `app/client_registry.py` reads the YAML and tracks the active client in
+  `st.session_state.active_client_id`.
+- `db.py` caches a connection **per client** (`@st.cache_resource` keyed by
+  `client_id`), so switching never reuses the wrong database.
+- `agent/semantic.py` resolves the metric folder at call time from the active
+  client.
+- **Switch clients at runtime** from the ⚙ admin page (sidebar → “Switch
+  client”) — no restart. `SEMA_CLIENT` in `.env` only sets the startup client.
+
+Both databases live in one local Postgres container; `sql/init/` bootstraps
+`insurance_db` and the read-only role on a fresh volume.

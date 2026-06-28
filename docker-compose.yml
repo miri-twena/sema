@@ -1,14 +1,20 @@
 # Local PostgreSQL instance for SEMA development.
 #
+# One container hosts BOTH client databases (the clean choice for dev -- one
+# engine, less overhead than two containers):
+#   - sema_db       (ecommerce client)   created by the image from POSTGRES_DB
+#   - insurance_db  (insurance client)   created by sql/init/ on first boot
+# sql/init/*.sql also sets up the read-only agent role on both databases.
+#
 # Usage:
 #   1. Copy .env.example to .env and adjust values if you like (defaults
 #      work fine for local development).
 #   2. Run: docker compose up -d
-#   3. PostgreSQL will be available on localhost:5432 with the
-#      credentials/database name from .env.
+#   3. Load data per client: data/load_data.py and data/insurance/load_data.py
 #
 # Data is persisted in the "sema_pgdata" Docker volume, so stopping/starting
-# the container does NOT lose data. To start completely fresh, run:
+# the container does NOT lose data. The sql/init scripts only run on a FRESH
+# volume. To start completely fresh, run:
 #   docker compose down -v
 
 services:
@@ -24,6 +30,9 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - sema_pgdata:/var/lib/postgresql/data
+      # Bootstrap scripts: create insurance_db + the read-only role on a fresh
+      # volume. Mounted read-only; ignored once the volume already exists.
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
 
 volumes:
   sema_pgdata:
