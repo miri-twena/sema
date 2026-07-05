@@ -7,6 +7,7 @@ import { AlertsPanel } from "./components/AlertsPanel";
 import { ChatInput } from "./components/ChatInput";
 import { ChatMessage } from "./components/ChatMessage";
 import { AssistantResponseCard } from "./components/AssistantResponseCard";
+import { DrillChat, type DrillContext } from "./components/DrillChat";
 
 interface Turn {
   question: string;
@@ -24,6 +25,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [dbConnected, setDbConnected] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drill, setDrill] = useState<DrillContext | null>(null); // active widget drill-down
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -157,7 +159,7 @@ export default function App() {
               <div key={i} className={i > 0 ? "border-t border-line pt-4 mt-4" : ""}>
                 <ChatMessage text={turn.question} dir={turn.dir} />
                 {turn.response ? (
-                  <AssistantResponseCard response={turn.response} dir={turn.dir} />
+                  <AssistantResponseCard response={turn.response} dir={turn.dir} onDrill={setDrill} />
                 ) : turn.stopped ? (
                   <div className="text-sm text-muted px-1 py-3 italic">Response stopped.</div>
                 ) : (
@@ -180,6 +182,8 @@ export default function App() {
       </main>
 
       <AlertsPanel alerts={alerts} />
+
+      {drill && <DrillChat widget={drill} clientId={activeId} onClose={() => setDrill(null)} />}
     </div>
   );
 }

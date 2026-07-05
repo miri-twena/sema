@@ -7,8 +7,17 @@ import { KpiCards } from "./KpiCards";
 import { ChartRenderer } from "./ChartRenderer";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
+import type { DrillContext } from "./DrillChat";
 
-export function AssistantResponseCard({ response, dir }: { response: ChatResponse; dir: "rtl" | "ltr" }) {
+export function AssistantResponseCard({
+  response,
+  dir,
+  onDrill,
+}: {
+  response: ChatResponse;
+  dir: "rtl" | "ltr";
+  onDrill?: (ctx: DrillContext) => void;
+}) {
   if (response.status === "error") {
     return (
       <Card className="p-4 border-critical-fg/30">
@@ -33,11 +42,11 @@ export function AssistantResponseCard({ response, dir }: { response: ChatRespons
 
         {response.kpis.length > 0 && (
           <div className="mt-3">
-            <KpiCards kpis={response.kpis} />
+            <KpiCards kpis={response.kpis} onDrill={onDrill} />
           </div>
         )}
 
-        {response.chart && <ChartRenderer chart={response.chart} />}
+        {response.chart && <ChartRenderer chart={response.chart} onDrill={onDrill} />}
         {response.table && <DataTable table={response.table} />}
         {response.actions.length > 0 && <RecommendedActions actions={response.actions} />}
       </div>

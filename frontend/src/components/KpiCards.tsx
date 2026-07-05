@@ -1,4 +1,5 @@
 import type { Kpi } from "../lib/api";
+import type { DrillContext } from "./DrillChat";
 
 // (bg, label color) tints cycled across the cards -- matches theme.py KPI_TINTS.
 const TINTS: [string, string][] = [
@@ -31,7 +32,7 @@ function formatValue(value: number | string, fmt: string): string {
   }
 }
 
-export function KpiCards({ kpis }: { kpis: Kpi[] }) {
+export function KpiCards({ kpis, onDrill }: { kpis: Kpi[]; onDrill?: (ctx: DrillContext) => void }) {
   if (!kpis?.length) return null;
   return (
     <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, minmax(0, 1fr))` }}>
@@ -39,14 +40,32 @@ export function KpiCards({ kpis }: { kpis: Kpi[] }) {
         const [bg, labelColor] = TINTS[i % TINTS.length];
         const hasDelta = kpi.delta !== undefined && kpi.delta !== null;
         const up = (kpi.delta ?? 0) >= 0;
+        const valueText = formatValue(kpi.value, kpi.format);
+        const deltaText = hasDelta
+          ? `, ${up ? "up" : "down"} ${Math.abs(kpi.delta as number).toFixed(1)}% ${kpi.delta_label ?? ""}`.trimEnd()
+          : "";
         return (
-          <div key={i} className="rounded-xl p-4 flex flex-col justify-between" style={{ background: bg }}>
+          <div
+            key={i}
+            onClick={
+              onDrill
+                ? () =>
+                    onDrill({
+                      title: kpi.label,
+                      contextBlock: `The user is asking about the KPI "${kpi.label}": current value ${valueText}${deltaText}. Answer only in the context of this metric.`,
+                    })
+                : undefined
+            }
+            title={onDrill ? `Ask about ${kpi.label}` : undefined}
+            className={`rounded-xl p-4 flex flex-col justify-between transition ${
+              onDrill ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5" : ""
+            }`}
+            style={{ background: bg }}
+          >
             <div className="text-[0.68rem] font-semibold uppercase tracking-wide leading-tight min-h-[2.2em]" style={{ color: labelColor }}>
               {kpi.label}
             </div>
-            <div className="mt-1 text-2xl font-semibold text-ink whitespace-nowrap">
-              {formatValue(kpi.value, kpi.format)}
-            </div>
+            <div className="mt-1 text-2xl font-semibold text-ink whitespace-nowrap">{valueText}</div>
             {hasDelta && (
               <div className={`mt-1 text-sm font-medium ${up ? "text-emerald-600" : "text-orange-700"}`}>
                 {up ? "▲" : "▼"} {Math.abs(kpi.delta as number).toFixed(1)}% {kpi.delta_label ?? ""}

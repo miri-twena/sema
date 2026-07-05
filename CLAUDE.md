@@ -126,6 +126,45 @@ The verified end-to-end startup sequence on this machine:
 5. Environment variables (including the API key) are read at startup, so
    **restart Streamlit after editing `.env`** for changes to take effect.
 
+## Claude Code Working Style (Response Format & Workflow)
+
+Applies to how I work in this repo. The TS/UI-specific rules below (shadcn,
+Tailwind, Lucide, TypeScript strict) apply to `frontend/` work; the Python
+rules in **Coding Standards** above still govern the backend/app layer.
+
+1. **Token efficiency first** — read existing code before suggesting
+   changes; show diffs, not full file rewrites; explain in 1-2 sentences,
+   then code; reuse existing utilities/components/types; no unnecessary
+   comments.
+2. **Code quality** — match existing style and patterns; TypeScript strict
+   mode (no `any`); handle errors properly; no `console.log` left in;
+   remove unused imports/variables.
+3. **Architecture** — preserve existing functionality; minimal scope (solve
+   the exact problem, nothing more); no new dependencies without explicit
+   approval; check whether a similar component/utility already exists
+   before writing new code.
+4. **If 3+ files are affected** — show the plan first (max 5 bullets),
+   explain the impact, wait for approval, then implement with diffs.
+5. **UI/design work** — Tailwind CSS utilities only (no inline styles);
+   shadcn/ui components when available; Lucide icons; match existing
+   spacing/radius/shadows; check the design system before building custom
+   UI.
+6. **Git** — never auto-commit or auto-push; show `git diff`; wait for
+   explicit "commit and push" approval; propose a commit message format for
+   me to confirm.
+7. **Testing** — write focused tests for new functions when applicable; run
+   locally before suggesting if possible; report coverage changes.
+8. **If stuck** — ask for clarification, show the relevant snippet and ask,
+   or suggest alternatives with trade-offs rather than guessing.
+9. **Documentation** — update README only when behavior changes; comments
+   only for non-obvious logic; docstrings for public functions/exports.
+10. **Response shape** — structure answers as: Problem (1 sentence) →
+    Solution (1 sentence) → Changes (diff) → How to Apply → Verification.
+    Keep prose to 3-4 sentences outside of code blocks.
+
+Priority order when these trade off: (1) works correctly, (2) follows
+existing patterns, (3) token-efficient, (4) clean/readable, (5) documented.
+
 ## UI Conventions
 
 - **RTL / Hebrew:** a turn's text direction is decided once, from the

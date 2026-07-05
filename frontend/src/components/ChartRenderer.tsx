@@ -13,7 +13,9 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { MessageSquareText } from "lucide-react";
 import type { Chart } from "../lib/api";
+import type { DrillContext } from "./DrillChat";
 
 const PALETTE = ["#7C8CFF", "#7EE6C3", "#9ED8FF", "#FFB4A2", "#F2C94C", "#C9A0FF"];
 
@@ -56,7 +58,7 @@ function pivot(rows: Row[], x: string, color: string, y: string) {
   return { data, series };
 }
 
-export function ChartRenderer({ chart }: { chart: Chart }) {
+export function ChartRenderer({ chart, onDrill }: { chart: Chart; onDrill?: (ctx: DrillContext) => void }) {
   const { kind, rows, x, y, color, names, values, y_format, title } = chart;
   if (!rows?.length) return null;
   const fmt = makeTickFormatter(y_format);
@@ -132,9 +134,30 @@ export function ChartRenderer({ chart }: { chart: Chart }) {
 
   if (!body) return null;
 
+  const drill = () =>
+    onDrill?.({
+      title: title || "Chart",
+      contextBlock:
+        `The user is asking about the chart "${title || "chart"}" ` +
+        `(a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}). ` +
+        `Underlying data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}. ` +
+        `Answer only in the context of this chart and its metric.`,
+    });
+
   return (
     <div className="mt-3">
-      {title && <div className="text-sm font-semibold text-ink mb-1">{title}</div>}
+      <div className="flex items-center justify-between mb-1 gap-2">
+        {title && <div className="text-sm font-semibold text-ink">{title}</div>}
+        {onDrill && (
+          <button
+            onClick={drill}
+            className="shrink-0 flex items-center gap-1 text-xs text-muted hover:text-primary transition"
+            title="Ask about this chart"
+          >
+            <MessageSquareText size={14} /> Ask about this
+          </button>
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={280}>
         {body as React.ReactElement}
       </ResponsiveContainer>
