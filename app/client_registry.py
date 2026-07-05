@@ -13,6 +13,7 @@ app and visuals, different governed dataset behind it.
 
 from __future__ import annotations
 
+import contextvars
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -62,13 +63,29 @@ def get_client_by_id(client_id: str) -> dict:
     return clients[0]
 
 
+# Per-request client override for non-Streamlit callers (the FastAPI layer).
+# A ContextVar is concurrency-safe: each request sets its own client without
+# touching global state or affecting Streamlit. Streamlit leaves it unset.
+_active_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "sema_active_client_override", default=None
+)
+
+
+def set_active_client_override(client_id: str | None) -> None:
+    """Set the active client for the current execution context (FastAPI use)."""
+    _active_override.set(client_id)
+
+
 def active_client_id() -> str:
     """The id of the currently-active client.
 
-    Reads st.session_state.active_client_id, defaulting to DEFAULT_CLIENT_ID.
-    Wrapped in try/except so it also works outside a Streamlit run (e.g. a
-    plain Python script or test), where session_state isn't available.
+    Resolution order: a per-request override (set by the API) -> Streamlit
+    session_state -> DEFAULT_CLIENT_ID. The try/except lets this work outside a
+    Streamlit run (FastAPI, scripts, tests), where session_state is absent.
     """
+    override = _active_override.get()
+    if override:
+        return override
     try:
         return st.session_state.get("active_client_id", DEFAULT_CLIENT_ID)
     except Exception:

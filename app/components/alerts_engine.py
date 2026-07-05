@@ -63,9 +63,9 @@ def _format_value(value) -> str:
         return str(value)
 
 
-def evaluate_all_alerts() -> list[dict]:
-    """Triggered alerts for the currently-active client (critical first)."""
-    return _evaluate(active_client_id())
+def evaluate_all_alerts(client_id: str | None = None) -> list[dict]:
+    """Triggered alerts for the given (or currently-active) client, critical first."""
+    return _evaluate(client_id or active_client_id())
 
 
 @st.cache_data(ttl=120)

@@ -11,7 +11,7 @@
 
 clients:
   - id: ecommerce
-    label: "🛍️ E-Commerce"
+    label: "E-Commerce"
     db_env: POSTGRES_DB
     semantic_dir: sql/semantic
     suggested_questions:
@@ -21,7 +21,7 @@ clients:
       - "Which campaign performs best?"
 
   - id: insurance
-    label: "🚗 Auto Insurance"
+    label: "Auto Insurance"
     db_env: POSTGRES_DB_INSURANCE
     semantic_dir: sql/insurance/semantic
     suggested_questions:

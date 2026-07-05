@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #1e293b;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Markdown rendered from the assistant answer */
+.sema-prose h1, .sema-prose h2 { font-size: 1.18rem; font-weight: 600; margin: 0.2rem 0 0.5rem; letter-spacing: -0.01em; }
+.sema-prose h3 { font-size: 1rem; font-weight: 600; color: #5b5f9f; margin: 0.9rem 0 0.35rem; }
+.sema-prose p { margin: 0.45rem 0; line-height: 1.65; }
+.sema-prose ul { margin: 0.3rem 0 0.6rem; padding-inline-start: 1.2rem; list-style: disc; }
+.sema-prose li { margin: 0.18rem 0; line-height: 1.55; }
+.sema-prose strong { font-weight: 600; }
+.sema-prose table { border-collapse: collapse; width: 100%; font-size: 0.86rem; margin: 0.4rem 0 0.7rem; }
+.sema-prose th { background: #f1f5f9; color: #475569; font-weight: 600; text-align: start; padding: 0.45rem 0.6rem; border-bottom: 1px solid #e8edf3; }
+.sema-prose td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #eef2f7; }
+
+/* thin scrollbars for the chat + panels */
+.sema-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.sema-scroll::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 8px; }
+.sema-scroll::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }

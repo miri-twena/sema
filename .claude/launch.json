@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "streamlit", "run", "app/main.py", "--server.headless", "true", "--server.port", "8501"],
       "port": 8501
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--port", "5173"],
+      "port": 5173
     }
   ]
 }

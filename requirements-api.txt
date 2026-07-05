@@ -1,0 +1,6 @@
+# SEMA REST API layer (FastAPI). Separate from requirements.txt so the
+# Streamlit app's dependencies are untouched. Install into the same venv:
+#   .venv\Scripts\python.exe -m pip install -r requirements-api.txt
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
