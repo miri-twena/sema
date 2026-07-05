@@ -12,6 +12,7 @@ interface Turn {
   question: string;
   response: ChatResponse | null; // null while loading
   dir: "rtl" | "ltr";
+  stopped?: boolean; // user aborted the request mid-thinking
 }
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Initial load: health + clients.
   useEffect(() => {
@@ -64,14 +66,22 @@ export default function App() {
     setError(null);
   }
 
+  function stop() {
+    // Aborts the in-flight request; send()'s catch handles the AbortError.
+    abortRef.current?.abort();
+  }
+
   async function send(question: string) {
     if (loading) return;
     const dir = isRtl(question) ? "rtl" : "ltr";
     setError(null);
+    // Show the question immediately, before the answer comes back.
     setTurns((t) => [...t, { question, response: null, dir }]);
     setLoading(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const resp = await api.chat(question, history, activeId);
+      const resp = await api.chat(question, history, activeId, controller.signal);
       setTurns((t) => {
         const copy = [...t];
         copy[copy.length - 1] = { question, response: resp, dir };
@@ -83,16 +93,20 @@ export default function App() {
         { role: "assistant", content: resp.answer },
       ]);
     } catch (e) {
+      const aborted = e instanceof DOMException && e.name === "AbortError";
       setTurns((t) => {
         const copy = [...t];
-        copy[copy.length - 1] = {
-          question,
-          dir,
-          response: { answer: "", kpis: [], chart: null, table: null, actions: [], sql_used: null, confidence: null, status: "error", error: String(e) },
-        };
+        copy[copy.length - 1] = aborted
+          ? { question, dir, response: null, stopped: true }
+          : {
+              question,
+              dir,
+              response: { answer: "", kpis: [], chart: null, table: null, actions: [], sql_used: null, confidence: null, status: "error", error: String(e) },
+            };
         return copy;
       });
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   }
@@ -144,6 +158,8 @@ export default function App() {
                 <ChatMessage text={turn.question} dir={turn.dir} />
                 {turn.response ? (
                   <AssistantResponseCard response={turn.response} dir={turn.dir} />
+                ) : turn.stopped ? (
+                  <div className="text-sm text-muted px-1 py-3 italic">Response stopped.</div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-muted px-1 py-3">
                     <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -158,7 +174,7 @@ export default function App() {
         {/* input */}
         <div className="px-8 py-4 border-t border-line bg-bg">
           <div className="max-w-3xl mx-auto">
-            <ChatInput onSend={send} disabled={loading} />
+            <ChatInput onSend={send} onStop={stop} loading={loading} />
           </div>
         </div>
       </main>

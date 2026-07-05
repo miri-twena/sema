@@ -77,11 +77,12 @@ async function getJSON<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
+async function postJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal, // lets the caller abort the request (stop button)
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
@@ -91,6 +92,6 @@ export const api = {
   health: () => getJSON<Health>("/api/health"),
   clients: () => getJSON<Client[]>("/api/clients"),
   alerts: (clientId: string) => getJSON<Alert[]>(`/api/alerts?client_id=${encodeURIComponent(clientId)}`),
-  chat: (question: string, history: Message[], clientId: string) =>
-    postJSON<ChatResponse>("/api/chat", { question, history, client_id: clientId }),
+  chat: (question: string, history: Message[], clientId: string, signal?: AbortSignal) =>
+    postJSON<ChatResponse>("/api/chat", { question, history, client_id: clientId }, signal),
 };

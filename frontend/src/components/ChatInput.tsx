@@ -1,20 +1,22 @@
 import { useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 
 export function ChatInput({
   onSend,
-  disabled,
+  onStop,
+  loading,
   placeholder,
 }: {
   onSend: (text: string) => void;
-  disabled?: boolean;
+  onStop?: () => void;
+  loading?: boolean;
   placeholder?: string;
 }) {
   const [value, setValue] = useState("");
 
   const send = () => {
     const t = value.trim();
-    if (t && !disabled) {
+    if (t && !loading) {
       onSend(t);
       setValue("");
     }
@@ -28,22 +30,32 @@ export function ChatInput({
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            send();
+            if (!loading) send();
           }
         }}
         rows={1}
-        disabled={disabled}
         placeholder={placeholder || "Ask about revenue, customers, campaigns..."}
         className="flex-1 resize-none bg-transparent outline-none text-sm text-ink placeholder:text-faint py-1.5 max-h-32"
       />
-      <button
-        onClick={send}
-        disabled={disabled || !value.trim()}
-        className="shrink-0 w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition"
-        aria-label="Send"
-      >
-        <Send size={16} />
-      </button>
+      {loading ? (
+        <button
+          onClick={onStop}
+          className="shrink-0 w-9 h-9 rounded-xl bg-ink text-white flex items-center justify-center hover:bg-ink/90 transition"
+          aria-label="Stop"
+          title="Stop"
+        >
+          <Square size={13} fill="currentColor" />
+        </button>
+      ) : (
+        <button
+          onClick={send}
+          disabled={!value.trim()}
+          className="shrink-0 w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition"
+          aria-label="Send"
+        >
+          <Send size={16} />
+        </button>
+      )}
     </div>
   );
 }

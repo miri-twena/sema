@@ -56,7 +56,8 @@ When you have enough evidence, finish by calling the present_answer tool \
 in that turn). In present_answer:
 - insight_text: lead with the direct answer and key numbers; explain the \
 drivers briefly and quantified (percentages and absolute values). Markdown is \
-allowed. Do not show SQL.
+allowed. Do not show SQL. Never use emojis anywhere in your answer (not in the \
+insight text, KPI labels, or actions) -- plain professional text only.
 - kpis: 2-4 headline numbers with the right format (currency/percent/number/ \
 ratio). Add a delta (% change) when you compared to a baseline.
 - chart: when a trend or breakdown helps, bind it to one of your run_sql \
