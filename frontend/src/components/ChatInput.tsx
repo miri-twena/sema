@@ -6,13 +6,15 @@ export function ChatInput({
   onStop,
   loading,
   placeholder,
+  initialValue,
 }: {
   onSend: (text: string) => void;
   onStop?: () => void;
   loading?: boolean;
   placeholder?: string;
+  initialValue?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue ?? "");
 
   const send = () => {
     const t = value.trim();

@@ -1,16 +1,13 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Alert } from "../lib/api";
-
-const SEV: Record<string, { bg: string; fg: string }> = {
-  critical: { bg: "#FEE2E2", fg: "#DC2626" },
-  warning: { bg: "#FEF9C3", fg: "#CA8A04" },
-};
+import { SEVERITY as SEV } from "../lib/tokens";
 
 // Right-hand alerts rail. Collapses horizontally: closing slides it to the
 // right down to a thin strip (and the main content widens to fill the space);
 // opening expands it back to the left. Critical alerts in red, warnings amber.
-export function AlertsPanel({ alerts }: { alerts: Alert[] }) {
+// Clicking an alert seeds the chat with a question about it (onAlertClick).
+export function AlertsPanel({ alerts, onAlertClick }: { alerts: Alert[]; onAlertClick?: (a: Alert) => void }) {
   const [open, setOpen] = useState(true);
   if (!alerts?.length) return null;
 
@@ -50,9 +47,14 @@ export function AlertsPanel({ alerts }: { alerts: Alert[] }) {
             {alerts.map((a) => {
               const c = SEV[a.severity] ?? SEV.warning;
               return (
-                <div
+                <button
                   key={a.id}
-                  className="rounded-xl px-3 py-2.5"
+                  onClick={onAlertClick ? () => onAlertClick(a) : undefined}
+                  disabled={!onAlertClick}
+                  aria-label={onAlertClick ? `Ask about ${a.alert_label}` : undefined}
+                  className={`text-start rounded-xl px-3 py-2.5 transition ${
+                    onAlertClick ? "cursor-pointer hover:brightness-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" : "cursor-default"
+                  }`}
                   style={{ background: c.bg, borderInlineStart: `3px solid ${c.fg}` }}
                 >
                   <div className="text-sm font-semibold" style={{ color: c.fg }}>
@@ -62,7 +64,7 @@ export function AlertsPanel({ alerts }: { alerts: Alert[] }) {
                     {a.message}
                   </div>
                   <div className="text-[0.7rem] text-muted mt-1">{a.metric_label}</div>
-                </div>
+                </button>
               );
             })}
           </div>

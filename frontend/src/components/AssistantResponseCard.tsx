@@ -1,13 +1,16 @@
+import { Suspense, lazy } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Code2 } from "lucide-react";
 import type { ChatResponse } from "../lib/api";
 import { Card } from "./ui/Card";
 import { KpiCards } from "./KpiCards";
-import { ChartRenderer } from "./ChartRenderer";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
 import type { DrillContext } from "./DrillChat";
+
+// Recharts is heavy (~half the bundle); load it only when an answer has a chart.
+const ChartRenderer = lazy(() => import("./ChartRenderer").then((m) => ({ default: m.ChartRenderer })));
 
 export function AssistantResponseCard({
   response,
@@ -46,9 +49,28 @@ export function AssistantResponseCard({
           </div>
         )}
 
-        {response.chart && <ChartRenderer chart={response.chart} onDrill={onDrill} />}
+        {response.chart && (
+          <Suspense fallback={<div className="mt-3 h-[280px] rounded-xl bg-surfaceAlt animate-pulse" />}>
+            <ChartRenderer chart={response.chart} onDrill={onDrill} />
+          </Suspense>
+        )}
+
         {response.table && <DataTable table={response.table} />}
-        {response.actions.length > 0 && <RecommendedActions actions={response.actions} />}
+        {response.actions.length > 0 && <RecommendedActions actions={response.actions} onDrill={onDrill} />}
+
+        {response.sql_used && (
+          <details className="mt-4">
+            <summary className="cursor-pointer list-none flex items-center gap-1.5 text-xs font-medium text-muted hover:text-primary transition w-fit">
+              <Code2 size={14} /> View SQL
+            </summary>
+            <pre
+              dir="ltr"
+              className="mt-2 overflow-auto sema-scroll rounded-lg border border-line bg-surfaceAlt p-3 text-[0.72rem] leading-relaxed text-ink"
+            >
+              {response.sql_used}
+            </pre>
+          </details>
+        )}
       </div>
     </Card>
   );

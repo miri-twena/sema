@@ -1,11 +1,15 @@
 import {
   useReactTable,
   getCoreRowModel,
+  getSortedRowModel,
   flexRender,
   createColumnHelper,
+  type SortingState,
 } from "@tanstack/react-table";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import type { DataTableModel } from "../lib/api";
+import { formatCell } from "../lib/format";
 
 type Row = Record<string, unknown>;
 
@@ -14,26 +18,31 @@ function prettify(name: string): string {
 }
 
 export function DataTable({ table }: { table: DataTableModel }) {
+  const [sorting, setSorting] = useState<SortingState>([]);
   const helper = createColumnHelper<Row>();
+
   const columns = useMemo(
     () =>
       table.columns.map((col) =>
         helper.accessor((row) => row[col], {
           id: col,
           header: prettify(col),
-          cell: (info) => {
-            const v = info.getValue();
-            return v === null || v === undefined ? "" : String(v);
-          },
+          cell: (info) => formatCell(info.getValue()),
+          // sort by the raw value (numbers/dates), not the formatted string
+          sortingFn: "auto",
         }),
       ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [table.columns],
   );
 
   const instance = useReactTable({
     data: table.rows as Row[],
     columns,
+    state: { sorting },
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -44,14 +53,27 @@ export function DataTable({ table }: { table: DataTableModel }) {
           <thead>
             {instance.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
-                {hg.headers.map((h) => (
-                  <th
-                    key={h.id}
-                    className="bg-surfaceAlt text-[#475569] font-semibold text-start px-3 py-2 border-b border-line whitespace-nowrap"
-                  >
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                  </th>
-                ))}
+                {hg.headers.map((h) => {
+                  const sorted = h.column.getIsSorted();
+                  return (
+                    <th
+                      key={h.id}
+                      onClick={h.column.getToggleSortingHandler()}
+                      className="bg-surfaceAlt text-[#475569] font-semibold text-start px-3 py-2 border-b border-line whitespace-nowrap cursor-pointer select-none hover:text-ink"
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {flexRender(h.column.columnDef.header, h.getContext())}
+                        {sorted === "asc" ? (
+                          <ChevronUp size={13} />
+                        ) : sorted === "desc" ? (
+                          <ChevronDown size={13} />
+                        ) : (
+                          <ChevronsUpDown size={13} className="opacity-30" />
+                        )}
+                      </span>
+                    </th>
+                  );
+                })}
               </tr>
             ))}
           </thead>

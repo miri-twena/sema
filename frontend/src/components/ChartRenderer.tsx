@@ -16,33 +16,10 @@ import {
 import { MessageSquareText } from "lucide-react";
 import type { Chart } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
-
-const PALETTE = ["#7C8CFF", "#7EE6C3", "#9ED8FF", "#FFB4A2", "#F2C94C", "#C9A0FF"];
+import { formatX, makeAxisTickFormatter } from "../lib/format";
+import { CHART_PALETTE as PALETTE } from "../lib/tokens";
 
 type Row = Record<string, unknown>;
-
-function makeTickFormatter(yFormat?: string | null) {
-  return (v: unknown): string => {
-    if (typeof v !== "number") return String(v ?? "");
-    if (yFormat === "currency") {
-      const a = Math.abs(v);
-      if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-      if (a >= 1_000) return `$${(v / 1_000).toFixed(0)}k`;
-      return `$${v}`;
-    }
-    if (yFormat === "percent") return `${v}%`;
-    return v.toLocaleString();
-  };
-}
-
-/** Format an x tick: ISO dates -> "Jul 25"; otherwise pass through. */
-function formatX(v: unknown): string {
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) return d.toLocaleDateString("en", { month: "short", year: "2-digit" });
-  }
-  return String(v ?? "");
-}
 
 /** Pivot long rows ({x, color, y}) into wide rows ({x, series1, series2, ...}). */
 function pivot(rows: Row[], x: string, color: string, y: string) {
@@ -61,7 +38,7 @@ function pivot(rows: Row[], x: string, color: string, y: string) {
 export function ChartRenderer({ chart, onDrill }: { chart: Chart; onDrill?: (ctx: DrillContext) => void }) {
   const { kind, rows, x, y, color, names, values, y_format, title } = chart;
   if (!rows?.length) return null;
-  const fmt = makeTickFormatter(y_format);
+  const fmt = makeAxisTickFormatter(y_format);
 
   const axis = { stroke: "#94A3B8", fontSize: 12 };
   const grid = <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F7" vertical={false} />;

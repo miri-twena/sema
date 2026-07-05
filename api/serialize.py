@@ -60,7 +60,7 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
         chart=chart,
         table=table,
         actions=list(resp.get("recommended_actions", [])),
-        sql_used=sql_used,
+        sql_used=resp.get("sql_used") or sql_used,
         status="ok",
     )
 

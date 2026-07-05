@@ -1,64 +1,50 @@
 import type { Kpi } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
-
-// (bg, label color) tints cycled across the cards -- matches theme.py KPI_TINTS.
-const TINTS: [string, string][] = [
-  ["#FBEEEA", "#9A6A58"],
-  ["#EAF5FF", "#5A7894"],
-  ["#EEF0FF", "#5B5F9F"],
-  ["#EAFBF4", "#1B7A5E"],
-];
-
-function compact(n: number): string {
-  const a = Math.abs(n);
-  if (a >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (a >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
-}
-
-function formatValue(value: number | string, fmt: string): string {
-  if (typeof value !== "number") return String(value);
-  switch (fmt) {
-    case "currency":
-      return `$${compact(value)}`;
-    case "percent":
-      return `${value.toFixed(1)}%`;
-    case "number":
-      return compact(value);
-    case "ratio":
-      return `${value.toFixed(2)}x`;
-    default:
-      return String(value);
-  }
-}
+import { formatValue } from "../lib/format";
+import { KPI_TINTS } from "../lib/tokens";
 
 export function KpiCards({ kpis, onDrill }: { kpis: Kpi[]; onDrill?: (ctx: DrillContext) => void }) {
   if (!kpis?.length) return null;
   return (
     <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, minmax(0, 1fr))` }}>
       {kpis.map((kpi, i) => {
-        const [bg, labelColor] = TINTS[i % TINTS.length];
+        const [bg, labelColor] = KPI_TINTS[i % KPI_TINTS.length];
         const hasDelta = kpi.delta !== undefined && kpi.delta !== null;
         const up = (kpi.delta ?? 0) >= 0;
         const valueText = formatValue(kpi.value, kpi.format);
         const deltaText = hasDelta
           ? `, ${up ? "up" : "down"} ${Math.abs(kpi.delta as number).toFixed(1)}% ${kpi.delta_label ?? ""}`.trimEnd()
           : "";
+
+        const drill = onDrill
+          ? () =>
+              onDrill({
+                title: kpi.label,
+                contextBlock: `The user is asking about the KPI "${kpi.label}": current value ${valueText}${deltaText}. Answer only in the context of this metric.`,
+              })
+          : undefined;
+
         return (
           <div
             key={i}
-            onClick={
-              onDrill
-                ? () =>
-                    onDrill({
-                      title: kpi.label,
-                      contextBlock: `The user is asking about the KPI "${kpi.label}": current value ${valueText}${deltaText}. Answer only in the context of this metric.`,
-                    })
+            onClick={drill}
+            onKeyDown={
+              drill
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      drill();
+                    }
+                  }
                 : undefined
             }
-            title={onDrill ? `Ask about ${kpi.label}` : undefined}
+            role={drill ? "button" : undefined}
+            tabIndex={drill ? 0 : undefined}
+            aria-label={drill ? `Ask about ${kpi.label}` : undefined}
             className={`rounded-xl p-4 flex flex-col justify-between transition ${
-              onDrill ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5" : ""
+              drill
+                ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                : ""
             }`}
             style={{ background: bg }}
           >

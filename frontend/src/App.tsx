@@ -1,119 +1,70 @@
-import { useEffect, useState, useRef } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { api, type Client, type Alert, type ChatResponse, type Message } from "./lib/api";
-import { isRtl } from "./lib/rtl";
+import { api, type Client, type Alert } from "./lib/api";
+import { useChat } from "./hooks/useChat";
 import { Sidebar } from "./components/Sidebar";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { ChatInput } from "./components/ChatInput";
-import { ChatMessage } from "./components/ChatMessage";
-import { AssistantResponseCard } from "./components/AssistantResponseCard";
-import { DrillChat, type DrillContext } from "./components/DrillChat";
+import { TurnView } from "./components/TurnView";
+import type { DrillContext } from "./components/DrillChat";
 
-interface Turn {
-  question: string;
-  response: ChatResponse | null; // null while loading
-  dir: "rtl" | "ltr";
-  stopped?: boolean; // user aborted the request mid-thinking
-}
+// Recharts + the drill panel are the heaviest parts; load them on demand.
+const DrillChat = lazy(() => import("./components/DrillChat").then((m) => ({ default: m.DrillChat })));
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [activeId, setActiveId] = useState<string>("");
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [history, setHistory] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false);
   const [dbConnected, setDbConnected] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [drill, setDrill] = useState<DrillContext | null>(null); // active widget drill-down
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [drill, setDrill] = useState<DrillContext | null>(null);
 
+  const chat = useChat({ clientId: activeId, persistKey: "sema:chat" });
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
-  // Initial load: health + clients.
   useEffect(() => {
-    api.health().then((h) => {
-      setDbConnected(h.db_connected);
-      setActiveId((cur) => cur || h.active_client);
-    }).catch(() => setDbConnected(false));
-    api.clients().then((cs) => {
-      setClients(cs);
-      setActiveId((cur) => cur || cs[0]?.id || "");
-    }).catch((e) => setError(String(e)));
+    api.health()
+      .then((h) => {
+        setDbConnected(h.db_connected);
+        setActiveId((cur) => cur || h.active_client);
+      })
+      .catch(() => setDbConnected(false));
+    api.clients()
+      .then((cs) => {
+        setClients(cs);
+        setActiveId((cur) => cur || cs[0]?.id || "");
+      })
+      .catch((e) => setLoadError(String(e)));
   }, []);
 
-  // Load alerts whenever the active client changes.
   useEffect(() => {
     if (!activeId) return;
     api.alerts(activeId).then(setAlerts).catch(() => setAlerts([]));
   }, [activeId]);
 
-  // Auto-scroll to the newest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, loading]);
+  }, [chat.turns, chat.loading]);
 
   const activeClient = clients.find((c) => c.id === activeId);
 
-  function switchClient(id: string) {
-    setActiveId(id);
-    setTurns([]);
-    setHistory([]);
-    setError(null);
-  }
+  const switchClient = useCallback(
+    (id: string) => {
+      chat.reset();
+      setActiveId(id);
+    },
+    [chat],
+  );
 
-  function newConversation() {
-    setTurns([]);
-    setHistory([]);
-    setError(null);
-  }
+  const onDrill = useCallback((ctx: DrillContext) => setDrill(ctx), []);
+  const onRetry = useCallback((i: number) => chat.retry(i), [chat]);
 
-  function stop() {
-    // Aborts the in-flight request; send()'s catch handles the AbortError.
-    abortRef.current?.abort();
-  }
+  const onAlertClick = useCallback(
+    (a: Alert) => chat.send(`Why is "${a.alert_label}" flagged right now? ${a.message}`),
+    [chat],
+  );
 
-  async function send(question: string) {
-    if (loading) return;
-    const dir = isRtl(question) ? "rtl" : "ltr";
-    setError(null);
-    // Show the question immediately, before the answer comes back.
-    setTurns((t) => [...t, { question, response: null, dir }]);
-    setLoading(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const resp = await api.chat(question, history, activeId, controller.signal);
-      setTurns((t) => {
-        const copy = [...t];
-        copy[copy.length - 1] = { question, response: resp, dir };
-        return copy;
-      });
-      setHistory((h) => [
-        ...h,
-        { role: "user", content: question },
-        { role: "assistant", content: resp.answer },
-      ]);
-    } catch (e) {
-      const aborted = e instanceof DOMException && e.name === "AbortError";
-      setTurns((t) => {
-        const copy = [...t];
-        copy[copy.length - 1] = aborted
-          ? { question, dir, response: null, stopped: true }
-          : {
-              question,
-              dir,
-              response: { answer: "", kpis: [], chart: null, table: null, actions: [], sql_used: null, confidence: null, status: "error", error: String(e) },
-            };
-        return copy;
-      });
-    } finally {
-      abortRef.current = null;
-      setLoading(false);
-    }
-  }
-
-  const empty = turns.length === 0;
+  const empty = chat.turns.length === 0;
 
   return (
     <div className="flex h-screen bg-bg text-ink">
@@ -122,13 +73,12 @@ export default function App() {
         activeId={activeId}
         onClientChange={switchClient}
         suggested={activeClient?.suggested_questions ?? []}
-        onPick={send}
-        onNewConversation={newConversation}
+        onPick={chat.send}
+        onNewConversation={chat.reset}
         dbConnected={dbConnected}
       />
 
       <main className="flex-1 flex flex-col min-w-0">
-        {/* header */}
         <header className="flex items-center justify-between px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
@@ -136,54 +86,42 @@ export default function App() {
           </div>
         </header>
 
-        {/* transcript */}
         <div ref={scrollRef} className="flex-1 overflow-auto sema-scroll px-8 py-6">
           <div className="max-w-3xl mx-auto">
-            {error && (
+            {loadError && (
               <div className="mb-4 flex items-center gap-2 rounded-xl border border-critical-fg/30 bg-critical-bg px-4 py-3 text-sm text-critical-fg">
-                <AlertTriangle size={16} className="shrink-0" /> {error}
+                <AlertTriangle size={16} className="shrink-0" /> Couldn't reach the server. Is the API running?
               </div>
             )}
 
-            {empty && !loading && (
+            {empty && !chat.loading && (
               <div className="text-center py-20">
                 <div className="inline-block w-14 h-14 rounded-2xl bg-gradient-to-br from-primary via-sky to-mint mb-4" />
                 <div className="text-lg font-semibold">Ask your business anything.</div>
-                <div className="text-sm text-muted mt-1">
-                  Pick a question from the sidebar, or type one below.
-                </div>
+                <div className="text-sm text-muted mt-1">Pick a question from the sidebar, or type one below.</div>
               </div>
             )}
 
-            {turns.map((turn, i) => (
-              <div key={i} className={i > 0 ? "border-t border-line pt-4 mt-4" : ""}>
-                <ChatMessage text={turn.question} dir={turn.dir} />
-                {turn.response ? (
-                  <AssistantResponseCard response={turn.response} dir={turn.dir} onDrill={setDrill} />
-                ) : turn.stopped ? (
-                  <div className="text-sm text-muted px-1 py-3 italic">Response stopped.</div>
-                ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted px-1 py-3">
-                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                    SEMA is analyzing…
-                  </div>
-                )}
-              </div>
+            {chat.turns.map((turn, i) => (
+              <TurnView key={i} turn={turn} index={i} isFirst={i === 0} onDrill={onDrill} onRetry={onRetry} />
             ))}
           </div>
         </div>
 
-        {/* input */}
         <div className="px-8 py-4 border-t border-line bg-bg">
           <div className="max-w-3xl mx-auto">
-            <ChatInput onSend={send} onStop={stop} loading={loading} />
+            <ChatInput onSend={chat.send} onStop={chat.stop} loading={chat.loading} />
           </div>
         </div>
       </main>
 
-      <AlertsPanel alerts={alerts} />
+      <AlertsPanel alerts={alerts} onAlertClick={onAlertClick} />
 
-      {drill && <DrillChat widget={drill} clientId={activeId} onClose={() => setDrill(null)} />}
+      {drill && (
+        <Suspense fallback={null}>
+          <DrillChat widget={drill} clientId={activeId} onClose={() => setDrill(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

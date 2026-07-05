@@ -121,6 +121,7 @@ def _empty_response() -> dict:
         "table": None,
         "table_title": None,
         "recommended_actions": [],
+        "sql_used": None,
     }
 
 
@@ -170,5 +171,10 @@ def build_response(tool_input: dict, tools) -> dict:
         if df is not None and not df.empty:
             resp["table"] = df.head(15)
             resp["table_title"] = table.get("title", "Result")
+
+    # Surface the SQL the agent actually ran (for the UI's "View SQL" trust
+    # feature). Joined when several queries were run to build the answer.
+    if getattr(tools, "results", None):
+        resp["sql_used"] = ";\n\n".join(r["sql"] for r in tools.results if r.get("sql"))
 
     return resp
