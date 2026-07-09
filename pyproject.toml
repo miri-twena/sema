@@ -1,9 +1,10 @@
 # SEMA backend packaging.
 #
-# Installed editable (pip install -e .) so the backend modules under app/ and
-# the api/ package resolve WITHOUT sys.path hacks or PYTHONPATH=app. This is
-# the incremental first step toward a proper sema_core/ package: same modules,
-# same import names, now importable everywhere (Streamlit, FastAPI, pytest).
+# Installed editable (pip install -e .) so `sema_core` (framework-free
+# backend) and `api` (REST layer) import everywhere -- Streamlit, FastAPI,
+# pytest, scripts -- with no sys.path hacks or PYTHONPATH. Streamlit UI code
+# in app/ is NOT installed; `streamlit run app/main.py` resolves its own
+# sibling modules (components/, pages/) from the script directory.
 #
 # Setup once per venv:
 #   .venv\Scripts\python.exe -m pip install -e .
@@ -14,27 +15,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sema-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "SEMA - AI Business Advisor backend (agent, semantic layer, API)"
 requires-python = ">=3.12"
 
 [tool.setuptools]
-# Top-level modules live in app/ (import as `db`, `wiring`, ...); the REST
-# layer is the api/ package at the repo root.
-package-dir = {"" = "app", "api" = "api"}
-packages = ["agent", "components", "pages", "api"]
-py-modules = [
-    "cache",
-    "client_registry",
-    "db",
-    "insight_builder",
-    "main",
-    "obs",
-    "queries",
-    "query_router",
-    "settings",
-    "wiring",
-]
+packages = ["sema_core", "sema_core.agent", "api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -29,8 +29,8 @@ import psycopg2
 from psycopg2 import pool as pg_pool
 from dotenv import load_dotenv
 
-from client_registry import active_client_id, get_client_by_id
-from settings import settings
+from sema_core.client_registry import active_client_id, get_client_by_id
+from sema_core.settings import settings
 
 load_dotenv()
 

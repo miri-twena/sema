@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-import client_registry
-from agent.semantic import load_semantic_layer
+from sema_core import client_registry
+from sema_core.agent.semantic import load_semantic_layer
 from components import styles
 from components.theme import connected_flow_logo
-from db import check_connection
+from sema_core.db import check_connection
 
 st.set_page_config(page_title="SEMA — Clients", page_icon="⚙", layout="wide")
 styles.inject()

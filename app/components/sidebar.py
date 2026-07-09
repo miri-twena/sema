@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import streamlit as st
 
-import client_registry
+from sema_core import client_registry
 from components.theme import connected_flow_logo
-from db import check_connection
+from sema_core.db import check_connection
 
 
 def render() -> None:

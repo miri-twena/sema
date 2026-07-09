@@ -15,10 +15,10 @@ Routing:
 
 from __future__ import annotations
 
-import insight_builder
-from agent import agent
-from obs import get_logger
-from query_router import detect_intent
+from sema_core import insight_builder
+from sema_core.agent import agent
+from sema_core.obs import get_logger
+from sema_core.query_router import detect_intent
 
 logger = get_logger("wiring")
 
@@ -34,17 +34,19 @@ def get_response(
     question: str,
     history: list[dict] | None = None,
     request_id: str | None = None,
+    on_progress=None,
 ) -> dict:
     """Return the response dict for a question (agent first, router fallback).
 
     `history` is the prior conversation (Claude API format) for multi-turn
     follow-ups; it's only used by the agent. The rule-based fallback answers
-    each known question standalone, so it ignores history. `request_id`
+    each known question standalone, so it ignores history and `on_progress`
+    (it's instant -- no meaningful progress to report). `request_id`
     correlates this call with the API request's log lines.
     """
     if agent.api_key_configured():
         try:
-            return agent.run(question, history=history, request_id=request_id)
+            return agent.run(question, history=history, request_id=request_id, on_progress=on_progress)
         except Exception:
             # Don't swallow silently: record the traceback before falling back
             # to the rule-based router, so agent failures are diagnosable.

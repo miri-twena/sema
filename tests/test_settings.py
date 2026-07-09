@@ -4,7 +4,7 @@ P1a item 6: settings read from env with sane defaults.
 
 from __future__ import annotations
 
-from settings import load_settings
+from sema_core.settings import load_settings
 
 
 def test_defaults_when_env_absent(monkeypatch):

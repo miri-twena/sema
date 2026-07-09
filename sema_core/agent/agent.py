@@ -27,12 +27,12 @@ import json
 import os
 import time
 
-from agent.prompts import SYSTEM_PROMPT
-from agent.response import PRESENT_ANSWER_TOOL, build_response
-from agent.tools import TOOL_SCHEMAS, AgentTools
-from client_registry import active_client_id
-from obs import get_logger, log_event
-from settings import settings
+from sema_core.agent.prompts import SYSTEM_PROMPT
+from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response
+from sema_core.agent.tools import TOOL_SCHEMAS, AgentTools
+from sema_core.client_registry import active_client_id
+from sema_core.obs import get_logger, log_event
+from sema_core.settings import settings
 
 logger = get_logger("agent")
 
@@ -105,11 +105,22 @@ def _api_error_class():
         return _NeverRaised
 
 
+
+# Human-readable status per tool name, shown to the user while the loop runs
+# (via on_progress). "run_sql" gets a per-call counter appended ("...2").
+_TOOL_STATUS = {
+    "get_schema": "Reading the database schema",
+    "get_semantic_layer": "Consulting the semantic layer",
+    "run_sql": "Running query",
+}
+
+
 def run(
     question: str,
     history: list[dict] | None = None,
     client=None,
     request_id: str | None = None,
+    on_progress=None,
 ) -> dict:
     """Answer a business question via the agent loop.
 
@@ -117,9 +128,14 @@ def run(
     user/assistant text turns), so follow-up questions like "break that down
     by category" have context. `client` is injectable for testing; in
     production it's built from the ANTHROPIC_API_KEY. `request_id` correlates
-    this run's log line with the API request. Returns the response dict the UI
-    renders.
+    this run's log line with the API request. `on_progress`, if given, is
+    called with a short status string (e.g. "Running query 2") before each
+    tool dispatch -- the streaming endpoint uses this to send SSE progress
+    events; the non-streaming caller simply doesn't pass it. Returns the
+    response dict the UI renders.
     """
+    if on_progress is None:
+        on_progress = lambda _msg: None  # no-op: identical code path either way
     # Missing-key guard: only relevant when we'd build a real client.
     if client is None and not api_key_configured():
         return not_configured_response()
@@ -223,6 +239,7 @@ def run(
         for block in response.content:
             if block.type == "tool_use" and block.name == PRESENT_ANSWER_TOOL["name"]:
                 tool_calls += 1
+                on_progress("Writing the answer")
                 return _finish(build_response(block.input, tools), "present_answer")
 
         # Otherwise run the data tools and send results back for the next turn.
@@ -230,6 +247,10 @@ def run(
         for block in response.content:
             if block.type == "tool_use":
                 tool_calls += 1
+                status = _TOOL_STATUS.get(block.name, block.name)
+                if block.name == "run_sql":
+                    status = f"{status} {len(tools.results) + 1}"
+                on_progress(status)
                 result = tools.dispatch(block.name, block.input)
                 tool_results.append(
                     {

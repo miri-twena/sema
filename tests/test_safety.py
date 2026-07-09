@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.safety import DEFAULT_ROW_LIMIT, SQLSafetyError, is_safe, validate_and_prepare
+from sema_core.agent.safety import DEFAULT_ROW_LIMIT, SQLSafetyError, is_safe, validate_and_prepare
 
 
 # --- allowed ----------------------------------------------------------------

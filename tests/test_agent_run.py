@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent import agent
+from sema_core.agent import agent
 
 
 def _text_block(text: str):

@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# sema_core/settings.py -> repo root (mirrors client_registry.PROJECT_ROOT).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _int(name: str, default: int) -> int:
@@ -70,6 +74,10 @@ class Settings:
     cors_origins: list[str]
     api_key: str  # X-API-Key value; empty = auth disabled (local dev)
 
+    # --- server-side conversations ---
+    conversation_db_path: Path  # SQLite file for conversation metadata
+    history_token_budget: int  # approx. tokens of prior turns sent to the model
+
 
 def load_settings() -> Settings:
     """Build a Settings snapshot from the current environment.
@@ -98,6 +106,10 @@ def load_settings() -> Settings:
             "SEMA_CORS_ORIGINS",
             ["http://localhost:5173", "http://localhost:3000"],
         ),
+        conversation_db_path=Path(
+            os.environ.get("SEMA_CONVERSATION_DB", str(_PROJECT_ROOT / "var" / "sema_state.db"))
+        ),
+        history_token_budget=_int("SEMA_HISTORY_TOKEN_BUDGET", 8000),
     )
 
 

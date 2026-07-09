@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from agent import tools
+from sema_core.agent import tools
 
 
 def _fake_run_query_factory(calls: list[str]):

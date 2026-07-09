@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from cache import ttl_cache
-from client_registry import active_client_id
-from db import run_query
+from sema_core.cache import ttl_cache
+from sema_core.client_registry import active_client_id
+from sema_core.db import run_query
 
 QUERIES_DIR = Path(__file__).resolve().parent.parent / "sql" / "queries"
 

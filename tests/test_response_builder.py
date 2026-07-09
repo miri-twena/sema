@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from agent.response import build_response
+from sema_core.agent.response import build_response
 
 
 class FakeTools:

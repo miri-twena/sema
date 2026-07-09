@@ -19,10 +19,10 @@ import operator
 import re
 import sys
 
-from agent.semantic import load_semantic_layer
-from cache import ttl_cache
-from client_registry import active_client_id
-from db import run_sql_readonly
+from sema_core.agent.semantic import load_semantic_layer
+from sema_core.cache import ttl_cache
+from sema_core.client_registry import active_client_id
+from sema_core.db import run_sql_readonly
 
 # Supported comparison operators for an alert `condition`. Longer tokens first
 # so "<=" / ">=" are matched before "<" / ">".

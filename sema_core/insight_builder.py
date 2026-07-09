@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-import queries
-from query_router import SUGGESTED_QUESTIONS
+from sema_core import queries
+from sema_core.query_router import SUGGESTED_QUESTIONS
 
 
 def _month_label(ts: pd.Timestamp) -> str:

@@ -18,12 +18,12 @@ from pathlib import Path
 
 import streamlit as st
 
-import client_registry
+from sema_core import client_registry
 from components import chat, sidebar, styles
-from components.alerts_engine import evaluate_all_alerts
+from sema_core.alerts_engine import evaluate_all_alerts
 from components.alerts_panel import render as render_alerts
 from components.theme import TOKENS, connected_flow_logo
-from wiring import get_response
+from sema_core.wiring import get_response
 
 _ICON_PATH = Path(__file__).parent / "assets" / "sema_icon.svg"
 

@@ -120,9 +120,10 @@ The verified end-to-end startup sequence on this machine:
    `.env` (gitignored — never commit it, never paste it into chat). Without
    it the app still runs but falls back to the rule-based router.
 4. **Run the UI** — from the project root:
-   `$env:PYTHONPATH = "$PWD\app"; .venv\Scripts\python.exe -m streamlit run app\main.py`
-   → http://localhost:8501. `PYTHONPATH=app` is required because the app
-   modules import as top-level (`from db import ...`, `from agent ...`).
+   `.venv\Scripts\python.exe -m streamlit run app\main.py`
+   → http://localhost:8501. No `PYTHONPATH` needed: the backend lives in the
+   installed `sema_core` package (`pip install -e .` once per venv, see
+   pyproject.toml). `app/` holds only the Streamlit UI.
 5. Environment variables (including the API key) are read at startup, so
    **restart Streamlit after editing `.env`** for changes to take effect.
 

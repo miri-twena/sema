@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-import client_registry
-from client_registry import (
+from sema_core import client_registry
+from sema_core.client_registry import (
     ClientConfigError,
     active_client_id,
     get_client_by_id,

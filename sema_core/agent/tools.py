@@ -25,10 +25,10 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from agent.safety import SQLSafetyError, validate_and_prepare
-from agent.semantic import load_semantic_layer
-from client_registry import active_client_id
-from db import run_query, run_sql_readonly
+from sema_core.agent.safety import SQLSafetyError, validate_and_prepare
+from sema_core.agent.semantic import load_semantic_layer
+from sema_core.client_registry import active_client_id
+from sema_core.db import run_query, run_sql_readonly
 
 # How many rows of a query result we show the model (the full result is kept
 # separately for rendering). Keeps token cost bounded.

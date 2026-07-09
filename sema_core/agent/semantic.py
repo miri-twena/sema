@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from client_registry import PROJECT_ROOT, active_client_id, get_client_by_id
+from sema_core.client_registry import PROJECT_ROOT, active_client_id, get_client_by_id
 
 # Every metric file must define these keys, or we consider it malformed.
 REQUIRED_KEYS = {"name", "label", "description", "grain", "sql", "dimensions", "examples"}

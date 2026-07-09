@@ -23,7 +23,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import expressions as exp
 
-from settings import settings
+from sema_core.settings import settings
 
 DEFAULT_ROW_LIMIT = settings.row_limit  # SEMA_ROW_LIMIT, default 1000
 
