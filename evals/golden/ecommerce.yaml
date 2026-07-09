@@ -1,0 +1,73 @@
+# SEMA golden-question eval set -- ecommerce client.
+#
+# Expected values below were read directly from the LIVE database (see
+# evals/README.md for the exact queries used), not copied from documentation
+# -- data/README.md's own summary numbers turned out to describe a slightly
+# different metric than some of these questions ask (e.g. its "~40%" VIP
+# figure is about the *designed generator cohort*, not "top 5% by lifetime
+# revenue" which is what customers actually ask and what the semantic
+# layer's alternative_definition computes -- the real number is 48.5%).
+# Always re-verify against the live DB when adding a question here.
+
+questions:
+  - id: revenue_trend_peak_month
+    question: "Show revenue trend by month."
+    assertions:
+      contains_any: ["December", "Dec"]
+      numeric_within:
+        - value: 1672356 # December 2025 revenue, the Q4 peak
+          tolerance_pct: 10
+      expects_sql: true
+
+  - id: q4_vs_q1_direction
+    question: "How did Q4 2025 revenue compare to Q1 2026?"
+    assertions:
+      direction: down # Q1 2026 is the seasonal post-holiday trough
+      expects_sql: true
+
+  - id: march_dip_overall
+    question: "Why did revenue drop in March 2026?"
+    assertions:
+      contains_any: ["March"]
+      direction: down
+      expects_sql: true
+
+  - id: march_dip_category_driver
+    question: "Which product category contributed most to the March 2026 revenue drop?"
+    assertions:
+      contains_any: ["Electronics"] # Feb->Mar: $499K -> $365K, ~27% drop, largest of any category
+      expects_sql: true
+
+  - id: march_dip_channel_driver
+    question: "Which marketing channel underperformed in March 2026?"
+    assertions:
+      contains_any: ["Meta"] # Feb->Mar order count: 190 -> 130, ~32% drop, largest of any channel
+      expects_sql: true
+
+  - id: vip_customers_identified
+    question: "Who are our most valuable customers?"
+    assertions:
+      contains_any: ["VIP"]
+      expects_sql: true
+
+  - id: revenue_concentration_top5pct
+    question: "What percentage of total revenue comes from the top 5% of customers?"
+    assertions:
+      numeric_within:
+        - value: 48.5 # 198 of 3947 paying customers = 48.5% of total revenue
+          tolerance_pct: 15
+      expects_sql: true
+
+  - id: churn_risk_count
+    question: "How many customers are at risk of churning (no order in the last 90 days)?"
+    assertions:
+      numeric_within:
+        - value: 1845 # customers with no completed order in the 90 days before the dataset's max order date
+          tolerance_pct: 15
+      expects_sql: true
+
+  - id: worst_campaign
+    question: "Which marketing campaign has performed worst?"
+    assertions:
+      contains_any: ["Meta Retarget", "Meta"] # "Meta Retarget - Electronics" runs only in March, poor ROI
+      expects_sql: true

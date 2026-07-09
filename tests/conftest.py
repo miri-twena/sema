@@ -1,17 +1,37 @@
 """
 Shared pytest setup for the SEMA backend tests.
 
-The backend modules import as top-level (``from db import ...``,
-``import client_registry``) because they live in ``app/``. Putting ``app/`` on
-sys.path here is the test-suite equivalent of ``PYTHONPATH=app`` -- so tests
-run without launching Streamlit, and without a live DB or API key.
+`sema_core` and `api` resolve via the editable install (pip install -e .,
+see pyproject.toml) -- no path manipulation needed. Tests require neither a
+live database, an API key, nor Streamlit.
 """
 
 from __future__ import annotations
 
-import sys
+import os
+import tempfile
 from pathlib import Path
 
-_APP_DIR = Path(__file__).resolve().parent.parent / "app"
-if str(_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(_APP_DIR))
+# Redirect the conversation store BEFORE anything imports sema_core.settings
+# (a module-level singleton, read once at import time) -- otherwise importing
+# api.main during test collection would eagerly create the real
+# var/sema_state.db as a side effect, before any fixture gets a chance to
+# monkeypatch it away. pytest loads conftest.py before collecting test
+# modules, so this always wins the race.
+os.environ.setdefault(
+    "SEMA_CONVERSATION_DB", str(Path(tempfile.mkdtemp(prefix="sema_test_")) / "conversations.db")
+)
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_conversation_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway SQLite conversation store, so tests
+    never read or write the app's real var/sema_state.db."""
+    import api.main as main
+    from sema_core.conversation_store import SqliteConversationStore
+
+    monkeypatch.setattr(
+        main, "conversation_store", SqliteConversationStore(tmp_path / "test_conversations.db")
+    )

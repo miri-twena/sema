@@ -22,9 +22,14 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
-    # Cap matches the agent's MAX_HISTORY_TURNS * 2: oversized histories are
-    # rejected with 422 at the boundary instead of silently truncated inside.
+    # Legacy path: the client ships its own history. Cap matches the agent's
+    # MAX_HISTORY_TURNS * 2; oversized histories are rejected with 422 rather
+    # than silently truncated. Superseded by conversation_id when both are sent.
     history: list[Message] = Field(default_factory=list, max_length=20)
+    # Preferred path: the server holds history server-side (see
+    # conversation_store.py). Omit on the first message; the response returns
+    # one to reuse on follow-ups.
+    conversation_id: str | None = None
     client_id: str | None = None  # which client's DB + semantic layer to use
 
 
@@ -68,6 +73,7 @@ class ChatResponse(BaseModel):
     confidence: str | None = None
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
+    conversation_id: str | None = None
 
 
 # --- alerts / clients / schema / health ------------------------------------
