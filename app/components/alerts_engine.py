@@ -19,9 +19,8 @@ import operator
 import re
 import sys
 
-import streamlit as st
-
 from agent.semantic import load_semantic_layer
+from cache import ttl_cache
 from client_registry import active_client_id
 from db import run_sql_readonly
 
@@ -68,7 +67,8 @@ def evaluate_all_alerts(client_id: str | None = None) -> list[dict]:
     return _evaluate(client_id or active_client_id())
 
 
-@st.cache_data(ttl=120)
+# Framework-neutral TTL cache (was @st.cache_data): keyed by client_id arg.
+@ttl_cache(ttl=120)
 def _evaluate(client_id: str) -> list[dict]:
     try:
         metrics = load_semantic_layer(client_id)
@@ -90,12 +90,17 @@ def _evaluate(client_id: str) -> list[dict]:
                 if not _passes(alert.get("condition", ""), value):
                     continue
                 message = alert.get("message_template", "").replace("{value}", _format_value(value))
+                # Normalize so the API contract's Literal["critical","warning"]
+                # can't be broken by a typo in a metric YAML.
+                severity = alert.get("severity", "warning")
+                if severity not in ("critical", "warning"):
+                    severity = "warning"
                 triggered.append(
                     {
                         "id": alert["id"],
                         "metric_label": metric.get("label", metric.get("name", "")),
                         "alert_label": alert.get("label", alert["id"]),
-                        "severity": alert.get("severity", "warning"),
+                        "severity": severity,
                         "message": message,
                         "value": value,
                     }
