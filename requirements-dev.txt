@@ -1,0 +1,4 @@
+# SEMA developer / test dependencies (not needed to run the app).
+# Install into the same venv:
+#   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+pytest>=8.0        # test runner for tests/ (no live DB or API key required)

@@ -18,7 +18,6 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-import streamlit as st
 import yaml
 from dotenv import load_dotenv
 
@@ -55,12 +54,18 @@ def load_clients() -> list[dict]:
 
 
 def get_client_by_id(client_id: str) -> dict:
-    """Look up a client by id; fall back to the first client if not found."""
+    """Look up a client by id, or raise if it doesn't exist.
+
+    Previously this silently returned the FIRST client for an unknown id, which
+    meant an API call with a bad client_id would quietly query the WRONG
+    tenant's database. We never cross tenant boundaries on a bad id: raise and
+    let the caller (e.g. the API) turn it into a 404.
+    """
     clients = load_clients()
     for client in clients:
         if client["id"] == client_id:
             return client
-    return clients[0]
+    raise ClientConfigError(f"unknown client id: {client_id!r}")
 
 
 # Per-request client override for non-Streamlit callers (the FastAPI layer).
@@ -80,13 +85,17 @@ def active_client_id() -> str:
     """The id of the currently-active client.
 
     Resolution order: a per-request override (set by the API) -> Streamlit
-    session_state -> DEFAULT_CLIENT_ID. The try/except lets this work outside a
-    Streamlit run (FastAPI, scripts, tests), where session_state is absent.
+    session_state -> DEFAULT_CLIENT_ID. Streamlit is imported lazily INSIDE
+    this function so the module has no hard Streamlit dependency -- FastAPI,
+    tests, and scripts work without Streamlit installed; the try/except also
+    covers running outside a Streamlit session (no session_state).
     """
     override = _active_override.get()
     if override:
         return override
     try:
+        import streamlit as st
+
         return st.session_state.get("active_client_id", DEFAULT_CLIENT_ID)
     except Exception:
         return DEFAULT_CLIENT_ID

@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import insight_builder
 from agent import agent
+from obs import get_logger
 from query_router import detect_intent
+
+logger = get_logger("wiring")
 
 # Shown when we answer via the old rule-based router because the agent is
 # offline (no API key), so the user isn't misled into thinking the LLM ran.
@@ -27,18 +30,25 @@ FALLBACK_NOTE = (
 )
 
 
-def get_response(question: str, history: list[dict] | None = None) -> dict:
+def get_response(
+    question: str,
+    history: list[dict] | None = None,
+    request_id: str | None = None,
+) -> dict:
     """Return the response dict for a question (agent first, router fallback).
 
     `history` is the prior conversation (Claude API format) for multi-turn
     follow-ups; it's only used by the agent. The rule-based fallback answers
-    each known question standalone, so it ignores history.
+    each known question standalone, so it ignores history. `request_id`
+    correlates this call with the API request's log lines.
     """
     if agent.api_key_configured():
         try:
-            return agent.run(question, history=history)
+            return agent.run(question, history=history, request_id=request_id)
         except Exception:
-            pass  # fall through to the rule-based router below
+            # Don't swallow silently: record the traceback before falling back
+            # to the rule-based router, so agent failures are diagnosable.
+            logger.exception("agent.run failed; falling back to rule-based router (request_id=%s)", request_id)
 
     intent_id = detect_intent(question)
     if intent_id is not None:

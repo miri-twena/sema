@@ -9,40 +9,42 @@ serialized to {columns, rows} in serialize.py before they reach here.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- chat -------------------------------------------------------------------
 class Message(BaseModel):
-    role: str  # "user" | "assistant"
+    role: Literal["user", "assistant"]
     content: str
 
 
 class ChatRequest(BaseModel):
-    question: str
-    history: list[Message] = []
+    question: str = Field(min_length=1, max_length=4000)
+    # Cap matches the agent's MAX_HISTORY_TURNS * 2: oversized histories are
+    # rejected with 422 at the boundary instead of silently truncated inside.
+    history: list[Message] = Field(default_factory=list, max_length=20)
     client_id: str | None = None  # which client's DB + semantic layer to use
 
 
 class Kpi(BaseModel):
     label: str
     value: Any  # number or string
-    format: str = "text"  # currency | percent | number | ratio | text
+    format: Literal["currency", "percent", "number", "ratio", "text"] = "text"
     delta: float | None = None
     delta_label: str | None = None
 
 
 class Chart(BaseModel):
-    kind: str  # line | bar | grouped_bar | donut
+    kind: Literal["line", "bar", "grouped_bar", "donut"]
     title: str = ""
     x: str | None = None
     y: str | None = None
     color: str | None = None
     names: str | None = None
     values: str | None = None
-    y_format: str | None = None
+    y_format: Literal["currency", "number", "percent"] | None = None
     highlight_x: Any | None = None
     # The data is serialized from the bound run_sql result, so the frontend
     # (Recharts) renders straight from columns/rows -- no DataFrame leaks out.
@@ -64,7 +66,7 @@ class ChatResponse(BaseModel):
     actions: list[str] = []
     sql_used: str | None = None
     confidence: str | None = None
-    status: str = "ok"  # ok | error
+    status: Literal["ok", "error"] = "ok"
     error: str | None = None
 
 
@@ -73,7 +75,7 @@ class Alert(BaseModel):
     id: str
     metric_label: str
     alert_label: str
-    severity: str  # critical | warning
+    severity: Literal["critical", "warning"]
     message: str
     value: Any
 

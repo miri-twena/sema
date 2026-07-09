@@ -25,19 +25,27 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 from agent.prompts import SYSTEM_PROMPT
 from agent.response import PRESENT_ANSWER_TOOL, build_response
 from agent.tools import TOOL_SCHEMAS, AgentTools
+from client_registry import active_client_id
+from obs import get_logger, log_event
+from settings import settings
+
+logger = get_logger("agent")
 
 # The full tool menu the model sees: the three data tools plus the finishing
 # present_answer tool (which carries the structured final answer).
 ALL_TOOLS = TOOL_SCHEMAS + [PRESENT_ANSWER_TOOL]
 
-MODEL = "claude-sonnet-4-6"
-MAX_ITERATIONS = 8       # safety cap on tool-use rounds
-MAX_TOKENS = 4000        # larger: multi-turn conversations carry more context
-MAX_HISTORY_TURNS = 10   # keep at most the last 10 turns (20 user/assistant entries)
+# Tunables now live in settings.py (read from env with these defaults):
+#   SEMA_MODEL, SEMA_MAX_ITERATIONS, SEMA_MAX_TOKENS, SEMA_MAX_HISTORY_TURNS.
+MODEL = settings.anthropic_model
+MAX_ITERATIONS = settings.max_iterations      # safety cap on tool-use rounds
+MAX_TOKENS = settings.max_tokens              # multi-turn conversations carry more context
+MAX_HISTORY_TURNS = settings.max_history_turns  # keep at most the last N turns
 
 # The response dict shape the UI renders (same contract as insight_builder).
 NOT_CONFIGURED_MESSAGE = "Claude API key is not configured yet."
@@ -82,14 +90,35 @@ def not_configured_response() -> dict:
     return resp
 
 
-def run(question: str, history: list[dict] | None = None, client=None) -> dict:
+def _api_error_class():
+    """The anthropic APIError type, or a stand-in when the SDK isn't installed
+    (tests inject a fake client, so the import must stay optional)."""
+    try:
+        from anthropic import APIError
+
+        return APIError
+    except ImportError:
+
+        class _NeverRaised(Exception):
+            pass
+
+        return _NeverRaised
+
+
+def run(
+    question: str,
+    history: list[dict] | None = None,
+    client=None,
+    request_id: str | None = None,
+) -> dict:
     """Answer a business question via the agent loop.
 
     `history` is the prior conversation in Claude API format (alternating
     user/assistant text turns), so follow-up questions like "break that down
     by category" have context. `client` is injectable for testing; in
-    production it's built from the ANTHROPIC_API_KEY. Returns the response
-    dict the UI renders.
+    production it's built from the ANTHROPIC_API_KEY. `request_id` correlates
+    this run's log line with the API request. Returns the response dict the UI
+    renders.
     """
     # Missing-key guard: only relevant when we'd build a real client.
     if client is None and not api_key_configured():
@@ -99,9 +128,43 @@ def run(question: str, history: list[dict] | None = None, client=None) -> dict:
         # Imported lazily so this module works without the package installed.
         from anthropic import Anthropic
 
-        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        # Explicit timeout + retries so a slow/flaky API call can't hang a
+        # request indefinitely (defaults live in settings.py).
+        client = Anthropic(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            timeout=settings.anthropic_timeout_s,
+            max_retries=settings.anthropic_max_retries,
+        )
 
     tools = AgentTools()
+
+    # Observability counters -- logged once when the run finishes (any exit).
+    started = time.perf_counter()
+    input_tokens = 0
+    output_tokens = 0
+    tool_calls = 0
+    rounds = 0
+    last_stop: str | None = None
+
+    def _finish(resp: dict, outcome: str) -> dict:
+        """Emit one structured log line summarizing the run, then return resp."""
+        log_event(
+            logger,
+            "agent_run",
+            request_id=request_id,
+            client_id=active_client_id(),
+            question_len=len(question),
+            duration_ms=round((time.perf_counter() - started) * 1000),
+            outcome=outcome,
+            rounds=rounds,
+            tool_calls=tool_calls,
+            sql_statements=len(tools.results),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=last_stop,
+        )
+        return resp
+
     # Start from the prior turns, capped to the most recent ones so a long
     # session can't blow the context window. History is whole turns (each a
     # user+assistant pair), so slicing an even count keeps it starting on a
@@ -111,14 +174,38 @@ def run(question: str, history: list[dict] | None = None, client=None) -> dict:
         prior = prior[-(MAX_HISTORY_TURNS * 2):]
     messages: list[dict] = prior + [{"role": "user", "content": question}]
 
+    api_error = _api_error_class()
+
     for _ in range(MAX_ITERATIONS):
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            tools=ALL_TOOLS,
-            messages=messages,
-        )
+        rounds += 1
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=SYSTEM_PROMPT,
+                tools=ALL_TOOLS,
+                messages=messages,
+            )
+        except api_error:
+            # AI-service failure (overloaded, 5xx, auth): a friendly answer,
+            # not the generic error path -- and logged as an availability
+            # event, not a code bug.
+            logger.exception("Anthropic API error (request_id=%s)", request_id)
+            return _finish(
+                _basic_response(
+                    "The AI service is temporarily unavailable. Please try "
+                    "again in a moment.",
+                    tools,
+                ),
+                "api_error",
+            )
+
+        # Accumulate token usage + stop_reason for cost/observability logging.
+        last_stop = response.stop_reason
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            input_tokens += getattr(usage, "input_tokens", 0) or 0
+            output_tokens += getattr(usage, "output_tokens", 0) or 0
 
         if response.stop_reason != "tool_use":
             # The model answered in prose without calling present_answer.
@@ -126,7 +213,7 @@ def run(question: str, history: list[dict] | None = None, client=None) -> dict:
             final_text = "".join(
                 block.text for block in response.content if block.type == "text"
             )
-            return _basic_response(final_text, tools)
+            return _finish(_basic_response(final_text, tools), "prose_answer")
 
         # Record the model's turn before acting on it.
         messages.append({"role": "assistant", "content": response.content})
@@ -135,12 +222,14 @@ def run(question: str, history: list[dict] | None = None, client=None) -> dict:
         # structured response and return immediately (no tool result needed).
         for block in response.content:
             if block.type == "tool_use" and block.name == PRESENT_ANSWER_TOOL["name"]:
-                return build_response(block.input, tools)
+                tool_calls += 1
+                return _finish(build_response(block.input, tools), "present_answer")
 
         # Otherwise run the data tools and send results back for the next turn.
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
+                tool_calls += 1
                 result = tools.dispatch(block.name, block.input)
                 tool_results.append(
                     {
@@ -152,8 +241,11 @@ def run(question: str, history: list[dict] | None = None, client=None) -> dict:
         messages.append({"role": "user", "content": tool_results})
 
     # Ran out of iterations without a final answer.
-    return _basic_response(
-        "I wasn't able to finish the analysis within the allowed number of "
-        "steps. Please try rephrasing the question.",
-        tools,
+    return _finish(
+        _basic_response(
+            "I wasn't able to finish the analysis within the allowed number of "
+            "steps. Please try rephrasing the question.",
+            tools,
+        ),
+        "max_iterations",
     )

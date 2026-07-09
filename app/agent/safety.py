@@ -23,10 +23,16 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import expressions as exp
 
-DEFAULT_ROW_LIMIT = 1000
+from settings import settings
+
+DEFAULT_ROW_LIMIT = settings.row_limit  # SEMA_ROW_LIMIT, default 1000
 
 # Root expression types we consider safe (all read-only).
 _ALLOWED_ROOTS = (exp.Select, exp.Union)
+
+# System catalogs are off-limits for agent SQL: schema questions must go
+# through the get_schema tool, and catalog probing is a recon vector.
+_BLOCKED_SCHEMAS = {"pg_catalog", "information_schema"}
 
 
 class SQLSafetyError(Exception):
@@ -61,8 +67,29 @@ def validate_and_prepare(sql: str, max_rows: int = DEFAULT_ROW_LIMIT) -> str:
         kind = type(statement).__name__.upper()
         raise SQLSafetyError(f"Only SELECT queries are allowed (got {kind}).")
 
-    # Auto-add a LIMIT if there isn't one already (caps result size).
-    if statement.args.get("limit") is None:
+    # Block system-catalog access (schema comes from the get_schema tool).
+    # `pg_stat_activity` etc. resolve via the search_path without a schema
+    # prefix, so unqualified pg_* names are rejected too.
+    for table in statement.find_all(exp.Table):
+        schema_name = (table.db or "").lower()
+        if schema_name in _BLOCKED_SCHEMAS or (
+            not schema_name and table.name.lower().startswith("pg_")
+        ):
+            raise SQLSafetyError(
+                "Queries against system catalogs are not allowed; "
+                "use the get_schema tool instead."
+            )
+
+    # Cap result size: add a LIMIT if missing, and REPLACE any model-supplied
+    # LIMIT larger than max_rows (a huge LIMIT must not bypass the cap).
+    limit_expr = statement.args.get("limit")
+    current_limit: int | None = None
+    if limit_expr is not None:
+        try:
+            current_limit = int(limit_expr.expression.name)
+        except (AttributeError, TypeError, ValueError):
+            current_limit = None  # non-literal LIMIT (e.g. expression): re-cap
+    if current_limit is None or current_limit > max_rows:
         statement = statement.limit(max_rows)
 
     return statement.sql(dialect="postgres")

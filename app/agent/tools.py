@@ -27,6 +27,7 @@ from functools import lru_cache
 
 from agent.safety import SQLSafetyError, validate_and_prepare
 from agent.semantic import load_semantic_layer
+from client_registry import active_client_id
 from db import run_query, run_sql_readonly
 
 # How many rows of a query result we show the model (the full result is kept
@@ -80,16 +81,21 @@ TOOL_SCHEMAS = [
 ]
 
 
-@lru_cache(maxsize=1)
-def _introspect_schema() -> dict:
-    """Read tables/columns/relationships from the database catalog (cached)."""
+# Cached PER client_id (maxsize=None = unbounded, one entry per client). The
+# earlier @lru_cache(maxsize=1) had no client argument, so after switching
+# clients the agent kept getting the FIRST client's schema -- a tenant-safety
+# bug. Keying the cache on client_id fixes it: each client caches its own.
+@lru_cache(maxsize=None)
+def _introspect_schema(client_id: str) -> dict:
+    """Read tables/columns/relationships from a client's DB catalog (cached)."""
     cols = run_query(
         """
         SELECT table_name, column_name, data_type, ordinal_position
         FROM information_schema.columns
         WHERE table_schema = 'public'
         ORDER BY table_name, ordinal_position
-        """
+        """,
+        client_id=client_id,
     )
     fks = run_query(
         """
@@ -107,7 +113,8 @@ def _introspect_schema() -> dict:
            AND ccu.table_schema = tc.table_schema
         WHERE tc.constraint_type = 'FOREIGN KEY'
           AND tc.table_schema = 'public'
-        """
+        """,
+        client_id=client_id,
     )
 
     tables: list[dict] = []
@@ -143,7 +150,9 @@ class AgentTools:
 
     # --- the three tools ---------------------------------------------------
     def get_schema(self) -> dict:
-        return _introspect_schema()
+        # Resolve the active client explicitly and pass it in, so the cache is
+        # keyed correctly per tenant (never serves another client's schema).
+        return _introspect_schema(active_client_id())
 
     def get_semantic_layer(self) -> dict:
         metrics = load_semantic_layer()

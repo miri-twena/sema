@@ -13,26 +13,23 @@ Then open http://localhost:8000/docs (Swagger).
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import secrets
+import time
 
-# The backend modules import as top-level (from db import ..., import
-# client_registry, ...). They live in app/, so put it on the path -- the same
-# thing PYTHONPATH=app does for Streamlit.
-_APP_DIR = Path(__file__).resolve().parent.parent / "app"
-if str(_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(_APP_DIR))
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi import FastAPI, HTTPException  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+# The backend modules (db, wiring, client_registry, ...) resolve via the
+# editable install (pip install -e ., see pyproject.toml) -- no sys.path hack.
+import client_registry
+from agent import agent
+from components import alerts_engine
+from db import check_connection, run_query
+from obs import get_logger, log_event, new_request_id
+from settings import settings
+from wiring import get_response
 
-import client_registry  # noqa: E402
-from agent import agent  # noqa: E402
-from components import alerts_engine  # noqa: E402
-from db import check_connection, run_query  # noqa: E402
-from wiring import get_response  # noqa: E402
-
-from api.models import (  # noqa: E402
+from api.models import (
     Alert,
     ChatRequest,
     ChatResponse,
@@ -41,14 +38,34 @@ from api.models import (  # noqa: E402
     Health,
     SchemaResponse,
 )
-from api.serialize import build_schema, to_chat_response  # noqa: E402
+from api.serialize import build_schema, to_chat_response
 
-app = FastAPI(title="SEMA API", version="0.1.0")
+logger = get_logger("api")
 
-# CORS for local React dev (Vite default 5173; CRA/other 3000).
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Auth scaffold: every route requires X-API-Key matching SEMA_API_KEY.
+
+    Empty SEMA_API_KEY = auth disabled (local dev). Structured as a FastAPI
+    dependency so swapping in real auth (JWT, per-tenant keys) later means
+    replacing this one function. compare_digest avoids timing side-channels.
+    """
+    if not settings.api_key:
+        return
+    if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
+
+
+app = FastAPI(
+    title="SEMA API",
+    version="0.1.0",
+    dependencies=[Depends(require_api_key)],  # applied to ALL routes
+)
+
+# CORS for local React dev (origins configurable via SEMA_CORS_ORIGINS).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,7 +73,14 @@ app.add_middleware(
 
 
 def _resolve_client(client_id: str | None) -> str:
-    return client_id or client_registry.DEFAULT_CLIENT_ID
+    """Resolve to a KNOWN client id or raise 404 -- never fall back to another
+    tenant. Called at the top of every client-scoped endpoint."""
+    cid = client_id or client_registry.DEFAULT_CLIENT_ID
+    try:
+        client_registry.get_client_by_id(cid)
+    except client_registry.ClientConfigError:
+        raise HTTPException(status_code=404, detail=f"unknown client: {cid}") from None
+    return cid
 
 
 def _client_model(c: dict) -> Client:
@@ -96,15 +120,41 @@ def set_client(req: ClientChangeRequest) -> Client:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    cid = _resolve_client(req.client_id)
+    request_id = new_request_id()
+    cid = _resolve_client(req.client_id)  # 404 before we touch any tenant's DB
     # Point the whole agent run (db + semantic) at this request's client.
     client_registry.set_active_client_override(cid)
+    started = time.perf_counter()
     try:
         history = [m.model_dump() for m in req.history]
-        resp = get_response(req.question, history=history)
-        return to_chat_response(resp)
-    except Exception as exc:  # never leak a 500 with a stack trace to the UI
-        return ChatResponse(answer="", status="error", error=str(exc))
+        resp = get_response(req.question, history=history, request_id=request_id)
+        out = to_chat_response(resp)
+        log_event(
+            logger,
+            "api_chat",
+            request_id=request_id,
+            client_id=cid,
+            question_len=len(req.question),
+            history_len=len(req.history),
+            duration_ms=round((time.perf_counter() - started) * 1000),
+            status=out.status,
+        )
+        return out
+    except Exception:
+        # Log the full traceback server-side; return only a generic message and
+        # the request_id so internal details (paths, SQL, driver errors) can't
+        # leak to the client but support can still find the log line.
+        logger.exception(
+            "api_chat failed (request_id=%s, client_id=%s)", request_id, cid
+        )
+        return ChatResponse(
+            answer="",
+            status="error",
+            error=(
+                "Something went wrong while answering your question. "
+                f"Please try again. Reference: {request_id}"
+            ),
+        )
     finally:
         client_registry.set_active_client_override(None)
 
@@ -118,7 +168,14 @@ def alerts(client_id: str | None = None) -> list[Alert]:
 @app.get("/api/schema", response_model=SchemaResponse)
 def schema(client_id: str | None = None) -> SchemaResponse:
     cid = _resolve_client(client_id)
+    request_id = new_request_id()
     try:
         return build_schema(cid, run_query)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception:
+        logger.exception(
+            "api_schema failed (request_id=%s, client_id=%s)", request_id, cid
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not load the schema. Reference: {request_id}",
+        ) from None
