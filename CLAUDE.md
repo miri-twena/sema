@@ -84,8 +84,12 @@ evolves.
 
 ## Architecture Preferences
 
-- Stack: Python, PostgreSQL (synthetic ecommerce database), Streamlit (chat
-  UI), Claude API (agent/orchestration).
+- Stack: Python, PostgreSQL (synthetic ecommerce database), Claude API
+  (agent/orchestration). Two front ends share one backend: Streamlit
+  (`app/`, the original chat UI) and a FastAPI + React stack (`api/` +
+  `frontend/`). The framework-free backend they both call into lives in
+  `sema_core/` (installed editable via `pyproject.toml`) — see
+  `README.md`'s Project Structure for the module breakdown.
 - Agent design: Claude with explicit tools (`get_schema`,
   `get_semantic_layer`, `run_sql`, `format_response`) operating in a
   reasoning loop — not a single mega-prompt. The semantic layer
@@ -93,12 +97,19 @@ evolves.
   definitions (Revenue, Churn, AOV, etc.) and their SQL logic.
 - SQL safety is non-negotiable: read-only DB connection, `SELECT`-only
   validation, row limits, and query timeouts.
+- Multi-tenant safety is non-negotiable: an unknown `client_id` must 404,
+  never silently fall back to another tenant's data; per-client caches
+  (schema, reports, DB connections) must be keyed by `client_id`, never
+  global.
 - Prefer structured (JSON) outputs from the AI over parsing free-form text.
 - Respect the folder structure defined in `README.md` and
   `docs/project_vision.md` — discuss before introducing new top-level
   folders.
 - Build incrementally and verify each piece works before moving on —
   prioritize a working end-to-end slice over a polished partial system.
+- Tests (`tests/`, pytest, no live DB/API key/Streamlit needed) prove
+  plumbing correctness; `evals/` (needs a live DB + API key) proves the
+  agent still tells the right story — run both when touching the backend.
 
 ## Running SEMA Locally (Windows / PowerShell)
 
@@ -115,7 +126,10 @@ The verified end-to-end startup sequence on this machine:
    deterministic: 5,000 customers / 20,000 orders / ~56k order items /
    ~131k sessions, with the intentional patterns documented in
    `data/README.md` (Q4 seasonality, the March-2026 revenue dip, the VIP
-   Pareto ~60% revenue share, churn-risk cohort).
+   Pareto — top 5% of customers by lifetime revenue = **48.5%** of total
+   revenue, verified against the live DB; `data/README.md`'s own "~40%"
+   figure describes a related but different generator-time cohort — churn-
+   risk cohort).
 3. **API key** — the agent needs `ANTHROPIC_API_KEY=...` on its own line in
    `.env` (gitignored — never commit it, never paste it into chat). Without
    it the app still runs but falls back to the rule-based router.
