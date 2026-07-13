@@ -36,6 +36,24 @@ export interface DataTableModel {
   rows: Record<string, unknown>[];
 }
 
+export interface DateRange {
+  start?: string | null;
+  end?: string | null;
+}
+
+/** Trust-layer metadata for one answer. `semantic_definitions`/`date_range`/
+ * `filters_applied` are the model's own self-report; `data_sources`/
+ * `data_freshness`/`records_used` are computed server-side from the actual
+ * query results, so they can't be hallucinated. */
+export interface Evidence {
+  semantic_definitions: string[];
+  date_range: DateRange | null;
+  filters_applied: string[];
+  data_sources: string[];
+  data_freshness: string | null;
+  records_used: number | null;
+}
+
 export interface ChatResponse {
   answer: string;
   kpis: Kpi[];
@@ -43,7 +61,8 @@ export interface ChatResponse {
   table: DataTableModel | null;
   actions: string[];
   sql_used: string | null;
-  confidence: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  evidence: Evidence | null;
   status: "ok" | "error";
   error: string | null;
 }
@@ -71,6 +90,11 @@ export interface Health {
   active_client: string;
 }
 
+export interface PopularQuestion {
+  question: string;
+  times_asked: number;
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -92,6 +116,8 @@ export const api = {
   health: () => getJSON<Health>("/api/health"),
   clients: () => getJSON<Client[]>("/api/clients"),
   alerts: (clientId: string) => getJSON<Alert[]>(`/api/alerts?client_id=${encodeURIComponent(clientId)}`),
+  popularQuestions: (clientId: string) =>
+    getJSON<PopularQuestion[]>(`/api/popular-questions?client_id=${encodeURIComponent(clientId)}`),
   chat: (question: string, history: Message[], clientId: string, signal?: AbortSignal) =>
     postJSON<ChatResponse>("/api/chat", { question, history, client_id: clientId }, signal),
 };

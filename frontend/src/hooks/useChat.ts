@@ -48,6 +48,7 @@ function errorResponse(e: unknown): ChatResponse {
     actions: [],
     sql_used: null,
     confidence: null,
+    evidence: null,
     status: "error",
     error: e instanceof Error ? e.message : String(e),
   };

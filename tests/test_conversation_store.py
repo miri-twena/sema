@@ -55,6 +55,69 @@ def test_wrong_tenant_cannot_read_or_write(store):
     assert len(store.get_turns(conv_id, "ecommerce")) == 1
 
 
+# --- popular questions --------------------------------------------------------
+def test_top_questions_ranks_by_distinct_conversations(store):
+    c1 = store.create("ecommerce")
+    store.append(c1, "ecommerce", "user", "Show revenue trend")
+    c2 = store.create("ecommerce")
+    store.append(c2, "ecommerce", "user", "Show revenue trend")  # same question, 2nd conversation
+    c3 = store.create("ecommerce")
+    store.append(c3, "ecommerce", "user", "Who are our VIPs?")
+
+    top = store.top_questions("ecommerce")
+    assert top[0] == {"question": "Show revenue trend", "times_asked": 2}
+    assert top[1] == {"question": "Who are our VIPs?", "times_asked": 1}
+
+
+def test_top_questions_dedupes_case_and_whitespace(store):
+    c1 = store.create("ecommerce")
+    store.append(c1, "ecommerce", "user", "  Show revenue trend  ")
+    c2 = store.create("ecommerce")
+    store.append(c2, "ecommerce", "user", "show revenue trend")
+
+    top = store.top_questions("ecommerce")
+    assert len(top) == 1
+    assert top[0]["times_asked"] == 2
+
+
+def test_top_questions_repeated_row_in_one_conversation_counts_once(store):
+    # A single conversation re-inserting the same question (the history
+    # backfill in api/main.py) must not inflate the count past 1.
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "Show revenue trend")
+    store.append(conv_id, "ecommerce", "user", "Show revenue trend")
+
+    top = store.top_questions("ecommerce")
+    assert top[0]["times_asked"] == 1
+
+
+def test_top_questions_scoped_per_tenant(store):
+    c1 = store.create("ecommerce")
+    store.append(c1, "ecommerce", "user", "Ecommerce-only question")
+    c2 = store.create("insurance")
+    store.append(c2, "insurance", "user", "Insurance-only question")
+
+    assert [q["question"] for q in store.top_questions("ecommerce")] == ["Ecommerce-only question"]
+    assert [q["question"] for q in store.top_questions("insurance")] == ["Insurance-only question"]
+
+
+def test_top_questions_respects_limit(store):
+    conv_id = store.create("ecommerce")
+    for i in range(10):
+        store.append(conv_id, "ecommerce", "user", f"Question {i}")
+        conv_id = store.create("ecommerce")  # each needs its own conversation to count
+
+    assert len(store.top_questions("ecommerce", limit=3)) == 3
+
+
+def test_top_questions_ignores_blank_and_assistant_rows(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "   ")
+    store.append(conv_id, "ecommerce", "assistant", "Real answer")
+
+    assert store.top_questions("ecommerce") == []
+
+
 # --- token-budget truncation ---------------------------------------------------
 def test_truncate_drops_oldest_first():
     turns = [

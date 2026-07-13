@@ -12,6 +12,12 @@
       "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
       "runtimeArgs": ["frontend/node_modules/vite/bin/vite.js", "frontend", "--port", "5173"],
       "port": 5173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--reload", "--port", "8000"],
+      "port": 8000
     }
   ]
 }

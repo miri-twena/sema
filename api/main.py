@@ -41,6 +41,7 @@ from api.models import (
     Client,
     ClientChangeRequest,
     Health,
+    PopularQuestion,
     SchemaResponse,
 )
 from api.serialize import build_schema, to_chat_response
@@ -289,6 +290,14 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
 def alerts(client_id: str | None = None) -> list[Alert]:
     cid = _resolve_client(client_id)
     return [Alert(**a) for a in alerts_engine.evaluate_all_alerts(client_id=cid)]
+
+
+@app.get("/api/popular-questions", response_model=list[PopularQuestion])
+def popular_questions(client_id: str | None = None) -> list[PopularQuestion]:
+    """Most-asked questions for this client, aggregated across every
+    conversation (no login yet, so this is server-wide, not per-person)."""
+    cid = _resolve_client(client_id)
+    return [PopularQuestion(**q) for q in conversation_store.top_questions(cid)]
 
 
 @app.get("/api/schema", response_model=SchemaResponse)

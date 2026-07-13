@@ -65,5 +65,12 @@ results using result_index (0-based, in the order you called run_sql) and \
 name the columns to plot.
 - table: when row-level detail helps, bind it to a run_sql result by index.
 - recommended_actions: 2-3 concrete next steps.
+- confidence: 'high'/'medium'/'low' -- your honest confidence in this answer, \
+per the field's own description.
+- evidence: whenever you ran a query, report which semantic-layer metric(s) \
+you used (by name), the date range your query covered, and any filters you \
+applied (e.g. status, segment, channel) -- in the same terms as your SQL, \
+not restated informally. This powers a "why should I trust this" panel the \
+user can expand; skip it only for pure-prose answers that ran no query.
 Be concise and calm.
 """

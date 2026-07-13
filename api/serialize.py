@@ -14,7 +14,17 @@ from typing import Any
 
 import pandas as pd
 
-from api.models import Chart, ChatResponse, Kpi, SchemaColumn, SchemaResponse, SchemaTable, Table
+from api.models import (
+    Chart,
+    ChatResponse,
+    DateRange,
+    Evidence,
+    Kpi,
+    SchemaColumn,
+    SchemaResponse,
+    SchemaTable,
+    Table,
+)
 
 
 def _columns(df: pd.DataFrame) -> list[str]:
@@ -54,6 +64,19 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
     if t is not None and not t.empty:
         table = Table(title=resp.get("table_title"), columns=_columns(t), rows=_records(t))
 
+    evidence: Evidence | None = None
+    raw_evidence = resp.get("evidence")
+    if raw_evidence:
+        date_range = raw_evidence.get("date_range")
+        evidence = Evidence(
+            semantic_definitions=raw_evidence.get("semantic_definitions", []),
+            date_range=DateRange(**date_range) if date_range else None,
+            filters_applied=raw_evidence.get("filters_applied", []),
+            data_sources=raw_evidence.get("data_sources", []),
+            data_freshness=raw_evidence.get("data_freshness"),
+            records_used=raw_evidence.get("records_used"),
+        )
+
     return ChatResponse(
         answer=resp.get("insight_text", ""),
         kpis=kpis,
@@ -61,6 +84,8 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
         table=table,
         actions=list(resp.get("recommended_actions", [])),
         sql_used=resp.get("sql_used") or sql_used,
+        confidence=resp.get("confidence"),
+        evidence=evidence,
         status="ok",
     )
 

@@ -17,7 +17,11 @@ No dependency on the Claude API key.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
+import sqlglot
+from sqlglot import expressions as exp
 
 # The "menu entry" for the finishing tool. Added to the tool list in agent.py.
 PRESENT_ANSWER_TOOL = {
@@ -107,6 +111,44 @@ PRESENT_ANSWER_TOOL = {
                 "items": {"type": "string"},
                 "description": "2-3 concrete next steps.",
             },
+            "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "Your confidence in this answer: 'high' when the "
+                "semantic layer directly defines the metric and the data is "
+                "complete; 'medium' when you had to combine/derive it or the "
+                "sample is small; 'low' when the data is sparse, ambiguous, or "
+                "you had to guess at intent.",
+            },
+            "evidence": {
+                "type": "object",
+                "description": "Trust-layer metadata about how this answer was "
+                "grounded -- shown to the user in a collapsible 'Evidence' "
+                "section. Optional, but include it whenever you ran a query.",
+                "properties": {
+                    "semantic_definitions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Name(s) of the semantic-layer metric(s) "
+                        "(from get_semantic_layer) you actually applied, e.g. "
+                        "['revenue', 'vip_customers'].",
+                    },
+                    "date_range": {
+                        "type": "object",
+                        "description": "The date range your query covered.",
+                        "properties": {
+                            "start": {"type": "string", "description": "e.g. '2025-06-01'."},
+                            "end": {"type": "string", "description": "e.g. '2026-05-31'."},
+                        },
+                    },
+                    "filters_applied": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Human-readable filters your SQL applied, "
+                        "e.g. [\"status = 'completed'\", \"segment = 'VIP'\"].",
+                    },
+                },
+            },
         },
         "required": ["insight_text", "recommended_actions"],
     },
@@ -122,6 +164,8 @@ def _empty_response() -> dict:
         "table_title": None,
         "recommended_actions": [],
         "sql_used": None,
+        "confidence": None,
+        "evidence": None,
     }
 
 
@@ -134,6 +178,68 @@ def _df_at(tools, index) -> pd.DataFrame | None:
     if 0 <= i < len(tools.results):
         return tools.results[i]["df"]
     return None
+
+
+def _tables_in(sql: str) -> list[str]:
+    """Real table names referenced by one SQL statement -- excludes CTE
+    aliases (a `WITH x AS (...)` name isn't a real table). Best-effort:
+    unparsable SQL yields no tables rather than raising, since this is
+    metadata for the trust panel, not a safety gate (the SQL was already
+    validated by safety.py before it ran)."""
+    try:
+        statements = sqlglot.parse(sql, read="postgres")
+    except Exception:
+        return []
+    cte_names = set()
+    tables: list[str] = []
+    for statement in statements:
+        if statement is None:
+            continue
+        for cte in statement.find_all(exp.CTE):
+            if cte.alias:
+                cte_names.add(cte.alias.lower())
+        for table in statement.find_all(exp.Table):
+            name = table.name
+            if name and name.lower() not in cte_names and name not in tables:
+                tables.append(name)
+    return tables
+
+
+def _clean_evidence(raw: dict | None, tools) -> dict | None:
+    """Build the trust-layer evidence dict for one answer.
+
+    `semantic_definitions`/`date_range`/`filters_applied` are the model's own
+    self-report (from present_answer's optional `evidence` field) -- they
+    reflect the model's reasoning, which only the model has access to.
+    `data_freshness`/`records_used`/`data_sources` are computed HERE from
+    `tools.results` (the actual executed SQL and its row counts), independent
+    of anything the model claims, so those three fields can't be hallucinated.
+
+    Returns None when no query ran and the model reported nothing either --
+    there's no evidence to show for a pure-prose answer.
+    """
+    raw = raw or {}
+    results = getattr(tools, "results", None) or []
+    if not raw and not results:
+        return None
+
+    date_range = raw.get("date_range")
+    data_sources: set[str] = set()
+    for r in results:
+        data_sources.update(_tables_in(r.get("sql", "")))
+
+    return {
+        "semantic_definitions": list(raw.get("semantic_definitions", [])),
+        "date_range": (
+            {"start": date_range.get("start"), "end": date_range.get("end")}
+            if isinstance(date_range, dict)
+            else None
+        ),
+        "filters_applied": list(raw.get("filters_applied", [])),
+        "data_sources": sorted(data_sources),
+        "data_freshness": datetime.now(timezone.utc).isoformat(),
+        "records_used": sum(len(r["df"]) for r in results if r.get("df") is not None),
+    }
 
 
 def _clean_kpi(raw: dict) -> dict:
@@ -176,5 +282,8 @@ def build_response(tool_input: dict, tools) -> dict:
     # feature). Joined when several queries were run to build the answer.
     if getattr(tools, "results", None):
         resp["sql_used"] = ";\n\n".join(r["sql"] for r in tools.results if r.get("sql"))
+
+    resp["confidence"] = tool_input.get("confidence")
+    resp["evidence"] = _clean_evidence(tool_input.get("evidence"), tools)
 
     return resp

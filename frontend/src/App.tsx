@@ -1,7 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { api, type Client, type Alert } from "./lib/api";
+import { api, type Client, type Alert, type PopularQuestion } from "./lib/api";
 import { useChat } from "./hooks/useChat";
+import { useQuestionHistory } from "./hooks/useQuestionHistory";
 import { Sidebar } from "./components/Sidebar";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { ChatInput } from "./components/ChatInput";
@@ -15,11 +16,13 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [activeId, setActiveId] = useState<string>("");
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [popularQuestions, setPopularQuestions] = useState<PopularQuestion[]>([]);
   const [dbConnected, setDbConnected] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
 
   const chat = useChat({ clientId: activeId, persistKey: "sema:chat" });
+  const questionHistory = useQuestionHistory(activeId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function App() {
   useEffect(() => {
     if (!activeId) return;
     api.alerts(activeId).then(setAlerts).catch(() => setAlerts([]));
+    api.popularQuestions(activeId).then(setPopularQuestions).catch(() => setPopularQuestions([]));
   }, [activeId]);
 
   useEffect(() => {
@@ -54,6 +58,19 @@ export default function App() {
       setActiveId(id);
     },
     [chat],
+  );
+
+  // Top-level questions (typed or picked from the sidebar) are logged to this
+  // browser's per-client history; drill-down follow-ups and alert-triggered
+  // questions are scoped/synthesized, not a real "question I asked", so they
+  // don't get recorded here.
+  const sendQuestion = useCallback(
+    (q: string) => {
+      const trimmed = q.trim();
+      if (trimmed) questionHistory.record(trimmed);
+      chat.send(q);
+    },
+    [chat, questionHistory],
   );
 
   const onDrill = useCallback((ctx: DrillContext) => setDrill(ctx), []);
@@ -73,7 +90,9 @@ export default function App() {
         activeId={activeId}
         onClientChange={switchClient}
         suggested={activeClient?.suggested_questions ?? []}
-        onPick={chat.send}
+        questionHistory={questionHistory.items}
+        popularQuestions={popularQuestions}
+        onPick={sendQuestion}
         onNewConversation={chat.reset}
         dbConnected={dbConnected}
       />
@@ -110,7 +129,7 @@ export default function App() {
 
         <div className="px-8 py-4 border-t border-line bg-bg">
           <div className="max-w-3xl mx-auto">
-            <ChatInput onSend={chat.send} onStop={chat.stop} loading={chat.loading} />
+            <ChatInput onSend={sendQuestion} onStop={chat.stop} loading={chat.loading} />
           </div>
         </div>
       </main>

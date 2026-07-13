@@ -8,7 +8,7 @@ import { SEVERITY as SEV } from "../lib/tokens";
 // opening expands it back to the left. Critical alerts in red, warnings amber.
 // Clicking an alert seeds the chat with a question about it (onAlertClick).
 export function AlertsPanel({ alerts, onAlertClick }: { alerts: Alert[]; onAlertClick?: (a: Alert) => void }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   if (!alerts?.length) return null;
 
   const criticalCount = alerts.filter((a) => a.severity === "critical").length;

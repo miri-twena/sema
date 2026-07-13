@@ -102,6 +102,36 @@ class SqliteConversationStore:
             ).fetchall()
         return [{"role": role, "content": content} for role, content in rows]
 
+    def top_questions(self, client_id: str, limit: int = 6) -> list[dict]:
+        """Most frequently asked questions for a client, across every
+        conversation (there's no login yet, so "popular" can only mean
+        server-wide per client, not per-person). Grouped by trimmed/
+        lowercased text so trivial casing/whitespace differences still count
+        as the same question; the displayed text keeps its original casing.
+
+        Counts DISTINCT conversation_id per question, not raw message rows:
+        a caller without a conversation_id (the current React frontend)
+        gets a FRESH conversation per turn seeded from its whole running
+        history (see api/main.py's _resolve_conversation), so a single
+        multi-turn session re-inserts its early questions into several
+        conversation rows. Row-counting would inflate those; conversation-
+        counting caps each session's contribution to a question at 1.
+        """
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT TRIM(m.content) AS question, COUNT(DISTINCT m.conversation_id) AS times_asked
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.role = 'user' AND c.client_id = ? AND TRIM(m.content) != ''
+                GROUP BY LOWER(TRIM(m.content))
+                ORDER BY times_asked DESC, MAX(m.id) DESC
+                LIMIT ?
+                """,
+                (client_id, limit),
+            ).fetchall()
+        return [{"question": q, "times_asked": n} for q, n in rows]
+
 
 def truncate_by_tokens(
     turns: list[dict], budget_tokens: int, chars_per_token: float = 4.0

@@ -1,12 +1,60 @@
 import { Plus } from "lucide-react";
-import type { Client } from "../lib/api";
+import type { Client, PopularQuestion } from "../lib/api";
 import { ClientSelector } from "./ClientSelector";
+import { KPI_TINTS } from "../lib/tokens";
+
+// Each sidebar question category gets its own pastel tint from the SAME
+// palette used for KPI cards elsewhere (KPI_TINTS: [bg, text] pairs), so the
+// three lists read as distinct groups at a glance without introducing new
+// colors into the app.
+const SUGGESTED_TINT = KPI_TINTS[2]; // lavender -- matches the app's primary accent
+const RECENT_TINT = KPI_TINTS[3]; // mint
+const POPULAR_TINT = KPI_TINTS[1]; // sky
+
+function QuestionList({
+  label,
+  items,
+  tint,
+  onPick,
+}: {
+  label: string;
+  items: { text: string; badge?: string }[];
+  tint: readonly [string, string];
+  onPick: (q: string) => void;
+}) {
+  if (!items.length) return null;
+  const [bg, fg] = tint;
+  return (
+    <div className="mb-5">
+      <div className="text-[0.72rem] font-semibold uppercase tracking-wide mb-2" style={{ color: fg }}>
+        {label}
+      </div>
+      <div className="flex flex-col gap-2">
+        {items.map((item, i) => (
+          <button
+            key={i}
+            onClick={() => onPick(item.text)}
+            style={{ background: bg, color: fg, borderColor: `${fg}33` }}
+            className="text-start rounded-xl border text-[0.82rem] px-3 py-2.5 leading-snug hover:brightness-[0.97] hover:-translate-y-px hover:shadow-card transition flex items-center justify-between gap-2"
+          >
+            <span className="truncate">{item.text}</span>
+            {item.badge && (
+              <span className="shrink-0 text-[0.68rem] font-medium opacity-70">{item.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function Sidebar({
   clients,
   activeId,
   onClientChange,
   suggested,
+  questionHistory,
+  popularQuestions,
   onPick,
   onNewConversation,
   dbConnected,
@@ -15,6 +63,8 @@ export function Sidebar({
   activeId: string;
   onClientChange: (id: string) => void;
   suggested: string[];
+  questionHistory: string[];
+  popularQuestions: PopularQuestion[];
   onPick: (q: string) => void;
   onNewConversation: () => void;
   dbConnected: boolean;
@@ -49,20 +99,27 @@ export function Sidebar({
       </div>
 
       <div className="px-5 pb-5 overflow-auto sema-scroll">
-        <div className="text-[0.72rem] font-semibold uppercase tracking-wide text-[#475569] mb-2">
-          Suggested questions
-        </div>
-        <div className="flex flex-col gap-2">
-          {suggested.map((q, i) => (
-            <button
-              key={i}
-              onClick={() => onPick(q)}
-              className="text-start rounded-xl border border-lineSoft bg-primary/[0.06] text-primary-dark text-[0.82rem] px-3 py-2.5 leading-snug hover:bg-surface hover:border-primary hover:-translate-y-px hover:shadow-card transition"
-            >
-              {q}
-            </button>
-          ))}
-        </div>
+        <QuestionList
+          label="Suggested questions"
+          items={suggested.map((q) => ({ text: q }))}
+          tint={SUGGESTED_TINT}
+          onPick={onPick}
+        />
+        <QuestionList
+          label="Your recent questions"
+          items={questionHistory.map((q) => ({ text: q }))}
+          tint={RECENT_TINT}
+          onPick={onPick}
+        />
+        <QuestionList
+          label="Popular in your company"
+          items={popularQuestions.map((p) => ({
+            text: p.question,
+            badge: `${p.times_asked}×`,
+          }))}
+          tint={POPULAR_TINT}
+          onPick={onPick}
+        />
       </div>
     </aside>
   );

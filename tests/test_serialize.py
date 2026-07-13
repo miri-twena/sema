@@ -72,3 +72,31 @@ def test_kpis_and_actions_pass_through():
     assert out.kpis[0].label == "AOV"
     assert out.actions == ["Do X", "Do Y"]
     assert out.sql_used == "SELECT 1"
+
+
+def test_confidence_and_evidence_map_to_contract():
+    out = to_chat_response(
+        _resp_dict(
+            confidence="medium",
+            evidence={
+                "semantic_definitions": ["revenue"],
+                "date_range": {"start": "2025-06-01", "end": "2026-05-31"},
+                "filters_applied": ["status = 'completed'"],
+                "data_freshness": "2026-07-13T10:00:00+00:00",
+                "records_used": 42,
+            },
+        )
+    )
+    assert out.confidence == "medium"
+    assert out.evidence is not None
+    assert out.evidence.semantic_definitions == ["revenue"]
+    assert out.evidence.date_range.start == "2025-06-01"
+    assert out.evidence.date_range.end == "2026-05-31"
+    assert out.evidence.filters_applied == ["status = 'completed'"]
+    assert out.evidence.records_used == 42
+
+
+def test_missing_confidence_and_evidence_default_none():
+    out = to_chat_response(_resp_dict())
+    assert out.confidence is None
+    assert out.evidence is None

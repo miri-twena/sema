@@ -8,6 +8,7 @@ import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
 import type { DrillContext } from "./DrillChat";
+import { ConfidenceBadge, EvidencePanel } from "./EvidencePanel";
 
 // Recharts is heavy (~half the bundle); load it only when an answer has a chart.
 const ChartRenderer = lazy(() => import("./ChartRenderer").then((m) => ({ default: m.ChartRenderer })));
@@ -37,6 +38,7 @@ export function AssistantResponseCard({
         <div className="flex items-center gap-2 mb-1.5">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
           <span className="text-xs font-semibold text-primary-dark">SEMA</span>
+          <ConfidenceBadge confidence={response.confidence} />
         </div>
 
         <div className="sema-prose text-ink text-[0.94rem]">
@@ -71,6 +73,8 @@ export function AssistantResponseCard({
             </pre>
           </details>
         )}
+
+        <EvidencePanel evidence={response.evidence} />
       </div>
     </Card>
   );

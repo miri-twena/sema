@@ -63,6 +63,27 @@ class Table(BaseModel):
     rows: list[dict[str, Any]] = []
 
 
+class DateRange(BaseModel):
+    start: str | None = None
+    end: str | None = None
+
+
+class Evidence(BaseModel):
+    """Trust-layer metadata for one answer: what grounded it, and how much of
+    it is a model self-report vs. a deterministic fact about the query that
+    ran. `semantic_definitions`/`date_range`/`filters_applied` are what the
+    agent reports it used; `data_freshness`/`records_used` are computed
+    server-side from the actual query results, not model-asserted, so they
+    can't be hallucinated."""
+
+    semantic_definitions: list[str] = []
+    date_range: DateRange | None = None
+    filters_applied: list[str] = []
+    data_sources: list[str] = []  # DB tables the backing SQL actually queried (parsed, not asserted)
+    data_freshness: str | None = None  # ISO timestamp: when the backing query ran
+    records_used: int | None = None  # total rows returned by the SQL that backs this answer
+
+
 class ChatResponse(BaseModel):
     answer: str
     kpis: list[Kpi] = []
@@ -70,7 +91,8 @@ class ChatResponse(BaseModel):
     table: Table | None = None
     actions: list[str] = []
     sql_used: str | None = None
-    confidence: str | None = None
+    confidence: Literal["high", "medium", "low"] | None = None
+    evidence: Evidence | None = None
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
     conversation_id: str | None = None
@@ -111,6 +133,11 @@ class SchemaResponse(BaseModel):
     client_id: str
     tables: list[SchemaTable] = []
     relationships: list[dict[str, Any]] = []
+
+
+class PopularQuestion(BaseModel):
+    question: str
+    times_asked: int
 
 
 class Health(BaseModel):
