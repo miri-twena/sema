@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, X } from "lucide-react";
 import { useChat } from "../hooks/useChat";
 import { ChatInput } from "./ChatInput";
 import { TurnView } from "./TurnView";
@@ -18,6 +18,7 @@ export interface DrillContext {
 const STARTERS = ["Why did this change?", "Break this down by segment.", "What should I do about it?"];
 
 const ANIM_MS = 220;
+const EXPANDED_KEY = "sema.drill.expanded";
 
 // A slide-in sub-chat scoped to one widget / action. Its conversation lives in
 // its own useChat instance (no persistence), so it never mixes into the main
@@ -47,6 +48,30 @@ export function DrillChat({
     window.setTimeout(onClose, ANIM_MS);
   }, [onClose]);
 
+  // Expand/collapse width, remembered across drill-downs. Read lazily so a
+  // remembered "expanded" panel opens at full width immediately, no flash.
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return localStorage.getItem(EXPANDED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_KEY, String(expanded));
+    } catch {
+      // Storage disabled (e.g. private browsing) -- the toggle still works,
+      // it just won't be remembered next time.
+    }
+  }, [expanded]);
+
+  // The width transition is applied only after mount, so an initial expanded
+  // state (from localStorage) renders at full width immediately instead of
+  // animating in alongside the slide-in keyframe.
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => setHasMounted(true), []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [chat.turns, chat.loading]);
@@ -66,7 +91,9 @@ export function DrillChat({
         onClick={requestClose}
       />
       <aside
-        className={`fixed top-0 right-0 h-full w-[440px] max-w-[92vw] bg-bg border-l border-line shadow-pop z-50 flex flex-col ${
+        className={`fixed top-0 right-0 h-full ${expanded ? "w-[75vw] xl:w-[960px]" : "w-[440px]"} max-w-[92vw] bg-bg border-l border-line shadow-pop z-50 flex flex-col ${
+          hasMounted ? "transition-[width] duration-200" : ""
+        } ${
           closing ? "animate-[sema-slide-out-right_0.2s_ease-in_forwards]" : "animate-[sema-slide-in-right_0.2s_ease-out]"
         }`}
       >
@@ -75,13 +102,23 @@ export function DrillChat({
             <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">Drill-down</div>
             <div className="text-sm font-semibold text-ink truncate">{widget.title}</div>
           </div>
-          <button
-            onClick={requestClose}
-            aria-label="Close drill-down"
-            className="shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink flex items-center justify-center transition"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-label={expanded ? "Collapse panel" : "Expand panel"}
+              title={expanded ? "Collapse panel" : "Expand panel"}
+              className="hidden sm:flex shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink items-center justify-center transition"
+            >
+              {expanded ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+            </button>
+            <button
+              onClick={requestClose}
+              aria-label="Close drill-down"
+              className="shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink flex items-center justify-center transition"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 overflow-auto sema-scroll px-5 py-4">
