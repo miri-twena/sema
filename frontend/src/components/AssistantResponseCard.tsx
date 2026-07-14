@@ -8,7 +8,7 @@ import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
 import type { DrillContext } from "./DrillChat";
-import { ConfidenceBadge, EvidencePanel } from "./EvidencePanel";
+import { ConfidenceBadge, EvidencePanel, PeriodBanner } from "./EvidencePanel";
 
 // Recharts is heavy (~half the bundle); load it only when an answer has a chart.
 const ChartRenderer = lazy(() => import("./ChartRenderer").then((m) => ({ default: m.ChartRenderer })));
@@ -41,24 +41,26 @@ export function AssistantResponseCard({
           <ConfidenceBadge confidence={response.confidence} />
         </div>
 
+        <PeriodBanner dateRange={response.evidence?.date_range} />
+
         <div className="sema-prose text-ink text-[0.94rem]">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{response.answer}</ReactMarkdown>
         </div>
 
         {response.kpis.length > 0 && (
           <div className="mt-3">
-            <KpiCards kpis={response.kpis} onDrill={onDrill} />
+            <KpiCards kpis={response.kpis} dir={dir} onDrill={onDrill} />
           </div>
         )}
 
         {response.chart && (
           <Suspense fallback={<div className="mt-3 h-[280px] rounded-xl bg-surfaceAlt animate-pulse" />}>
-            <ChartRenderer chart={response.chart} onDrill={onDrill} />
+            <ChartRenderer chart={response.chart} dir={dir} onDrill={onDrill} />
           </Suspense>
         )}
 
         {response.table && <DataTable table={response.table} />}
-        {response.actions.length > 0 && <RecommendedActions actions={response.actions} onDrill={onDrill} />}
+        {response.actions.length > 0 && <RecommendedActions actions={response.actions} dir={dir} onDrill={onDrill} />}
 
         {response.sql_used && (
           <details className="mt-4">

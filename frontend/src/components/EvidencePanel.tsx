@@ -1,5 +1,5 @@
-import { ShieldCheck } from "lucide-react";
-import type { Evidence } from "../lib/api";
+import { CalendarDays, ShieldCheck } from "lucide-react";
+import type { DateRange, Evidence } from "../lib/api";
 
 const CONFIDENCE_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   high: { bg: "#EAFBF4", fg: "#1B7A5E", label: "High confidence" },
@@ -19,6 +19,25 @@ export function ConfidenceBadge({ confidence }: { confidence: string | null }) {
     >
       {style.label}
     </span>
+  );
+}
+
+/** Structural (not prose) period indicator, shown above the answer text
+ * whenever the model reported a date_range -- deterministic positioning and
+ * formatting beats relying on the model to remember to state it in prose.
+ * Renders nothing when the question wasn't about a specific period (the
+ * model is instructed to omit date_range in that case). */
+export function PeriodBanner({ dateRange }: { dateRange: DateRange | null | undefined }) {
+  if (!dateRange || (!dateRange.start && !dateRange.end)) return null;
+  const label =
+    dateRange.start && dateRange.end && dateRange.start !== dateRange.end
+      ? `${dateRange.start} – ${dateRange.end}`
+      : dateRange.start || dateRange.end;
+  return (
+    <div className="flex items-center gap-1.5 mb-2 text-[0.8rem] font-medium text-primary-dark">
+      <CalendarDays size={14} className="shrink-0" />
+      <span>Period: {label}</span>
+    </div>
   );
 }
 
@@ -42,15 +61,10 @@ function formatFreshness(iso: string): string {
  * to show (e.g. a pure-prose answer that ran no query). */
 export function EvidencePanel({ evidence }: { evidence: Evidence | null | undefined }) {
   if (!evidence) return null;
-  const { semantic_definitions, date_range, filters_applied, data_sources, data_freshness, records_used } = evidence;
+  const { semantic_definitions, date_range, filters_applied, data_sources, data_freshness } = evidence;
   const hasDateRange = date_range && (date_range.start || date_range.end);
   const hasAnything =
-    semantic_definitions.length > 0 ||
-    data_sources.length > 0 ||
-    hasDateRange ||
-    filters_applied.length > 0 ||
-    data_freshness ||
-    records_used != null;
+    semantic_definitions.length > 0 || data_sources.length > 0 || hasDateRange || filters_applied.length > 0 || data_freshness;
   if (!hasAnything) return null;
 
   return (
@@ -69,7 +83,6 @@ export function EvidencePanel({ evidence }: { evidence: Evidence | null | undefi
           </Row>
         )}
         {filters_applied.length > 0 && <Row label="Filters">{filters_applied.join("; ")}</Row>}
-        {records_used != null && <Row label="Records used">{records_used.toLocaleString()}</Row>}
         {data_freshness && <Row label="As of">{formatFreshness(data_freshness)}</Row>}
       </div>
     </details>

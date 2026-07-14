@@ -3,7 +3,15 @@ import type { DrillContext } from "./DrillChat";
 import { formatValue } from "../lib/format";
 import { KPI_TINTS } from "../lib/tokens";
 
-export function KpiCards({ kpis, onDrill }: { kpis: Kpi[]; onDrill?: (ctx: DrillContext) => void }) {
+export function KpiCards({
+  kpis,
+  dir,
+  onDrill,
+}: {
+  kpis: Kpi[];
+  dir?: "rtl" | "ltr";
+  onDrill?: (ctx: DrillContext) => void;
+}) {
   if (!kpis?.length) return null;
   return (
     <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, minmax(0, 1fr))` }}>
@@ -21,6 +29,7 @@ export function KpiCards({ kpis, onDrill }: { kpis: Kpi[]; onDrill?: (ctx: Drill
               onDrill({
                 title: kpi.label,
                 contextBlock: `The user is asking about the KPI "${kpi.label}": current value ${valueText}${deltaText}. Answer only in the context of this metric.`,
+                dir,
               })
           : undefined;
 

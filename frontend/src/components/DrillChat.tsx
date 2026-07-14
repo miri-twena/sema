@@ -13,9 +13,17 @@ export interface DrillContext {
   title: string;
   contextBlock: string;
   initialInput?: string;
+  /** Direction of the ORIGINAL question that produced this widget (KPI/chart/
+   * action). Drives which language the drill panel's static UI (suggested
+   * follow-ups, labels) uses -- a Hebrew question should get a Hebrew
+   * follow-up panel, not just Hebrew-rendered answer text. */
+  dir?: "rtl" | "ltr";
 }
 
-const STARTERS = ["Why did this change?", "Break this down by segment.", "What should I do about it?"];
+const STARTERS: Record<"ltr" | "rtl", string[]> = {
+  ltr: ["Why did this change?", "Break this down by segment.", "What should I do about it?"],
+  rtl: ["למה זה השתנה?", "פרט/י לפי פלח.", "מה כדאי לעשות בנידון?"],
+};
 
 const ANIM_MS = 220;
 const EXPANDED_KEY = "sema.drill.expanded";
@@ -37,6 +45,7 @@ export function DrillChat({
     [widget.contextBlock],
   );
   const chat = useChat({ clientId, buildPrompt, persistKey: null });
+  const dir = widget.dir ?? "ltr";
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Exit animation: the panel is on-screen by default (robust -- if animation
@@ -123,17 +132,26 @@ export function DrillChat({
 
         <div ref={scrollRef} className="flex-1 overflow-auto sema-scroll px-5 py-4">
           {chat.turns.length === 0 && (
-            <div className="mt-6 text-center">
+            <div className="mt-6 text-center" dir={dir} style={{ textAlign: "center" }}>
               <div className="text-sm text-muted">
-                Ask a follow-up about <span className="font-medium text-ink">{widget.title}</span>.
+                {dir === "rtl" ? (
+                  <>
+                    שאל/י שאלת המשך לגבי <span className="font-medium text-ink">{widget.title}</span>.
+                  </>
+                ) : (
+                  <>
+                    Ask a follow-up about <span className="font-medium text-ink">{widget.title}</span>.
+                  </>
+                )}
               </div>
               {/* Recommendations arrive pre-filled in the input, so skip starters. */}
               {!widget.initialInput && (
                 <div className="mt-3 flex flex-col gap-1.5">
-                  {STARTERS.map((s) => (
+                  {STARTERS[dir].map((s) => (
                     <button
                       key={s}
                       onClick={() => chat.send(s)}
+                      dir={dir}
                       className="text-start text-[0.82rem] rounded-lg border border-lineSoft bg-primary/[0.06] text-primary-dark px-3 py-2 hover:bg-surface hover:border-primary transition"
                     >
                       {s}
@@ -155,7 +173,7 @@ export function DrillChat({
             onStop={chat.stop}
             loading={chat.loading}
             initialValue={widget.initialInput}
-            placeholder={`Ask about ${widget.title}...`}
+            placeholder={dir === "rtl" ? `שאל/י לגבי ${widget.title}...` : `Ask about ${widget.title}...`}
           />
         </div>
       </aside>

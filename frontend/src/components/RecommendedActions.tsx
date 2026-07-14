@@ -3,9 +3,11 @@ import type { DrillContext } from "./DrillChat";
 
 export function RecommendedActions({
   actions,
+  dir,
   onDrill,
 }: {
   actions: string[];
+  dir?: "rtl" | "ltr";
   onDrill?: (ctx: DrillContext) => void;
 }) {
   if (!actions?.length) return null;
@@ -20,6 +22,7 @@ export function RecommendedActions({
                   title: action.length > 48 ? action.slice(0, 48) + "…" : action,
                   contextBlock: `The user is asking about this recommended action: "${action}". Explain how to execute it, what results to expect, and what to measure.`,
                   initialInput: action,
+                  dir,
                 })
             : undefined;
 

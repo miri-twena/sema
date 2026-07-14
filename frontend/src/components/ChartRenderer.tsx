@@ -35,7 +35,15 @@ function pivot(rows: Row[], x: string, color: string, y: string) {
   return { data, series };
 }
 
-export function ChartRenderer({ chart, onDrill }: { chart: Chart; onDrill?: (ctx: DrillContext) => void }) {
+export function ChartRenderer({
+  chart,
+  dir,
+  onDrill,
+}: {
+  chart: Chart;
+  dir?: "rtl" | "ltr";
+  onDrill?: (ctx: DrillContext) => void;
+}) {
   const { kind, rows, x, y, color, names, values, y_format, title } = chart;
   if (!rows?.length) return null;
   const fmt = makeAxisTickFormatter(y_format);
@@ -119,6 +127,7 @@ export function ChartRenderer({ chart, onDrill }: { chart: Chart; onDrill?: (ctx
         `(a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}). ` +
         `Underlying data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}. ` +
         `Answer only in the context of this chart and its metric.`,
+      dir,
     });
 
   return (
