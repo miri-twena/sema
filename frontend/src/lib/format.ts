@@ -28,8 +28,19 @@ export function formatValue(value: number | string, fmt: string): string {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
 
+/** Parse a date/month column value as UTC midnight, regardless of local
+ * timezone. The backend serializes these as e.g. "2026-01-01T00:00:00.000"
+ * (pandas Timestamps have no timezone info) -- `new Date(...)` on a
+ * date-TIME string with no "Z"/offset is parsed as LOCAL time per spec, so
+ * reading it back with getUTCDate() etc. shifts the displayed date by a day
+ * in any positive-UTC-offset timezone. Truncating to the YYYY-MM-DD prefix
+ * sidesteps this: a date-ONLY string IS guaranteed to parse as UTC midnight. */
+function parseIsoDateUTC(v: string): Date {
+  return new Date(v.slice(0, 10));
+}
+
 function isoToLabel(v: string): string {
-  const d = new Date(v);
+  const d = parseIsoDateUTC(v);
   if (isNaN(d.getTime())) return v;
   // Month buckets (day === 1) read better as "Jun 2025"; otherwise full date.
   const opts: Intl.DateTimeFormatOptions =
@@ -51,7 +62,7 @@ export function formatCell(v: unknown): string {
 /** Chart x-axis tick: ISO date -> "Jul 25", else pass through. */
 export function formatX(v: unknown): string {
   if (typeof v === "string" && ISO_DATE.test(v)) {
-    const d = new Date(v);
+    const d = parseIsoDateUTC(v);
     if (!isNaN(d.getTime()))
       return d.toLocaleDateString("en", { month: "short", year: "2-digit", timeZone: "UTC" });
   }

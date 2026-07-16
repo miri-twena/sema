@@ -35,6 +35,7 @@ def get_response(
     history: list[dict] | None = None,
     request_id: str | None = None,
     on_progress=None,
+    internal_context: str | None = None,
 ) -> dict:
     """Return the response dict for a question (agent first, router fallback).
 
@@ -42,11 +43,19 @@ def get_response(
     follow-ups; it's only used by the agent. The rule-based fallback answers
     each known question standalone, so it ignores history and `on_progress`
     (it's instant -- no meaningful progress to report). `request_id`
-    correlates this call with the API request's log lines.
+    correlates this call with the API request's log lines. `internal_context`
+    is SERVER-built drill-down framing (never client free text) -- see
+    agent.run.
     """
     if agent.api_key_configured():
         try:
-            return agent.run(question, history=history, request_id=request_id, on_progress=on_progress)
+            return agent.run(
+                question,
+                history=history,
+                request_id=request_id,
+                on_progress=on_progress,
+                internal_context=internal_context,
+            )
         except Exception:
             # Don't swallow silently: record the traceback before falling back
             # to the rule-based router, so agent failures are diagnosable.

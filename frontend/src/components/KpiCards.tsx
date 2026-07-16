@@ -27,8 +27,9 @@ export function KpiCards({
         const drill = onDrill
           ? () =>
               onDrill({
+                kind: "kpi",
                 title: kpi.label,
-                contextBlock: `The user is asking about the KPI "${kpi.label}": current value ${valueText}${deltaText}. Answer only in the context of this metric.`,
+                detail: `current value ${valueText}${deltaText}`,
                 dir,
               })
           : undefined;

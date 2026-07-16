@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronsLeft, ChevronsRight, X } from "lucide-react";
 import { useChat } from "../hooks/useChat";
 import { ChatInput } from "./ChatInput";
 import { TurnView } from "./TurnView";
 
 // The focused context passed when a widget (KPI / chart) or a recommended
-// action is clicked. `title` is the display name; `contextBlock` is the
-// pre-seeded instruction sent to the agent so it scopes every answer.
-// `initialInput` (recommendations) pre-fills the input instead of showing
-// generic starters.
+// action is clicked. Structured DATA fields only (kind/title/detail) -- the
+// SERVER builds the prompt framing from them; the client never assembles
+// context text itself (that was a prompt-injection surface). `initialInput`
+// (recommendations) pre-fills the input instead of showing generic starters.
 export interface DrillContext {
+  kind: "kpi" | "chart" | "table" | "action";
   title: string;
-  contextBlock: string;
+  /** Widget data summary (value text, chart axes + data preview, action text). */
+  detail: string;
   initialInput?: string;
   /** Direction of the ORIGINAL question that produced this widget (KPI/chart/
    * action). Drives which language the drill panel's static UI (suggested
@@ -40,11 +42,11 @@ export function DrillChat({
   clientId: string;
   onClose: () => void;
 }) {
-  const buildPrompt = useCallback(
-    (q: string) => `${widget.contextBlock}\n\nUser question: ${q}`,
-    [widget.contextBlock],
+  const drillContext = useMemo(
+    () => ({ kind: widget.kind, title: widget.title, detail: widget.detail }),
+    [widget.kind, widget.title, widget.detail],
   );
-  const chat = useChat({ clientId, buildPrompt, persistKey: null });
+  const chat = useChat({ clientId, drillContext, persistKey: null });
   const dir = widget.dir ?? "ltr";
   const scrollRef = useRef<HTMLDivElement>(null);
 

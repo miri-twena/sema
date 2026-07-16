@@ -19,8 +19,9 @@ export function RecommendedActions({
           const open = onDrill
             ? () =>
                 onDrill({
+                  kind: "action",
                   title: action.length > 48 ? action.slice(0, 48) + "…" : action,
-                  contextBlock: `The user is asking about this recommended action: "${action}". Explain how to execute it, what results to expect, and what to measure.`,
+                  detail: action,
                   initialInput: action,
                   dir,
                 })

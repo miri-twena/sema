@@ -110,17 +110,22 @@ elif user_input:
     question = user_input
 
 if question:
-    # If a widget context is active, prefix it onto the question sent to the
-    # agent (so it focuses on that element), then clear it -- the next general
-    # question starts clean. The user still sees their original text in the UI.
-    agent_question = question
+    # If a widget context is active, pass it as SERVER-built internal context
+    # (the prompt envelope separates it from the user's words), then clear it
+    # -- the next general question starts clean. These prefixes are built by
+    # our own component code, never typed by the user.
+    internal_context = None
     if st.session_state.widget_context:
-        agent_question = f'{st.session_state.widget_context["agent_prefix"]}\n\n{question}'
+        internal_context = st.session_state.widget_context["agent_prefix"]
         st.session_state.widget_context = None
 
     with st.spinner("SEMA is analyzing..."):
         # Pass the prior conversation so the agent can handle follow-ups.
-        response = get_response(agent_question, history=st.session_state.agent_history)
+        response = get_response(
+            question,
+            history=st.session_state.agent_history,
+            internal_context=internal_context,
+        )
 
     # Decide direction once, from the question's language: a Hebrew question
     # makes both the question bubble and the whole answer render right-to-left.
@@ -129,9 +134,9 @@ if question:
     st.session_state.messages.append({"role": "assistant", "content": response, "rtl": rtl})
     st.session_state.history.append(question)
 
-    # Grow the agent's conversation memory: the (context-prefixed) question, and
-    # the answer's narrative text only (Claude reads prose, not UI KPI/chart JSON).
-    st.session_state.agent_history.append({"role": "user", "content": agent_question})
+    # Grow the agent's conversation memory: the question, and the answer's
+    # narrative text only (Claude reads prose, not UI KPI/chart JSON).
+    st.session_state.agent_history.append({"role": "user", "content": question})
     st.session_state.agent_history.append(
         {"role": "assistant", "content": response.get("insight_text", "")}
     )

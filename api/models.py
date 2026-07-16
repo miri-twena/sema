@@ -20,6 +20,17 @@ class Message(BaseModel):
     content: str
 
 
+class DrillContextRequest(BaseModel):
+    """Structured drill-down reference: WHICH widget the user clicked, as data
+    fields. The server builds the actual prompt framing from these (see
+    sema_core.agent.prompts.build_drill_context) -- free-text context blocks
+    from the client are never trusted or forwarded to the model as framing."""
+
+    kind: Literal["kpi", "chart", "table", "action"]
+    title: str = Field(max_length=200)
+    detail: str = Field(default="", max_length=2000)
+
+
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     # Legacy path: the client ships its own history. Cap matches the agent's
@@ -31,6 +42,8 @@ class ChatRequest(BaseModel):
     # one to reuse on follow-ups.
     conversation_id: str | None = None
     client_id: str | None = None  # which client's DB + semantic layer to use
+    # Set when the question comes from a widget drill-down panel.
+    drill_context: DrillContextRequest | None = None
 
 
 class Kpi(BaseModel):

@@ -26,7 +26,7 @@ def test_first_message_returns_a_conversation_id(monkeypatch):
 def test_followup_question_receives_prior_turn_as_history(monkeypatch):
     seen_histories = []
 
-    def fake_get_response(question, history=None, request_id=None, on_progress=None):
+    def fake_get_response(question, history=None, request_id=None, on_progress=None, **kw):
         seen_histories.append(history)
         return {"insight_text": f"answer to: {question}", "recommended_actions": []}
 
@@ -47,7 +47,7 @@ def test_followup_question_receives_prior_turn_as_history(monkeypatch):
 def test_conversation_id_wins_over_client_sent_history(monkeypatch):
     seen_histories = []
 
-    def fake_get_response(question, history=None, request_id=None, on_progress=None):
+    def fake_get_response(question, history=None, request_id=None, on_progress=None, **kw):
         seen_histories.append(history)
         return {"insight_text": "ok", "recommended_actions": []}
 

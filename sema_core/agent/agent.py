@@ -27,7 +27,7 @@ import json
 import os
 import time
 
-from sema_core.agent.prompts import SYSTEM_PROMPT
+from sema_core.agent.prompts import SYSTEM_PROMPT, build_user_message
 from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response
 from sema_core.agent.tools import TOOL_SCHEMAS, AgentTools
 from sema_core.client_registry import active_client_id
@@ -46,6 +46,22 @@ MODEL = settings.anthropic_model
 MAX_ITERATIONS = settings.max_iterations      # safety cap on tool-use rounds
 MAX_TOKENS = settings.max_tokens              # multi-turn conversations carry more context
 MAX_HISTORY_TURNS = settings.max_history_turns  # keep at most the last N turns
+
+# --- Prompt caching --------------------------------------------------------
+# The Anthropic prompt is rendered as tools -> system -> messages. The SYSTEM
+# prompt and the tool schemas (ALL_TOOLS) are byte-identical on every request,
+# so we wrap the system text in a content block with an ephemeral cache
+# breakpoint. A breakpoint on the system block caches everything before it too
+# -- i.e. the tool definitions AND the system prompt together. Every later call
+# (each agent-loop round, and every question within the 5-minute cache TTL)
+# then re-reads that large static prefix at ~0.1x input cost instead of
+# reprocessing it. This is a pure cost/latency optimization: cache_control does
+# not change the model's output. Dynamic content (history, the user's question,
+# SQL results, the fetched semantic layer) all live AFTER this breakpoint, in
+# `messages`, so nothing volatile is ever cached under this key.
+CACHED_SYSTEM = [
+    {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+]
 
 # The response dict shape the UI renders (same contract as insight_builder).
 NOT_CONFIGURED_MESSAGE = "Claude API key is not configured yet."
@@ -121,6 +137,7 @@ def run(
     client=None,
     request_id: str | None = None,
     on_progress=None,
+    internal_context: str | None = None,
 ) -> dict:
     """Answer a business question via the agent loop.
 
@@ -131,8 +148,14 @@ def run(
     this run's log line with the API request. `on_progress`, if given, is
     called with a short status string (e.g. "Running query 2") before each
     tool dispatch -- the streaming endpoint uses this to send SSE progress
-    events; the non-streaming caller simply doesn't pass it. Returns the
-    response dict the UI renders.
+    events; the non-streaming caller simply doesn't pass it.
+
+    `internal_context` is SERVER-built framing only (e.g. which widget a
+    drill-down targets) -- callers must never pass client-provided free text
+    here. It and the question are wrapped in the prompt envelope (see
+    prompts.build_user_message), which strips forged delimiters from the
+    question, so users can't fake a context block. Returns the response dict
+    the UI renders.
     """
     if on_progress is None:
         on_progress = lambda _msg: None  # no-op: identical code path either way
@@ -158,6 +181,8 @@ def run(
     started = time.perf_counter()
     input_tokens = 0
     output_tokens = 0
+    cache_read_tokens = 0  # tokens served from the prompt cache (~0.1x cost)
+    cache_write_tokens = 0  # tokens written to the cache (~1.25x cost, once)
     tool_calls = 0
     rounds = 0
     last_stop: str | None = None
@@ -177,6 +202,11 @@ def run(
             sql_statements=len(tools.results),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            # Prompt-cache effectiveness: cache_read should dominate input_tokens
+            # after the first round. If it's ~0 across rounds, a silent
+            # invalidator crept into the system prompt or tool list.
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
             stop_reason=last_stop,
         )
         return resp
@@ -188,9 +218,22 @@ def run(
     prior = list(history or [])
     if len(prior) > MAX_HISTORY_TURNS * 2:
         prior = prior[-(MAX_HISTORY_TURNS * 2):]
-    messages: list[dict] = prior + [{"role": "user", "content": question}]
+    messages: list[dict] = prior + [
+        {"role": "user", "content": build_user_message(question, internal_context)}
+    ]
 
     api_error = _api_error_class()
+
+    # Prompt caching, part 2 -- the growing conversation prefix. Within one
+    # question the agent loops several times, and each round re-sends the whole
+    # message history (including the large get_semantic_layer result) at full
+    # price. We mark the newest tool-result block with a cache breakpoint so the
+    # next round re-reads that prefix from cache, then clear the previous marker
+    # so we never exceed Anthropic's 4-breakpoints-per-request limit (this keeps
+    # exactly one system + one moving message breakpoint). Clearing the marker
+    # does not evict the already-written cache entry -- it lives for the TTL and
+    # the next round's breakpoint still reads through it.
+    prev_cache_block: dict | None = None
 
     for _ in range(MAX_ITERATIONS):
         rounds += 1
@@ -198,7 +241,7 @@ def run(
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=CACHED_SYSTEM,  # tools + system cached (see CACHED_SYSTEM)
                 tools=ALL_TOOLS,
                 messages=messages,
             )
@@ -222,6 +265,8 @@ def run(
         if usage is not None:
             input_tokens += getattr(usage, "input_tokens", 0) or 0
             output_tokens += getattr(usage, "output_tokens", 0) or 0
+            cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
 
         if response.stop_reason != "tool_use":
             # The model answered in prose without calling present_answer.
@@ -259,6 +304,13 @@ def run(
                         "content": json.dumps(result, default=str),
                     }
                 )
+        # Move the conversation-prefix cache breakpoint to this round's last
+        # tool result (drop it from the previous round's block first).
+        if tool_results:
+            if prev_cache_block is not None:
+                prev_cache_block.pop("cache_control", None)
+            tool_results[-1]["cache_control"] = {"type": "ephemeral"}
+            prev_cache_block = tool_results[-1]
         messages.append({"role": "user", "content": tool_results})
 
     # Ran out of iterations without a final answer.

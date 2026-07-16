@@ -30,7 +30,7 @@ def _events(raw: str) -> list[tuple[str, dict]]:
 
 
 def test_stream_emits_status_then_answer(monkeypatch):
-    def fake_get_response(question, history=None, request_id=None, on_progress=None):
+    def fake_get_response(question, history=None, request_id=None, on_progress=None, **kw):
         on_progress("Consulting the semantic layer")
         on_progress("Running query 1")
         return {"insight_text": "Revenue is up.", "recommended_actions": ["Do X"]}

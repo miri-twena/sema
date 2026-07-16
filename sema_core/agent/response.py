@@ -7,21 +7,29 @@ answer, which this module turns into the exact response dict the UI already
 renders (the same shape insight_builder produces). That's how an agent
 answer looks identical to a curated one -- chat.py can't tell them apart.
 
-Accuracy guarantee: KPI numbers are small values the model read from query
-previews, but CHARTS and TABLES are bound to real query results by index
-(`result_index` into AgentTools.results) -- the model never re-types row
-data, so a chart can't drift from the SQL that produced it.
+Accuracy guarantee: CHARTS and TABLES are bound to real query results by
+index (`result_index` into AgentTools.results), and KPIs may bind a
+(result_index, column, row) reference the same way -- when bound, the value
+shown is read from the actual query result and the model-typed value is only
+a logged fallback. The model never re-types row data, so what the user sees
+can't drift from the SQL that produced it.
 
 No dependency on the Claude API key.
 """
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pandas as pd
 import sqlglot
 from sqlglot import expressions as exp
+
+from sema_core.obs import get_logger, log_event
+
+logger = get_logger("agent")
 
 # The "menu entry" for the finishing tool. Added to the tool list in agent.py.
 PRESENT_ANSWER_TOOL = {
@@ -52,6 +60,22 @@ PRESENT_ANSWER_TOOL = {
                         "format": {
                             "type": "string",
                             "enum": ["currency", "percent", "number", "ratio", "text"],
+                        },
+                        "result_index": {
+                            "type": "integer",
+                            "description": "When this KPI's value comes from a "
+                            "run_sql result, the 0-based index of that run_sql "
+                            "call. The UI then reads the EXACT value from the "
+                            "query result (with `column` and `row`) instead of "
+                            "your typed `value` -- always bind when possible.",
+                        },
+                        "column": {
+                            "type": "string",
+                            "description": "Column in that result holding the value.",
+                        },
+                        "row": {
+                            "type": "integer",
+                            "description": "0-based row in that result (default 0).",
                         },
                         "delta": {
                             "type": "number",
@@ -242,12 +266,74 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
     }
 
 
-def _clean_kpi(raw: dict) -> dict:
+def _coerce_scalar(v):
+    """DataFrame cell -> plain Python scalar (numpy ints/floats, Decimals) so
+    the API layer can JSON-encode it like any model-typed value."""
+    if hasattr(v, "item"):  # numpy scalar
+        v = v.item()
+    if isinstance(v, Decimal):
+        v = float(v)
+    return v
+
+
+_UNBOUND = object()  # sentinel: binding absent or unresolvable
+
+
+def _bound_kpi_value(raw: dict, tools):
+    """Resolve a KPI's (result_index, column, row) binding against the actual
+    run_sql results. Returns _UNBOUND when the KPI has no binding or the
+    reference doesn't resolve (bad index/column/row)."""
+    if "result_index" not in raw or not raw.get("column"):
+        return _UNBOUND
+    df = _df_at(tools, raw["result_index"])
+    if df is None or raw["column"] not in df.columns:
+        return _UNBOUND
+    try:
+        row = int(raw.get("row", 0))
+    except (TypeError, ValueError):
+        return _UNBOUND
+    if not 0 <= row < len(df):
+        return _UNBOUND
+    return _coerce_scalar(df[raw["column"]].iloc[row])
+
+
+def _values_differ(model_value, sql_value) -> bool:
+    """True when the model-typed value meaningfully differs from the SQL one.
+    Numeric comparison uses a 1% relative tolerance so ordinary model rounding
+    (9.07 -> 9.1) doesn't spam the mismatch log; real transcription errors do."""
+    try:
+        a, b = float(model_value), float(sql_value)
+    except (TypeError, ValueError):
+        return str(model_value) != str(sql_value)
+    return not math.isclose(a, b, rel_tol=0.01, abs_tol=1e-9)
+
+
+def _clean_kpi(raw: dict, tools) -> dict:
     kpi = {
         "label": raw.get("label", ""),
         "value": raw.get("value", ""),
         "format": raw.get("format", "text"),
     }
+
+    # KPI data binding: when the model bound this KPI to a run_sql result,
+    # the value shown to the user is read from the ACTUAL query result --
+    # the model-typed `value` is only a fallback for unbound KPIs. A model
+    # transcription error therefore can't reach the screen; it's logged.
+    sql_value = _bound_kpi_value(raw, tools)
+    if sql_value is not _UNBOUND:
+        if _values_differ(kpi["value"], sql_value):
+            log_event(
+                logger,
+                "kpi_value_mismatch",
+                label=kpi["label"],
+                model_value=kpi["value"],
+                sql_value=sql_value,
+                result_index=raw.get("result_index"),
+                column=raw.get("column"),
+                row=raw.get("row", 0),
+            )
+        kpi["value"] = sql_value
+
     if "delta" in raw and raw["delta"] is not None:
         kpi["delta"] = raw["delta"]
         kpi["delta_label"] = raw.get("delta_label", "")
@@ -259,7 +345,7 @@ def build_response(tool_input: dict, tools) -> dict:
     resp = _empty_response()
     resp["insight_text"] = tool_input.get("insight_text", "")
     resp["recommended_actions"] = list(tool_input.get("recommended_actions", []))
-    resp["kpis"] = [_clean_kpi(k) for k in tool_input.get("kpis", [])]
+    resp["kpis"] = [_clean_kpi(k, tools) for k in tool_input.get("kpis", [])]
 
     chart = tool_input.get("chart")
     if isinstance(chart, dict) and "result_index" in chart:

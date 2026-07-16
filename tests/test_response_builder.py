@@ -75,6 +75,61 @@ def test_table_bound_and_sql_used_joined():
     assert resp["sql_used"] == "SELECT 0;\n\nSELECT 1"
 
 
+# --- KPI data binding ---------------------------------------------------------
+def _kpi_input(**kpi) -> dict:
+    return {"insight_text": "t", "recommended_actions": [], "kpis": [{"label": "Rev", "format": "currency", **kpi}]}
+
+
+def test_bound_kpi_reads_value_from_sql_result():
+    df = pd.DataFrame({"revenue": [824068.05, 979975.44]})
+    tools = FakeTools([df])
+    resp = build_response(_kpi_input(value=999999, result_index=0, column="revenue", row=1), tools)
+    assert resp["kpis"][0]["value"] == 979975.44  # SQL value wins over the model's 999999
+
+
+def test_bound_kpi_mismatch_is_logged(caplog):
+    import logging
+
+    df = pd.DataFrame({"revenue": [824068.05]})
+    with caplog.at_level(logging.INFO, logger="sema.agent"):
+        build_response(_kpi_input(value=999999, result_index=0, column="revenue"), FakeTools([df]))
+    assert any("kpi_value_mismatch" in r.message for r in caplog.records)
+
+
+def test_bound_kpi_close_value_not_logged(caplog):
+    import logging
+
+    df = pd.DataFrame({"rate": [9.07]})
+    with caplog.at_level(logging.INFO, logger="sema.agent"):
+        resp = build_response(_kpi_input(value=9.1, result_index=0, column="rate"), FakeTools([df]))
+    # Ordinary model rounding: SQL value still wins, but no mismatch noise.
+    assert resp["kpis"][0]["value"] == 9.07
+    assert not any("kpi_value_mismatch" in r.message for r in caplog.records)
+
+
+def test_unresolvable_binding_falls_back_to_model_value():
+    df = pd.DataFrame({"revenue": [1.0]})
+    tools = FakeTools([df])
+    for bad in (
+        {"result_index": 99, "column": "revenue"},  # index out of range
+        {"result_index": 0, "column": "nope"},  # unknown column
+        {"result_index": 0, "column": "revenue", "row": 5},  # row out of range
+    ):
+        resp = build_response(_kpi_input(value=42, **bad), tools)
+        assert resp["kpis"][0]["value"] == 42
+
+
+def test_unbound_kpi_unchanged():
+    resp = build_response(_kpi_input(value=52.3), FakeTools([]))
+    assert resp["kpis"][0]["value"] == 52.3
+
+
+def test_bound_kpi_numpy_value_coerced_to_python():
+    df = pd.DataFrame({"orders": [1191]})  # int64 column
+    resp = build_response(_kpi_input(value=1191, result_index=0, column="orders"), FakeTools([df]))
+    assert type(resp["kpis"][0]["value"]) is int  # not numpy.int64 -- JSON-safe
+
+
 # --- trust layer: confidence + evidence -------------------------------------
 def test_confidence_and_evidence_pass_through(monkeypatch):
     tools = FakeTools([_df(3)])

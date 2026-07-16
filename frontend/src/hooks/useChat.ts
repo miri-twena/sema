@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ChatResponse, type Message } from "../lib/api";
+import { api, type ChatResponse, type DrillContextPayload, type Message } from "../lib/api";
 import { isRtl } from "../lib/rtl";
 
 export interface ChatTurn {
@@ -17,8 +17,10 @@ const PHASE_AT_MS = [1500, 5000, 11000];
 
 interface UseChatOptions {
   clientId: string;
-  /** Transform the question before sending (drill-down prefixes widget context). */
-  buildPrompt?: (question: string) => string;
+  /** Structured widget reference sent with every question from a drill-down
+   * panel. The SERVER builds the prompt framing from it -- the client never
+   * concatenates context text into the question (prompt-injection surface). */
+  drillContext?: DrillContextPayload;
   /** localStorage key to persist the transcript across refreshes; null disables. */
   persistKey?: string | null;
 }
@@ -54,7 +56,7 @@ function errorResponse(e: unknown): ChatResponse {
   };
 }
 
-export function useChat({ clientId, buildPrompt, persistKey }: UseChatOptions) {
+export function useChat({ clientId, drillContext, persistKey }: UseChatOptions) {
   const initial = useRef(load(persistKey));
   const [turns, setTurns] = useState<ChatTurn[]>(initial.current.turns);
   const [history, setHistory] = useState<Message[]>(initial.current.history);
@@ -103,9 +105,8 @@ export function useChat({ clientId, buildPrompt, persistKey }: UseChatOptions) {
       );
       const controller = new AbortController();
       abortRef.current = controller;
-      const prompt = buildPrompt ? buildPrompt(question) : question;
       try {
-        const resp = await api.chat(prompt, history, clientId, controller.signal);
+        const resp = await api.chat(question, history, clientId, controller.signal, drillContext);
         replaceLast({ question, response: resp, dir });
         if (resp.status === "ok") {
           setHistory((h) => [...h, { role: "user", content: question }, { role: "assistant", content: resp.answer }]);
@@ -119,9 +120,9 @@ export function useChat({ clientId, buildPrompt, persistKey }: UseChatOptions) {
         setLoading(false);
       }
     },
-    // history/clientId/buildPrompt captured per call; identity kept stable enough
+    // history/clientId/drillContext captured per call; identity kept stable enough
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, clientId],
+    [history, clientId, drillContext],
   );
 
   const send = useCallback(

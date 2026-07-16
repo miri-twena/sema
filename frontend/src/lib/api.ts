@@ -8,6 +8,15 @@ export interface Message {
   content: string;
 }
 
+/** Structured drill-down reference (mirrors DrillContextRequest). The server
+ * builds the prompt framing from these fields -- the client never sends
+ * free-text context blocks. */
+export interface DrillContextPayload {
+  kind: "kpi" | "chart" | "table" | "action";
+  title: string;
+  detail: string;
+}
+
 export interface Kpi {
   label: string;
   value: number | string;
@@ -118,6 +127,16 @@ export const api = {
   alerts: (clientId: string) => getJSON<Alert[]>(`/api/alerts?client_id=${encodeURIComponent(clientId)}`),
   popularQuestions: (clientId: string) =>
     getJSON<PopularQuestion[]>(`/api/popular-questions?client_id=${encodeURIComponent(clientId)}`),
-  chat: (question: string, history: Message[], clientId: string, signal?: AbortSignal) =>
-    postJSON<ChatResponse>("/api/chat", { question, history, client_id: clientId }, signal),
+  chat: (
+    question: string,
+    history: Message[],
+    clientId: string,
+    signal?: AbortSignal,
+    drillContext?: DrillContextPayload,
+  ) =>
+    postJSON<ChatResponse>(
+      "/api/chat",
+      { question, history, client_id: clientId, drill_context: drillContext ?? null },
+      signal,
+    ),
 };

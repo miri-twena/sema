@@ -27,6 +27,7 @@ from fastapi.responses import StreamingResponse
 # editable install (pip install -e ., see pyproject.toml) -- no sys.path hack.
 from sema_core import client_registry
 from sema_core.agent import agent
+from sema_core.agent.prompts import build_drill_context
 from sema_core import alerts_engine
 from sema_core.conversation_store import ConversationNotFoundError, SqliteConversationStore, truncate_by_tokens
 from sema_core.db import check_connection, run_query
@@ -122,6 +123,17 @@ def _resolve_conversation(cid: str, req: ChatRequest) -> tuple[str, list[dict]]:
     return conv_id, truncate_by_tokens(history, settings.history_token_budget)
 
 
+def _internal_context(req: ChatRequest) -> str | None:
+    """Server-side construction of the drill-down context block. The client
+    sends structured fields (kind/title/detail); the framing text is built
+    HERE, so no client-provided free text ever reaches the model as
+    instructions."""
+    if req.drill_context is None:
+        return None
+    dc = req.drill_context
+    return build_drill_context(dc.kind, dc.title, dc.detail)
+
+
 def _client_model(c: dict) -> Client:
     return Client(
         id=c["id"],
@@ -166,7 +178,12 @@ def chat(req: ChatRequest) -> ChatResponse:
     client_registry.set_active_client_override(cid)
     started = time.perf_counter()
     try:
-        resp = get_response(req.question, history=history, request_id=request_id)
+        resp = get_response(
+            req.question,
+            history=history,
+            request_id=request_id,
+            internal_context=_internal_context(req),
+        )
         out = to_chat_response(resp)
         out.conversation_id = conv_id
         # Persist this turn only on success -- a failed run leaves the
@@ -237,6 +254,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 history=history,
                 request_id=request_id,
                 on_progress=lambda msg: q.put(("status", {"message": msg})),
+                internal_context=_internal_context(req),
             )
             out = to_chat_response(resp)
             out.conversation_id = conv_id

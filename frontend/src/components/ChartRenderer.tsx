@@ -121,12 +121,11 @@ export function ChartRenderer({
 
   const drill = () =>
     onDrill?.({
+      kind: "chart",
       title: title || "Chart",
-      contextBlock:
-        `The user is asking about the chart "${title || "chart"}" ` +
-        `(a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}). ` +
-        `Underlying data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}. ` +
-        `Answer only in the context of this chart and its metric.`,
+      detail:
+        `a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}; ` +
+        `data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}`,
       dir,
     });
 
