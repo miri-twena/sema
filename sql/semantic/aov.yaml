@@ -47,4 +47,4 @@ alerts:
       , 1) AS mom_aov_change
       FROM ranked
       WHERE rn <= 2
-    message_template: "AOV ירד {value}% MoM"
+    message_template: "AOV dropped {value}% MoM"

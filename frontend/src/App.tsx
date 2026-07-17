@@ -1,11 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { api, type Client, type Alert, type PopularQuestion } from "./lib/api";
+import { api, type Client, type Alert, type Overview, type PopularQuestion } from "./lib/api";
 import { useChat } from "./hooks/useChat";
 import { useQuestionHistory } from "./hooks/useQuestionHistory";
 import { Sidebar } from "./components/Sidebar";
-import { AlertsPanel } from "./components/AlertsPanel";
 import { ChatInput } from "./components/ChatInput";
+import { HomeDashboard } from "./components/HomeDashboard";
 import { TurnView } from "./components/TurnView";
 import type { DrillContext } from "./components/DrillChat";
 
@@ -17,7 +17,13 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>("");
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [popularQuestions, setPopularQuestions] = useState<PopularQuestion[]>([]);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  // The user's chosen period, tagged with the client it belongs to -- so
+  // switching clients falls back to that client's default (its latest
+  // complete month) instead of carrying over a period it may not even have.
+  const [period, setPeriod] = useState<{ clientId: string; start: string; end: string } | null>(null);
   const [dbConnected, setDbConnected] = useState(true);
+  const [agentConfigured, setAgentConfigured] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
 
@@ -29,6 +35,7 @@ export default function App() {
     api.health()
       .then((h) => {
         setDbConnected(h.db_connected);
+        setAgentConfigured(h.agent_configured);
         setActiveId((cur) => cur || h.active_client);
       })
       .catch(() => setDbConnected(false));
@@ -45,6 +52,28 @@ export default function App() {
     api.alerts(activeId).then(setAlerts).catch(() => setAlerts([]));
     api.popularQuestions(activeId).then(setPopularQuestions).catch(() => setPopularQuestions([]));
   }, [activeId]);
+
+  // A period from a different client is ignored, so the server picks that
+  // client's own default instead.
+  const activePeriod = period && period.clientId === activeId ? period : null;
+
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    setOverview(null); // skeleton while this client's / period's KPIs load
+    api
+      .overview(activeId, activePeriod?.start, activePeriod?.end)
+      .then((o) => !cancelled && setOverview(o))
+      .catch(() => !cancelled && setOverview({ client_id: activeId, kpis: [], as_of: null, start: null, end: null, available_months: [] }));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, activePeriod]);
+
+  const onPeriodChange = useCallback(
+    (start: string, end: string) => setPeriod({ clientId: activeId, start, end }),
+    [activeId],
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -114,11 +143,18 @@ export default function App() {
             )}
 
             {empty && !chat.loading && (
-              <div className="text-center py-20">
-                <div className="inline-block w-14 h-14 rounded-2xl bg-gradient-to-br from-primary via-sky to-mint mb-4" />
-                <div className="text-lg font-semibold">Ask your business anything.</div>
-                <div className="text-sm text-muted mt-1">Pick a question from the sidebar, or type one below.</div>
-              </div>
+              <HomeDashboard
+                clientLabel={activeClient?.label ?? ""}
+                suggested={activeClient?.suggested_questions ?? []}
+                alerts={alerts}
+                overview={overview}
+                dbConnected={dbConnected}
+                agentConfigured={agentConfigured}
+                onPick={sendQuestion}
+                onDrill={onDrill}
+                onInvestigate={onAlertClick}
+                onPeriodChange={onPeriodChange}
+              />
             )}
 
             {chat.turns.map((turn, i) => (
@@ -133,8 +169,6 @@ export default function App() {
           </div>
         </div>
       </main>
-
-      <AlertsPanel alerts={alerts} onAlertClick={onAlertClick} />
 
       {drill && (
         <Suspense fallback={null}>

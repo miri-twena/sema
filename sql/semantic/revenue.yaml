@@ -53,4 +53,4 @@ alerts:
       , 1) AS mom_pct_change
       FROM ranked
       WHERE rn <= 2
-    message_template: "Revenue ירד {value}% MoM — חריג מעל ל-8%"
+    message_template: "Revenue dropped {value}% MoM — beyond the 8% threshold"

@@ -111,6 +111,23 @@ class ChatResponse(BaseModel):
     conversation_id: str | None = None
 
 
+# --- home dashboard ----------------------------------------------------------
+class Overview(BaseModel):
+    """Headline KPIs for the home dashboard (computed from the saved report
+    library, not the agent -- fast enough to run on page load)."""
+
+    client_id: str
+    kpis: list[Kpi] = []
+    as_of: str | None = None  # ISO timestamp: when these numbers were computed
+    # The period the KPIs cover, as month keys ("2026-05"). Resolved by the
+    # server: omitting start/end on the request yields the latest COMPLETE month.
+    start: str | None = None
+    end: str | None = None
+    # Months a client may select -- complete months only, oldest first, so the
+    # picker can't offer a period that's still in progress.
+    available_months: list[str] = []
+
+
 # --- alerts / clients / schema / health ------------------------------------
 class Alert(BaseModel):
     id: str

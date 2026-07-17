@@ -59,7 +59,7 @@ alerts:
       WHERE last_order <= (
           SELECT MAX(order_date) FROM orders WHERE status = 'completed'
       ) - INTERVAL '90 days'
-    message_template: "{value} לקוחות ב-churn risk — מעל לסף 300"
+    message_template: "{value} customers at churn risk — above the 300 threshold"
 
   - id: churn_risk_high_value
     label: "VIP Churn Risk"
@@ -78,4 +78,4 @@ alerts:
           SELECT MAX(order_date) FROM orders WHERE status = 'completed'
       ) - INTERVAL '90 days'
         AND ltv > 500
-    message_template: "{value} לקוחות VIP ב-churn risk (LTV > $500)"
+    message_template: "{value} VIP customers at churn risk (LTV > $500)"

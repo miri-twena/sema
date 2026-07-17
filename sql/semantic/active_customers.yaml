@@ -40,4 +40,4 @@ alerts:
         AND order_date > (
             SELECT MAX(order_date) FROM orders WHERE status = 'completed'
         ) - INTERVAL '90 days'
-    message_template: "רק {value} לקוחות פעילים ב-90 יום האחרונים"
+    message_template: "Only {value} active customers in the last 90 days"

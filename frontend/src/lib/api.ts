@@ -104,6 +104,18 @@ export interface PopularQuestion {
   times_asked: number;
 }
 
+/** Headline KPIs for the home dashboard (mirrors api/models.py Overview).
+ * `start`/`end` are month keys ("2026-05") resolved by the server;
+ * `available_months` lists only months with complete data. */
+export interface Overview {
+  client_id: string;
+  kpis: Kpi[];
+  as_of: string | null;
+  start: string | null;
+  end: string | null;
+  available_months: string[];
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -127,6 +139,12 @@ export const api = {
   alerts: (clientId: string) => getJSON<Alert[]>(`/api/alerts?client_id=${encodeURIComponent(clientId)}`),
   popularQuestions: (clientId: string) =>
     getJSON<PopularQuestion[]>(`/api/popular-questions?client_id=${encodeURIComponent(clientId)}`),
+  overview: (clientId: string, start?: string, end?: string) => {
+    const params = new URLSearchParams({ client_id: clientId });
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    return getJSON<Overview>(`/api/overview?${params}`);
+  },
   chat: (
     question: string,
     history: Message[],

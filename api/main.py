@@ -18,6 +18,7 @@ import queue
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,7 @@ from sema_core import alerts_engine
 from sema_core.conversation_store import ConversationNotFoundError, SqliteConversationStore, truncate_by_tokens
 from sema_core.db import check_connection, run_query
 from sema_core.obs import get_logger, log_event, new_request_id
+from sema_core.overview import build_overview
 from sema_core.settings import settings
 from sema_core.wiring import get_response
 
@@ -42,6 +44,8 @@ from api.models import (
     Client,
     ClientChangeRequest,
     Health,
+    Kpi,
+    Overview,
     PopularQuestion,
     SchemaResponse,
 )
@@ -302,6 +306,38 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             yield _sse(event, payload)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/overview", response_model=Overview)
+def overview(
+    client_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> Overview:
+    """Headline KPIs for the home dashboard. Computed from the saved report
+    library (no agent call), so it's fast enough to run on page load.
+
+    `start`/`end` are month keys ("2026-05"); omit both for the default (the
+    latest complete month). An unknown or inverted range resolves back to the
+    default rather than erroring. KPIs that can't be computed for this client
+    are omitted, never an error.
+    """
+    cid = _resolve_client(client_id)
+    # The saved reports resolve the active client via the same ContextVar
+    # override the chat endpoints use, so caches stay keyed per tenant.
+    client_registry.set_active_client_override(cid)
+    try:
+        data = build_overview(start=start, end=end)
+    finally:
+        client_registry.set_active_client_override(None)
+    return Overview(
+        client_id=cid,
+        kpis=[Kpi(**k) for k in data["kpis"]],
+        as_of=datetime.now(timezone.utc).isoformat(),
+        start=data["start"],
+        end=data["end"],
+        available_months=data["available_months"],
+    )
 
 
 @app.get("/api/alerts", response_model=list[Alert])

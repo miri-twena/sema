@@ -43,6 +43,11 @@ def _run(filename: str) -> pd.DataFrame:
 
 
 @ttl_cache(ttl=300, vary_on=active_client_id)
+def get_data_bounds() -> pd.DataFrame:
+    return _run("data_bounds.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
 def get_revenue_by_month() -> pd.DataFrame:
     return _run("revenue_by_month.sql")
 
