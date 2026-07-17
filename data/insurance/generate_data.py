@@ -1,9 +1,10 @@
 """
 SEMA synthetic AUTO INSURANCE data generator.
 
-Creates a realistic ~2.5-year motor-insurance dataset and writes it to CSV
-files in data/insurance/output/, matching sql/insurance/schema.sql. It is the
-insurance equivalent of data/generate_data.py (ecommerce).
+Creates a realistic ~2.5-year motor-insurance dataset (2024-01-01 .. losses
+through 2026-06-30) and writes it to CSV files in data/insurance/output/,
+matching sql/insurance/schema.sql. It is the insurance equivalent of
+data/generate_data.py (ecommerce).
 
 Why generate data: no real policyholder data is used, and we can bake in
 *known* business patterns so we can later check whether SEMA's answers match
@@ -13,6 +14,13 @@ Ground-truth stories injected (see constants + the summary printed at the end):
   - Claims seasonality: winter (Dec-Feb) has higher claim frequency.
   - Loss-ratio SPIKE in Jan 2026, driven by a weather event in the North
     region (the insurance analogue of the ecommerce "March revenue dip").
+  - A SECOND, smaller event: a June 2026 heatwave in the South region
+    (Weather + Fire claims, and only on policies that cover own-vehicle
+    damage) -- deliberately a different region and a smaller magnitude than
+    January, so the two events are worth comparing.
+  - A June 2026 RATE ACTION: renewals from 2026-06-01 are written at +5%,
+    and the renewing cohort retains noticeably worse -- the price/retention
+    trade-off.
   - Young drivers (<25) have much higher claim frequency.
   - Comprehensive coverage is the least profitable (highest loss ratio);
     Liability-only is the most profitable.
@@ -48,11 +56,23 @@ N_POLICYHOLDERS = 5_000
 N_AGENTS = 40
 
 # ~2.5 years of history so annual policies have time to renew (retention),
-# ending the month before "today" in this project.
+# ending the last COMPLETE month before "today" in this project.
+#
+# END_DATE and TODAY do DIFFERENT jobs, and the difference matters:
+#   - END_DATE is the LOSS ceiling: no claim occurs after it, and exposure
+#     (earned time on risk) stops there. It is a full month-end on purpose --
+#     claims dated into a half-finished July would drag that month's loss
+#     ratio down and poison every month-over-month comparison the agent makes.
+#   - TODAY is the STATUS reference: which term is currently in force, which
+#     premium instalments have been billed, and which claims have had time to
+#     settle. Those are genuinely "as of now" facts, so they run to the real
+#     current date.
+# Both are explicit constants rather than date.today(): the ground truth in
+# the docstring above is verified against this exact window, so reproducibility
+# beats auto-freshness.
 START_DATE = date(2024, 1, 1)
-END_DATE = date(2026, 5, 31)
-# Reference "today" used to decide which term is currently in force / Active.
-TODAY = date(2026, 6, 16)
+END_DATE = date(2026, 6, 30)
+TODAY = date(2026, 7, 16)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 
@@ -110,6 +130,44 @@ WINTER_FREQ_MULT = 1.6
 EVENT_MONTH = date(2026, 1, 1)
 EVENT_REGION = "North"
 EVENT_EXTRA_WEATHER_LAMBDA = 0.45  # extra Weather claims (Poisson) per active North policy
+
+# --- Business story: June 2026 heatwave (the SECOND, smaller catastrophe) ---
+# A heatwave hits the South region in June 2026: extra Weather and Fire
+# claims for policies in force that month. Deliberately a different region
+# and a materially smaller event than the Jan-2026 storm, so "compare the
+# two events" is a real question with a real answer rather than a repeat.
+# Sizing: lambda 0.10 vs Jan's 0.45, and South carries no severity loading
+# (REGION_SEVERITY_MULT South 1.0 vs North 1.2) -- the Fire share raises the
+# per-claim cost, but total incurred still lands well under the Jan event.
+# The event only touches policies that actually COVER own-vehicle damage --
+# which is both physically correct and load-bearing for an existing story:
+#   - Liability covers damage you do to OTHERS, so a heatwave wrecking your
+#     own car produces no claim at all -> excluded.
+#   - TPFT is Third Party, FIRE & Theft: fire is covered, general weather is
+#     not -> Fire claims only.
+#   - Comprehensive covers both -> Weather or Fire.
+# Without this, the event lands per-POLICY and is coverage-blind, while
+# premium is concentrated in Comprehensive (61% of premium on 45% of
+# policies). TPFT would then absorb 30% of the event's claims on 26% of the
+# premium, its loss ratio would climb faster than Comprehensive's, and the
+# documented "Comprehensive is the least profitable tier" story would invert.
+# Verified: coverage-blind gave TPFT 84.6% vs Comprehensive 84.5% (inverted);
+# coverage-aware restores Comprehensive to the top of the table.
+HEATWAVE_MONTH = date(2026, 6, 1)
+HEATWAVE_REGION = "South"
+HEATWAVE_EXTRA_LAMBDA = 0.10  # extra claims (Poisson) per active, covered South policy
+HEATWAVE_COVERED_TYPES = {"Comprehensive", "TPFT"}
+HEATWAVE_CLAIM_TYPES = ["Weather", "Fire"]
+HEATWAVE_TYPE_WEIGHTS = [0.75, 0.25]  # Comprehensive only; TPFT gets Fire by definition
+
+# --- Business story: June 2026 rate action ---
+# A ~5% rate increase applies to renewals incepting from June 2026, and it
+# costs some retention: the renewing cohort whose term expires on/after that
+# date renews less often. Sets up the trade-off question -- "did the rate
+# increase help the loss ratio, and what did it cost us in retention?"
+RATE_ACTION_DATE = date(2026, 6, 1)
+RATE_ACTION_PREMIUM_FACTOR = 1.05    # +5% on renewal premiums from that date
+RATE_ACTION_RETENTION_DROP = 0.08    # renewal probability -8pp for terms expiring on/after it
 
 # Claim types and their baseline mix; severity is a lognormal around the mean.
 CLAIM_TYPES = ["Collision", "Third-Party Liability", "Glass", "Weather", "Theft", "Vandalism", "Fire"]
@@ -358,6 +416,10 @@ def generate_policies(
             # Renewals drift the rate a little.
             if business_type == "Renewal":
                 premium = round(premium * float(rng.uniform(0.98, 1.10)), 2)
+                # Rate action: renewals incepting from RATE_ACTION_DATE are
+                # written at +5% on top of the usual drift.
+                if current_start >= RATE_ACTION_DATE:
+                    premium = round(premium * RATE_ACTION_PREMIUM_FACTOR, 2)
 
             cancelled = False
             cancellation_date = None
@@ -375,12 +437,19 @@ def generate_policies(
                     cancellation_reason = rng.choice(["Non-payment", "Customer request", "Sold vehicle"])
             else:
                 # A term that has already fully ended: renew or lapse.
+                # Rate action: a term expiring on/after RATE_ACTION_DATE is
+                # quoted the higher renewal price, and some of those customers
+                # walk -- the retention cost of the increase.
+                effective_renewal_prob = renewal_prob
+                if end >= RATE_ACTION_DATE:
+                    effective_renewal_prob = max(renewal_prob - RATE_ACTION_RETENTION_DROP, 0.0)
+
                 if rng.random() < 0.04:
                     status = "Cancelled"
                     cancelled = True
                     cancellation_date = random_date_between(rng, current_start, end)
                     cancellation_reason = rng.choice(["Non-payment", "Customer request", "Sold vehicle"])
-                elif rng.random() < renewal_prob:
+                elif rng.random() < effective_renewal_prob:
                     status = "Renewed"
                     successor_coming = True
                 else:
@@ -487,8 +556,12 @@ def generate_premium_payments(rng: np.random.Generator, policies: pd.DataFrame) 
 # ---------------------------------------------------------------------------
 
 def _claim_date_in_term(rng, start: date, end: date) -> date:
-    """Pick a loss date in the term, weighted toward winter months."""
-    span = (min(end, TODAY) - start).days
+    """Pick a loss date in the term, weighted toward winter months.
+
+    Bounded by END_DATE (not TODAY): losses stop at the last complete month,
+    so no claim lands in a partial month.
+    """
+    span = (min(end, END_DATE) - start).days
     if span <= 0:
         return start
     # sample a handful of candidate dates and prefer winter ones
@@ -508,7 +581,9 @@ def generate_claims(rng: np.random.Generator, policies: pd.DataFrame) -> pd.Data
     for p in policies.itertuples():
         start = date.fromisoformat(p.start_date)
         end = date.fromisoformat(p.end_date)
-        active_end = min(end, TODAY)
+        # Exposure stops at END_DATE, not TODAY: time on risk in a partial
+        # month would earn claims into a month the dataset doesn't cover.
+        active_end = min(end, END_DATE)
         if active_end <= start:
             continue
         term_years = (active_end - start).days / 365.0
@@ -530,13 +605,33 @@ def generate_claims(rng: np.random.Generator, policies: pd.DataFrame) -> pd.Data
             p.hlp_region == EVENT_REGION
             and start <= EVENT_MONTH
             and end > EVENT_MONTH
-            and EVENT_MONTH <= TODAY
+            and EVENT_MONTH <= END_DATE
         ):
             event_claims = int(rng.poisson(EVENT_EXTRA_WEATHER_LAMBDA))
 
-        for k in range(n_claims + event_claims):
-            is_event = k >= n_claims
-            if is_event:
+        # June-2026 heatwave: the second, smaller event -- extra Weather/Fire
+        # claims for South policies in force that month.
+        heatwave_claims = 0
+        if (
+            p.hlp_region == HEATWAVE_REGION
+            and start <= HEATWAVE_MONTH
+            and end > HEATWAVE_MONTH
+            and HEATWAVE_MONTH <= END_DATE
+            and p.hlp_coverage in HEATWAVE_COVERED_TYPES
+        ):
+            heatwave_claims = int(rng.poisson(HEATWAVE_EXTRA_LAMBDA))
+
+        for k in range(n_claims + event_claims + heatwave_claims):
+            is_event = n_claims <= k < n_claims + event_claims
+            is_heatwave = k >= n_claims + event_claims
+            if is_heatwave:
+                # TPFT covers fire but not own-vehicle weather damage.
+                if p.hlp_coverage == "TPFT":
+                    claim_type = "Fire"
+                else:
+                    claim_type = rng.choice(HEATWAVE_CLAIM_TYPES, p=HEATWAVE_TYPE_WEIGHTS)
+                claim_date = date(2026, 6, int(rng.integers(1, 31)))  # June has 30 days
+            elif is_event:
                 claim_type = "Weather"
                 claim_date = date(2026, 1, int(rng.integers(1, 29)))
             else:
@@ -658,6 +753,8 @@ def main() -> None:
     print("\nBusiness stories injected:")
     print("  ✓ Claims seasonality (winter Dec-Feb higher frequency)")
     print("  ✓ Loss-ratio spike Jan 2026 (North region weather event)")
+    print("  ✓ Heatwave Jun 2026 (South region, Weather/Fire -- smaller than Jan)")
+    print("  ✓ Rate action Jun 2026 (+5% on renewals, retention dip in that cohort)")
     print("  ✓ Young drivers (<25) higher claim frequency")
     print("  ✓ Comprehensive least profitable; Liability most profitable")
     print("  ✓ Retention by channel (Tied Agent best, Direct-Online worst)")

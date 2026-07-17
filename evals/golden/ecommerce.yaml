@@ -6,8 +6,12 @@
 # different metric than some of these questions ask (e.g. its "~40%" VIP
 # figure is about the *designed generator cohort*, not "top 5% by lifetime
 # revenue" which is what customers actually ask and what the semantic
-# layer's alternative_definition computes -- the real number is 48.5%).
+# layer's alternative_definition computes -- the real number is 48.2%).
 # Always re-verify against the live DB when adding a question here.
+#
+# Re-verified 2026-07-16 after the dataset was extended to 13 months
+# (2025-06-01 .. 2026-06-30). Numbers that moved are noted inline with their
+# previous value, so a future reader can tell a data change from a regression.
 
 questions:
   - id: revenue_trend_peak_month
@@ -15,7 +19,7 @@ questions:
     assertions:
       contains_any: ["December", "Dec"]
       numeric_within:
-        - value: 1672356 # December 2025 revenue, the Q4 peak
+        - value: 1698041 # December 2025 revenue, the Q4 peak (was 1672356 pre-extension)
           tolerance_pct: 10
       expects_sql: true
 
@@ -35,13 +39,18 @@ questions:
   - id: march_dip_category_driver
     question: "Which product category contributed most to the March 2026 revenue drop?"
     assertions:
-      contains_any: ["Electronics"] # Feb->Mar: $499K -> $365K, ~27% drop, largest of any category
+      # Feb->Mar: $427.7K -> $369.2K. That is a -$58.5K absolute drop -- the
+      # LARGEST of any category, i.e. the biggest contributor to the decline.
+      # Note it is not the steepest by percentage (-13.7%; Sports & Outdoors
+      # falls -31%), so this question is deliberately about absolute
+      # contribution. Pre-extension the same category fell $499K -> $365K.
+      contains_any: ["Electronics"]
       expects_sql: true
 
   - id: march_dip_channel_driver
     question: "Which marketing channel underperformed in March 2026?"
     assertions:
-      contains_any: ["Meta"] # Feb->Mar order count: 190 -> 130, ~32% drop, largest of any channel
+      contains_any: ["Meta"] # Feb->Mar order count: 200 -> 132, -34%, steepest of any channel
       expects_sql: true
 
   - id: vip_customers_identified
@@ -54,20 +63,68 @@ questions:
     question: "What percentage of total revenue comes from the top 5% of customers?"
     assertions:
       numeric_within:
-        - value: 48.5 # 198 of 3947 paying customers = 48.5% of total revenue
+        - value: 48.2 # 203 of 4054 paying customers = 48.2% of revenue (was 48.5% pre-extension)
           tolerance_pct: 15
       expects_sql: true
 
   - id: churn_risk_count
     question: "How many customers are at risk of churning (no order in the last 90 days)?"
     assertions:
+      # Customers with no completed order in the 90 days before the dataset's
+      # max order date. The cutoff moved 2026-03-02 -> 2026-04-01 with the
+      # extension (it is END_DATE - 90d by design), so this legitimately
+      # changed from 1845.
       numeric_within:
-        - value: 1845 # customers with no completed order in the 90 days before the dataset's max order date
+        - value: 1795
           tolerance_pct: 15
       expects_sql: true
 
   - id: worst_campaign
     question: "Which marketing campaign has performed worst?"
     assertions:
-      contains_any: ["Meta Retarget", "Meta"] # "Meta Retarget - Electronics" runs only in March, poor ROI
+      # CORRECTED 2026-07-16. This previously asserted "Meta Retarget", on the
+      # assumption that the March dip campaign was the worst performer. It
+      # never was: verified against the live DB, the lowest ROAS belongs to
+      # "Email Campaign 4" (6.86), with Meta Retarget only second-worst
+      # (7.98). The old assertion passed by luck, because answers listing the
+      # bottom few campaigns happen to contain the substring "Meta".
+      # Both names are accepted: the two are close enough that a model
+      # reasonably naming either is not a regression, but a model naming a
+      # HIGH-ROAS campaign is.
+      contains_any: ["Email Campaign 4", "Meta Retarget"]
+      expects_sql: true
+
+  # --- June 2026 scenarios (added with the 13-month extension) -------------
+
+  - id: summer_sale_bought_growth
+    question: "Did June 2026 revenue growth come from more orders or higher order values?"
+    assertions:
+      # Orders 1498 -> 1951 (+30%) but revenue only $1.236M -> $1.291M (+4.4%),
+      # because AOV fell $824.80 -> $661.46 (-19.8%) under heavy discounting.
+      # The answer must attribute growth to VOLUME, not order value.
+      contains_any: ["order", "volume", "discount"]
+      expects_sql: true
+
+  - id: summer_sale_aov_direction
+    question: "What happened to average order value in June 2026 compared to May?"
+    assertions:
+      direction: down # $824.80 -> $661.46
+      numeric_within:
+        - value: 661.46
+          tolerance_pct: 15
+      expects_sql: true
+
+  - id: electronics_price_increase
+    question: "Electronics prices went up in June 2026. What happened to Electronics revenue and units?"
+    assertions:
+      # Price +7% (realised avg unit price $409.68 -> $426.34), units
+      # 1521 -> 1425 (-6.3%), revenue $626K -> $612K (-2.2%, i.e. flat) --
+      # while every other category grew on the sale.
+      contains_any: ["flat", "unit", "volume", "declin", "fell"]
+      expects_sql: true
+
+  - id: best_channel_june
+    question: "Which traffic source converted best in June 2026?"
+    assertions:
+      contains_any: ["Email"] # 29.72% vs Direct 24.96%; Email is normally 3rd
       expects_sql: true

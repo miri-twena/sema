@@ -1,9 +1,9 @@
 """
 SEMA synthetic ecommerce data generator.
 
-This script creates a realistic-looking 12-month ecommerce dataset and
-writes it to CSV files in data/output/. The CSVs are then loaded into
-PostgreSQL by data/load_data.py.
+This script creates a realistic-looking 13-month ecommerce dataset
+(2025-06-01 .. 2026-06-30) and writes it to CSV files in data/output/. The
+CSVs are then loaded into PostgreSQL by data/load_data.py.
 
 Why generate data instead of using a real dataset?
 - No real customer data is needed or used (privacy, simplicity).
@@ -47,11 +47,24 @@ SEED = 42  # fixed seed -> running this script always produces the same data
 
 N_CUSTOMERS = 5_000
 N_PRODUCTS = 100
-N_ORDERS = 20_000
+# Orders are split across months proportional to MONTH_SEASONALITY, so this
+# total is a *density* knob, not just a size knob: N_ORDERS / sum(weights) is
+# the orders-per-average-month. When the window grew from 12 to 13 months
+# (2026-06 added), keeping 20,000 here would have silently shrunk every
+# existing month by ~7.7% -- a contraction with no business story behind it.
+# 21,633 = 20,000 * 13.25/12.25 (the ratio of summed seasonality weights),
+# which holds the per-month volume of the original 12 months constant.
+# This is the SEASONALITY BASELINE, not the final row count: the June 2026
+# Summer Sale adds ~490 incremental orders on top (see SUMMER_SALE_*).
+N_ORDERS = 21_633
 
-# 12 months of history, ending the month before "today" in this project.
+# 13 months of history, ending the last COMPLETE month before "today" in this
+# project (today = 2026-07-16). Deliberately not date.today()-derived: the
+# documented ground truth below (and evals/golden/) is verified against this
+# exact window, so reproducibility beats auto-freshness. A partial month is
+# never generated -- it would poison every month-over-month comparison.
 START_DATE = date(2025, 6, 1)
-END_DATE = date(2026, 5, 31)
+END_DATE = date(2026, 6, 30)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 
@@ -161,6 +174,70 @@ PREMIUM_PRICE_QUANTILE = 0.60  # within a category, products at/above this price
 CHURN_RISK_FRACTION = 0.10
 CHURN_CUTOFF_DATE = END_DATE - timedelta(days=90)            # last 90 days = "inactive"
 CHURN_DECLINE_START = CHURN_CUTOFF_DATE - timedelta(days=60)  # gradual decline window
+
+# --- Business story: June 2026 "Summer Sale" -- bought growth ---
+# June 2026 revenue recovers from the spring level, but NOT healthily: the
+# lift is bought with a heavily discounted, heavily promoted sale.
+#   - order volume is boosted (+30%) for this month only
+#   - far more orders carry a discount (45% vs the 15% baseline) and the
+#     discounts are deeper (15-35% vs 5-20%) -> AOV falls ~9%
+#   - a "Summer Sale 2026" campaign carries a large spend for a mediocre
+#     ROAS -> "we grew, but we paid for it"
+# Deliberately NOT the worst campaign in the dataset (that stays Email
+# Campaign 2): the story here is "mediocre return on a big bet", not "this
+# campaign is a disaster".
+# Note this is a DATE-specific multiplier, not a MONTH_SEASONALITY change:
+# that dict is keyed by month NUMBER, so raising month 6 would also alter
+# June 2025 and break the existing documented ground truth.
+SUMMER_SALE_MONTH = date(2026, 6, 1)
+SUMMER_SALE_VOLUME_FACTOR = 1.30       # +30% orders vs a normal June
+SUMMER_SALE_DISCOUNT_PROB = 0.45       # vs 0.15 baseline
+SUMMER_SALE_DISCOUNT_RANGE = (0.15, 0.35)  # vs (0.05, 0.20) baseline
+SUMMER_SALE_CHANNEL = "Meta"
+# Spend is sized so the campaign lands MEDIOCRE (ROAS ~10-13: well under the
+# ~20-30 median, comfortably above the worst) rather than becoming the
+# worst campaign in the set -- "Email Campaign 2" keeps that title, and the
+# golden eval for "which campaign performed worst" depends on it.
+SUMMER_SALE_BUDGET = 10_000.00
+SUMMER_SALE_SPEND = 9_000.00
+
+# --- Business story: Electronics price increase (June 2026) ---
+# Electronics list prices rise 7% on June 1 2026, and demand responds: the
+# category's share of orders falls ~10%. Net effect is revenue roughly flat
+# (1.07 * 0.90 = 0.96) with AOV up and units down -- the classic "was the
+# price increase worth it?" question.
+# NOTE on measurement: there is no per-CATEGORY conversion rate in this
+# schema -- website_sessions has no category dimension, so conversion rate
+# only exists per traffic_source. The demand response is therefore modelled
+# as fewer Electronics orders/units (which the schema CAN express) rather
+# than as a category conversion rate.
+# Historical order_items keep the price they were sold at; products.unit_price
+# is bumped to the new list price at the end of the run (unit_cost is left
+# alone, so the margin widens -- part of the same story).
+PRICE_INCREASE_MONTH = date(2026, 6, 1)
+PRICE_INCREASE_CATEGORY = "Electronics"
+PRICE_INCREASE_FACTOR = 1.07        # +7% list price from June 1 2026
+# Relative category weight (elasticity). This has to be strong enough to
+# swim UPSTREAM against the Summer Sale: June carries +30% order volume, so
+# a mild factor would still leave Electronics units RISING and hide the whole
+# story. At 0.65 the category's units fall ~7% against May even with the sale
+# on, which -- with prices +7% -- lands revenue roughly flat while every other
+# category grows. That contrast ("everything else was discounted and grew;
+# Electronics got dearer and flatlined") is the story.
+# Like MARCH_DIP_CATEGORY_FACTOR, this only steers the order's FOCUS category
+# (70% of line items); the other 30% still draw from the base weights, so the
+# realised swing is milder than the constant looks.
+PRICE_INCREASE_DEMAND_FACTOR = 0.65
+
+# --- Business story: Email conversion lift (June 2026) ---
+# A new email flow goes live in June 2026: the same Email traffic converts
+# far better, making Email the best-converting channel that month (it is
+# normally third, behind Direct and Organic). Modelled by placing fewer
+# NON-converting Email sessions in June -- converting sessions follow orders,
+# so cutting the denominator is what raises the rate.
+EMAIL_LIFT_MONTH = date(2026, 6, 1)
+EMAIL_LIFT_SOURCE = "Email"
+EMAIL_LIFT_SESSION_FACTOR = 0.60  # relative weight of June for non-converting Email sessions
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +366,27 @@ def generate_campaigns(rng: np.random.Generator) -> pd.DataFrame:
             "end_date": dip_end.isoformat(),
             "budget": 12_000.00,
             "spend": 11_500.00,
+        }
+    )
+    campaign_id += 1
+
+    # The Summer Sale campaign: runs only during SUMMER_SALE_MONTH with a
+    # large spend. It DOES drive extra orders (see the volume factor in
+    # generate_orders_and_items) -- but they're deeply discounted, so the
+    # revenue it buys per dollar spent is unremarkable. This is the
+    # "we grew, but we bought the growth" story.
+    sale_end = date(
+        SUMMER_SALE_MONTH.year, SUMMER_SALE_MONTH.month + 1, 1
+    ) - timedelta(days=1)
+    rows.append(
+        {
+            "campaign_id": campaign_id,
+            "campaign_name": "Summer Sale 2026",
+            "channel": SUMMER_SALE_CHANNEL,
+            "start_date": SUMMER_SALE_MONTH.isoformat(),
+            "end_date": sale_end.isoformat(),
+            "budget": SUMMER_SALE_BUDGET,
+            "spend": SUMMER_SALE_SPEND,
         }
     )
 
@@ -439,8 +537,20 @@ def generate_orders_and_items(
     weights = np.array([MONTH_SEASONALITY[m.month] for m in months], dtype=float)
     weights = weights / weights.sum()
     orders_per_month = (weights * N_ORDERS).round().astype(int)
-    # Adjust rounding so the total is exactly N_ORDERS.
+    # Adjust rounding so the seasonality baseline totals exactly N_ORDERS.
+    # NOTE: this must happen BEFORE the Summer Sale boost below -- months[-1]
+    # IS the sale month, so applying it afterwards would subtract the boost
+    # straight back out.
     orders_per_month[-1] += N_ORDERS - orders_per_month.sum()
+    # Summer Sale: the promo drives INCREMENTAL order volume in June 2026 only
+    # -- extra demand, not demand borrowed from other months -- so the run
+    # writes slightly more than N_ORDERS rows. Applied here rather than via
+    # MONTH_SEASONALITY (keyed by month number, so it would also hit June 2025).
+    if SUMMER_SALE_MONTH in months:
+        sale_idx = months.index(SUMMER_SALE_MONTH)
+        orders_per_month[sale_idx] = int(
+            round(orders_per_month[sale_idx] * SUMMER_SALE_VOLUME_FACTOR)
+        )
 
     # Propensity -> sampling weight ("vip" customers get picked far more
     # often than even "high"-propensity customers -- this is the main lever
@@ -481,6 +591,10 @@ def generate_orders_and_items(
             order_date_only = order_dt.date()
 
             is_march_dip = month_start == MARCH_DIP_MONTH
+            is_summer_sale = month_start == SUMMER_SALE_MONTH
+            # Electronics list prices rise on PRICE_INCREASE_MONTH and stay
+            # up, so this is a ">=" test, not a single-month test.
+            price_increase_active = order_date_only >= PRICE_INCREASE_MONTH
 
             # --- pick a "focus category" for this order ---
             cat_weights = category_weights.copy()
@@ -489,6 +603,14 @@ def generate_orders_and_items(
                 # share of orders (-25% relative weight).
                 idx = category_names.index(MARCH_DIP_CATEGORY)
                 cat_weights[idx] *= MARCH_DIP_CATEGORY_FACTOR
+                cat_weights = cat_weights / cat_weights.sum()
+            if price_increase_active:
+                # Price increase: demand responds, so Electronics' share of
+                # orders falls (the schema has no per-category conversion
+                # rate -- see PRICE_INCREASE_* -- so elasticity shows up as
+                # fewer Electronics orders/units).
+                idx = category_names.index(PRICE_INCREASE_CATEGORY)
+                cat_weights[idx] *= PRICE_INCREASE_DEMAND_FACTOR
                 cat_weights = cat_weights / cat_weights.sum()
             focus_category = rng.choice(category_names, p=cat_weights)
 
@@ -561,6 +683,12 @@ def generate_orders_and_items(
                 else:
                     quantity = int(rng.integers(1, 4))
                 unit_price = float(product["unit_price"])
+                if price_increase_active and cat_for_item == PRICE_INCREASE_CATEGORY:
+                    # Sold at the new list price. Line items keep the price
+                    # they were actually sold at, so pre-June history stays
+                    # at the old price (products.unit_price is bumped to the
+                    # new list price at the end of the run).
+                    unit_price = round(unit_price * PRICE_INCREASE_FACTOR, 2)
                 subtotal += quantity * unit_price
                 item_rows.append(
                     {
@@ -574,9 +702,18 @@ def generate_orders_and_items(
                 item_id += 1
 
             # --- discount: ~15% of orders get a 5-20% discount ---
+            # During the Summer Sale, far more orders are discounted and the
+            # discounts are deeper -> AOV falls even as order count rises.
+            if is_summer_sale:
+                discount_prob = SUMMER_SALE_DISCOUNT_PROB
+                discount_low, discount_high = SUMMER_SALE_DISCOUNT_RANGE
+            else:
+                discount_prob = 0.15
+                discount_low, discount_high = 0.05, 0.20
+
             discount_amount = 0.0
-            if rng.random() < 0.15:
-                discount_amount = round(subtotal * float(rng.uniform(0.05, 0.20)), 2)
+            if rng.random() < discount_prob:
+                discount_amount = round(subtotal * float(rng.uniform(discount_low, discount_high)), 2)
 
             # --- shipping: free over $50 net of discount, else $5.99 ---
             net_subtotal = subtotal - discount_amount
@@ -709,8 +846,18 @@ def generate_website_sessions(
         total_sessions_for_source = int(round(converting_count / target_rate))
         non_converting = max(total_sessions_for_source - converting_count, 0)
 
+        # Which month each non-converting session lands in. Uniform by
+        # default; for Email in June 2026 the weight is cut, so fewer
+        # non-converting Email sessions land that month. Converting sessions
+        # follow real orders, so shrinking the denominator is what lifts
+        # June's Email conversion rate (see EMAIL_LIFT_*).
+        month_weights = np.ones(len(months), dtype=float)
+        if traffic_source == EMAIL_LIFT_SOURCE and EMAIL_LIFT_MONTH in months:
+            month_weights[months.index(EMAIL_LIFT_MONTH)] *= EMAIL_LIFT_SESSION_FACTOR
+        month_weights = month_weights / month_weights.sum()
+
         for _ in range(non_converting):
-            month_start = months[int(rng.integers(0, len(months)))]
+            month_start = months[int(rng.choice(len(months), p=month_weights))]
             session_dt = random_datetime_in_month(rng, month_start)
             session_date_only = session_dt.date()
 
@@ -786,6 +933,16 @@ def main() -> None:
     sessions = generate_website_sessions(rng, customers, campaigns, orders)
     customers = customers.drop(columns=["_vip_seed", "_churn_risk"])
 
+    # Electronics price increase: the CATALOG now shows the new list price.
+    # Done after order generation on purpose -- order_items already captured
+    # the price each line was actually sold at (old price before June 2026,
+    # new price from June 2026 on), which is what a real order line stores.
+    # unit_cost is intentionally left alone, so the margin widens.
+    electronics = products["category"] == PRICE_INCREASE_CATEGORY
+    products.loc[electronics, "unit_price"] = (
+        products.loc[electronics, "unit_price"] * PRICE_INCREASE_FACTOR
+    ).round(2)
+
     # Nullable integer columns: without this, pandas stores them as float64
     # (because of the NaN/None values) and writes "1.0" instead of "1" to
     # CSV, which PostgreSQL's COPY rejects for INTEGER columns.
@@ -816,6 +973,9 @@ def main() -> None:
     print("  ✓ VIP customers (Pareto: top 5% ~ 40% of revenue)")
     print("  ✓ Seasonality (Nov/Dec up, Jan/Feb down, Mar dip)")
     print("  ✓ Churn risk (~10% of customers inactive in last 90 days)")
+    print("  ✓ Summer Sale (June 2026: orders up, AOV down, mediocre campaign ROI)")
+    print("  ✓ Electronics price increase (June 2026: +7% price, units down, revenue flat)")
+    print("  ✓ Email conversion lift (June 2026: best-converting channel that month)")
 
 
 if __name__ == "__main__":

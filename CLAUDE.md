@@ -125,13 +125,17 @@ The verified end-to-end startup sequence on this machine:
 2. **Data** — `.venv\Scripts\python.exe data\load_data.py` applies
    `sql/schema.sql` (drops + recreates tables) and bulk-loads the CSVs in
    `data/output/`. The generator uses a fixed seed, so the dataset is
-   deterministic: 5,000 customers / 20,000 orders / ~56k order items /
-   ~131k sessions, with the intentional patterns documented in
-   `data/README.md` (Q4 seasonality, the March-2026 revenue dip, the VIP
-   Pareto — top 5% of customers by lifetime revenue = **48.5%** of total
-   revenue, verified against the live DB; `data/README.md`'s own "~40%"
-   figure describes a related but different generator-time cohort — churn-
-   risk cohort).
+   deterministic: **13 months (2025-06-01 → 2026-06-30)**, 5,000 customers /
+   22,123 orders / 61.6k order items / 144.5k sessions, with the intentional
+   patterns documented in `data/README.md` (Q4 seasonality, the March-2026
+   revenue dip, the June-2026 Summer Sale / Electronics price increase /
+   Email conversion lift, the VIP Pareto — top 5% of customers by lifetime
+   revenue = **48.2%** of total revenue, verified against the live DB;
+   `data/README.md`'s own "~40%" figure describes a related but different
+   generator-time cohort). The range always ends on a **complete** month —
+   `END_DATE` is an explicit constant, never `date.today()`, because the
+   documented ground truth and `evals/` are verified against that exact
+   window.
 3. **API key** — the agent needs `ANTHROPIC_API_KEY=...` on its own line in
    `.env` (gitignored — never commit it, never paste it into chat). Without
    it the app still runs but falls back to the rule-based router.
