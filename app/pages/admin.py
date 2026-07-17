@@ -23,6 +23,8 @@ from sema_core.db import check_connection
 st.set_page_config(page_title="SEMA — Clients", page_icon="⚙", layout="wide")
 styles.inject()
 
+st.warning("⚠️ Internal dev tool — frozen. The product UI is the React app (see README).")
+
 # Guard: a user could land here first, before main.py set the default.
 if "active_client_id" not in st.session_state:
     st.session_state.active_client_id = client_registry.DEFAULT_CLIENT_ID

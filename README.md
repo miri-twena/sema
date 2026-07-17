@@ -103,13 +103,14 @@ FastAPI REST layer over `sema_core` (a React frontend consumes this):
   `{columns, rows}` shape.
 
 ### `app/`
-The Streamlit UI only (imports `sema_core` for everything else):
-`main.py` (entry point and chat loop) and `components/` (theme, styles,
-sidebar, chat, KPI cards, charts, tables, actions).
+The **frozen** Streamlit UI (internal dev tool only): `main.py` (entry point
+and chat loop) and `components/` (theme, styles, sidebar, chat, KPI cards,
+charts, tables, actions). Still works and useful for local sanity-checks, but
+receives no new investment and must not be modified without explicit approval.
 
 ### `frontend/`
-A React (Vite + TypeScript + Tailwind) client consuming the FastAPI REST
-layer in `api/`.
+**The product UI:** A React (Vite + TypeScript + Tailwind) client consuming the
+FastAPI REST layer in `api/`.
 
 ### `tests/`
 `pytest` suite for `sema_core`/`api` — no live database, API key, or
@@ -135,13 +136,14 @@ Project vision, MVP scope, and architecture docs.
 
 ## Status
 
-**Phase 1 is built**, with a hardened backend and a REST API alongside the
-original Streamlit app. SEMA runs over a live PostgreSQL database (synthetic
-ecommerce data), with:
+**Phase 1 is built**, with a hardened backend and a React + FastAPI product
+UI. The original Streamlit app is **frozen as an internal dev tool**. SEMA runs
+over a live PostgreSQL database (synthetic ecommerce data), with:
 
-- A premium chat UI (light pastel theme, KPI cards, charts, tables,
-  recommended actions) — in Streamlit (`app/`) and in a React frontend
-  (`frontend/`) talking to the FastAPI layer (`api/`).
+- **Product UI**: A premium chat interface (light pastel theme, KPI cards,
+  charts, tables, recommended actions) in React (`frontend/`) talking to the
+  FastAPI layer (`api/`). The original Streamlit UI (`app/`) is frozen and not
+  used for new work or design changes.
 - An **LLM agent** (Claude, model configurable via `SEMA_MODEL`) that answers
   questions using three tools (`get_schema`, `get_semantic_layer`, `run_sql`)
   plus a `present_answer` step, grounded in the semantic layer
@@ -190,28 +192,34 @@ below are PowerShell (Windows).
    ```powershell
    .venv\Scripts\python.exe -m pip install -e .
    ```
-5. **Run the Streamlit app**:
+5. **Run the product UI (React + FastAPI)**:
+   - In one terminal, start the FastAPI backend:
+     ```powershell
+     .venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
+     ```
+   - In another terminal, start the React dev server (from `frontend/`):
+     ```powershell
+     npm run dev
+     ```
+   - Open http://localhost:5173 (or the port shown by React dev server)
+   - Swagger API docs at http://localhost:8000/docs
+
+6. **Or run the Streamlit dev tool** (frozen, internal use only):
    ```powershell
    .venv\Scripts\python.exe -m streamlit run app\main.py
    ```
-   Then open http://localhost:8501.
+   Then open http://localhost:8501. This is for sanity-checks; the product UI
+   is React.
 
-   **Or run the FastAPI + React stack** instead:
-   ```powershell
-   .venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
-   ```
-   Swagger docs at http://localhost:8000/docs; see
-   [`frontend/README.md`](frontend/README.md) for the React dev server.
-
-2b. **Load the insurance client data** (optional; second client, same
+7. **Load the insurance client data** (optional; second client, same
    container, the `insurance_db` database):
    ```powershell
    .venv\Scripts\python.exe data\insurance\load_data.py
    ```
 
-Environment variables are read at startup, so **restart Streamlit after
-editing `.env`**. See [`docs/project_vision.md`](docs/project_vision.md) and
-[`docs/architecture.md`](docs/architecture.md) for the full design.
+Environment variables are read at startup, so **restart the backend or
+Streamlit after editing `.env`**. See [`docs/project_vision.md`](docs/project_vision.md)
+and [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 ## Multi-client
 

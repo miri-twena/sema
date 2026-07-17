@@ -34,6 +34,8 @@ st.set_page_config(
 )
 styles.inject()
 
+st.warning("⚠️ Internal dev tool — frozen. The product UI is the React app (see README).")
+
 if "active_client_id" not in st.session_state:
     st.session_state.active_client_id = client_registry.DEFAULT_CLIENT_ID
 if "messages" not in st.session_state:

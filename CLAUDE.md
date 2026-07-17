@@ -85,11 +85,13 @@ evolves.
 ## Architecture Preferences
 
 - Stack: Python, PostgreSQL (synthetic ecommerce database), Claude API
-  (agent/orchestration). Two front ends share one backend: Streamlit
-  (`app/`, the original chat UI) and a FastAPI + React stack (`api/` +
-  `frontend/`). The framework-free backend they both call into lives in
-  `sema_core/` (installed editable via `pyproject.toml`) — see
-  `README.md`'s Project Structure for the module breakdown.
+  (agent/orchestration). **React + FastAPI (`frontend/` + `api/`) is the
+  product UI.** Streamlit (`app/`, the original chat UI) is **frozen as an
+  internal dev tool** — it still works and is useful locally for sanity-checks,
+  but receives no new investment and must not be changed without explicit
+  approval. The framework-free backend they both call into lives in `sema_core/`
+  (installed editable via `pyproject.toml`) — see `README.md`'s Project
+  Structure for the module breakdown.
 - Agent design: Claude with explicit tools (`get_schema`,
   `get_semantic_layer`, `run_sql`, `format_response`) operating in a
   reasoning loop — not a single mega-prompt. The semantic layer
@@ -133,13 +135,21 @@ The verified end-to-end startup sequence on this machine:
 3. **API key** — the agent needs `ANTHROPIC_API_KEY=...` on its own line in
    `.env` (gitignored — never commit it, never paste it into chat). Without
    it the app still runs but falls back to the rule-based router.
-4. **Run the UI** — from the project root:
+4. **Run the product UI (React + FastAPI)** — from the project root:
+   - Start the FastAPI backend: `.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000`
+   - In another terminal, start the React dev server: from `frontend/`, run `npm run dev`
+   - Open http://localhost:5173 (or the port shown by the React dev server)
+   - Swagger API docs at http://localhost:8000/docs
+5. **Alternative: Run the Streamlit dev tool (frozen)** — from the project
+   root, to use the original Streamlit interface for local sanity-checks only:
    `.venv\Scripts\python.exe -m streamlit run app\main.py`
    → http://localhost:8501. No `PYTHONPATH` needed: the backend lives in the
    installed `sema_core` package (`pip install -e .` once per venv, see
-   pyproject.toml). `app/` holds only the Streamlit UI.
-5. Environment variables (including the API key) are read at startup, so
-   **restart Streamlit after editing `.env`** for changes to take effect.
+   pyproject.toml). `app/` is a frozen internal dev tool; do not modify it
+   without explicit approval.
+6. Environment variables (including the API key) are read at startup, so
+   **restart the FastAPI backend or Streamlit after editing `.env`** for
+   changes to take effect.
 
 ## Claude Code Working Style (Response Format & Workflow)
 
@@ -182,12 +192,13 @@ existing patterns, (3) token-efficient, (4) clean/readable, (5) documented.
 
 ## UI Conventions
 
-- **RTL / Hebrew:** a turn's text direction is decided once, from the
-  **question's language** — not per paragraph. `chat.is_rtl(question)`
-  (Hebrew Unicode check) tags both the question and answer messages; a
-  Hebrew question renders the entire answer card right-to-left (every
-  paragraph, list bullets, and KPI-card order), while English stays LTR.
-  Mechanism: `main.py` sets the `rtl` flag, `chat.py` drops a hidden
-  `.sema-rtl-flag` marker in the assistant card and `dir` on the user
-  bubble, and a `:has(.sema-rtl-flag)` CSS rule in `styles.py` flips the
-  whole card. Preserve this behavior when changing chat rendering.
+- **RTL / Hebrew (Streamlit — frozen):** a turn's text direction is decided
+  once, from the **question's language** — not per paragraph. Streamlit
+  implementation: `chat.is_rtl(question)` (Hebrew Unicode check) tags both the
+  question and answer messages; a Hebrew question renders the entire answer
+  card right-to-left (every paragraph, list bullets, and KPI-card order), while
+  English stays LTR. Mechanism: `main.py` sets the `rtl` flag, `chat.py` drops a
+  hidden `.sema-rtl-flag` marker in the assistant card and `dir` on the user
+  bubble, and a `:has(.sema-rtl-flag)` CSS rule in `styles.py` flips the whole
+  card. **Do not change this frozen implementation.** New RTL work happens in
+  `frontend/` (see `frontend/src/lib/rtl.ts`).

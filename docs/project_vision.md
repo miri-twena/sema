@@ -24,6 +24,17 @@ should align to this, not the other way around.
 > configured (the UI then notes the agent is offline). PostgreSQL, the insight
 > rendering, and the UI were left unchanged by the migration.
 
+> **2026-07-16 — Freeze decision:** Streamlit (`app/`) is **frozen as an internal
+> dev tool**. The **product UI is React + FastAPI** (`frontend/` + `api/`).
+> Rationale: maintaining two frontends is a double maintenance tax, and a
+> single design system (React) is cleaner for users and the team. RTL/Hebrew
+> support will be handled once in React (`frontend/src/lib/rtl.ts`), not
+> duplicated across Streamlit. Streamlit will not be deleted — it remains
+> useful for local sanity-checks and as a fallback — but it receives no new
+> features, no design changes, and no investment. This is enforced by a
+> guardrail test (`tests/test_streamlit_freeze.py`) that fails if product code
+> (`sema_core/`, `api/`) ever imports from `app/`.
+
 ---
 
 ## 1. Product Vision
