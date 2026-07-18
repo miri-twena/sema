@@ -83,6 +83,7 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
         chart=chart,
         table=table,
         actions=list(resp.get("recommended_actions", [])),
+        follow_up_questions=list(resp.get("follow_up_questions", [])),
         sql_used=resp.get("sql_used") or sql_used,
         confidence=resp.get("confidence"),
         evidence=evidence,

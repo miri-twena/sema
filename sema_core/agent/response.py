@@ -135,6 +135,21 @@ PRESENT_ANSWER_TOOL = {
                 "items": {"type": "string"},
                 "description": "2-3 concrete next steps.",
             },
+            "follow_up_questions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "0-3 SHORT follow-up QUESTIONS the user could ask "
+                "next that YOU can answer from THIS company's database -- e.g. "
+                "'Break this down by category', 'Which customers are affected?', "
+                "'Compare this to last month'. These become one-tap suggestions "
+                "in the input box, so each must be a data question you could "
+                "actually run a query for. NEVER include an action that needs an "
+                "external system or real-world execution (sending email, "
+                "launching a campaign, spending budget, contacting people) -- "
+                "those belong in recommended_actions, not here, because the app "
+                "would send this text straight back to you as a question. Phrase "
+                "them in the user's language. Omit entirely if nothing fits.",
+            },
             "confidence": {
                 "type": "string",
                 "enum": ["high", "medium", "low"],
@@ -187,6 +202,7 @@ def _empty_response() -> dict:
         "table": None,
         "table_title": None,
         "recommended_actions": [],
+        "follow_up_questions": [],
         "sql_used": None,
         "confidence": None,
         "evidence": None,
@@ -345,6 +361,12 @@ def build_response(tool_input: dict, tools) -> dict:
     resp = _empty_response()
     resp["insight_text"] = tool_input.get("insight_text", "")
     resp["recommended_actions"] = list(tool_input.get("recommended_actions", []))
+    # Answerable follow-up questions -- kept only if they're non-empty strings;
+    # the agent is instructed to omit execution actions here (see the tool
+    # schema), and the frontend applies a final safety filter.
+    resp["follow_up_questions"] = [
+        q.strip() for q in tool_input.get("follow_up_questions", []) if isinstance(q, str) and q.strip()
+    ]
     resp["kpis"] = [_clean_kpi(k, tools) for k in tool_input.get("kpis", [])]
 
     chart = tool_input.get("chart")

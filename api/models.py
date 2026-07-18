@@ -103,6 +103,10 @@ class ChatResponse(BaseModel):
     chart: Chart | None = None
     table: Table | None = None
     actions: list[str] = []
+    # Short follow-up QUESTIONS the agent can answer from the data (distinct
+    # from `actions`, which are business advice). Drive the composer's
+    # one-tap suggestion, so they must never contain un-answerable actions.
+    follow_up_questions: list[str] = []
     sql_used: str | None = None
     confidence: Literal["high", "medium", "low"] | None = None
     evidence: Evidence | None = None

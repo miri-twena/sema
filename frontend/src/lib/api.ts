@@ -69,6 +69,9 @@ export interface ChatResponse {
   chart: Chart | null;
   table: DataTableModel | null;
   actions: string[];
+  /** Short follow-up questions the agent can answer from the data (distinct
+   * from `actions`). Source for the composer's one-tap suggestion. */
+  follow_up_questions: string[];
   sql_used: string | null;
   confidence: "high" | "medium" | "low" | null;
   evidence: Evidence | null;

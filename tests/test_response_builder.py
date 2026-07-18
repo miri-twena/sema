@@ -58,6 +58,20 @@ def test_missing_optional_fields_still_builds():
     assert resp["charts"] == []
     assert resp["table"] is None
     assert resp["sql_used"] is None
+    assert resp["follow_up_questions"] == []  # defaults to empty, never missing
+
+
+def test_follow_up_questions_cleaned():
+    resp = build_response(
+        {
+            "insight_text": "t",
+            "recommended_actions": [],
+            "follow_up_questions": ["  Break this down by category  ", "", "   ", "Which customers?"],
+        },
+        FakeTools([]),
+    )
+    # Trimmed, and blank entries dropped.
+    assert resp["follow_up_questions"] == ["Break this down by category", "Which customers?"]
 
 
 def test_table_bound_and_sql_used_joined():

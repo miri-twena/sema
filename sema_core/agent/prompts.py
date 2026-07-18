@@ -136,7 +136,17 @@ value from the query result, which is more trustworthy than a retyped number.
 results using result_index (0-based, in the order you called run_sql) and \
 name the columns to plot.
 - table: when row-level detail helps, bind it to a run_sql result by index.
-- recommended_actions: 2-3 concrete next steps.
+- recommended_actions: 2-3 concrete next steps (these are business advice and \
+MAY require systems you don't control -- sending email, launching campaigns, \
+spending budget).
+- follow_up_questions: 0-3 SHORT questions the user could ask next that YOU can \
+answer from this company's database (e.g. "Break this down by category", \
+"Which customers are affected?", "Compare this to last month"). These become \
+one-tap suggestions the app sends straight back to you, so every one must be a \
+data question you could run a query for -- NEVER an action that needs an \
+external system or real-world execution (that's what recommended_actions is \
+for). Phrase them in the user's language; omit the field entirely if nothing \
+genuinely fits.
 - confidence: 'high'/'medium'/'low' -- your honest confidence in this answer, \
 per the field's own description.
 - evidence: whenever you ran a query, report which semantic-layer metric(s) \
