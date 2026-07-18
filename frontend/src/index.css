@@ -40,3 +40,13 @@ body {
 .sema-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .sema-scroll::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 8px; }
 .sema-scroll::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+/* SQL viewer syntax colors (SqlBlock). Tuned for the light surfaceAlt code
+   background, drawn from the SEMA palette. */
+.sema-sql .sql-kw      { color: #5B5F9F; font-weight: 600; }  /* keywords */
+.sema-sql .sql-fn      { color: #0E7490; }                    /* functions */
+.sema-sql .sql-str     { color: #1B7A5E; }                    /* strings */
+.sema-sql .sql-num     { color: #B45309; }                    /* numbers */
+.sema-sql .sql-op      { color: #64748B; }                    /* operators */
+.sema-sql .sql-punct   { color: #94A3B8; }                    /* punctuation */
+.sema-sql .sql-comment { color: #94A3B8; font-style: italic; }

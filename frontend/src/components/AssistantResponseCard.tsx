@@ -8,6 +8,7 @@ import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
 import { MessageActions } from "./MessageActions";
+import { SqlBlock } from "./SqlBlock";
 import type { DrillContext } from "./DrillChat";
 import { ConfidenceBadge, EvidencePanel, PeriodBanner } from "./EvidencePanel";
 
@@ -72,12 +73,7 @@ export function AssistantResponseCard({
             <summary className="cursor-pointer list-none flex items-center gap-1.5 text-xs font-medium text-muted hover:text-primary transition w-fit">
               <Code2 size={14} /> View SQL
             </summary>
-            <pre
-              dir="ltr"
-              className="mt-2 overflow-auto sema-scroll rounded-lg border border-line bg-surfaceAlt p-3 text-[0.72rem] leading-relaxed text-ink"
-            >
-              {response.sql_used}
-            </pre>
+            <SqlBlock sql={response.sql_used} />
           </details>
         )}
 
