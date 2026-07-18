@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ChatResponse, type DrillContextPayload, type Message } from "../lib/api";
-import { isRtl } from "../lib/rtl";
+import {
+  api,
+  type ChatResponse,
+  type ConversationDetail,
+  type DrillContextPayload,
+  type Message,
+} from "../lib/api";
+import { dirOf, isRtl } from "../lib/rtl";
 
 export interface ChatTurn {
   question: string;
@@ -23,11 +29,15 @@ interface UseChatOptions {
   drillContext?: DrillContextPayload;
   /** localStorage key to persist the transcript across refreshes; null disables. */
   persistKey?: string | null;
+  /** Called when a turn establishes or continues a server conversation, so the
+   * sidebar can refresh its list (new title, new position). */
+  onConversationChanged?: (conversationId: string) => void;
 }
 
 interface Persisted {
   turns: ChatTurn[];
   history: Message[];
+  conversationId?: string | null;
 }
 
 function load(key: string | null | undefined): Persisted {
@@ -39,6 +49,29 @@ function load(key: string | null | undefined): Persisted {
     /* ignore corrupt storage */
   }
   return { turns: [], history: [] };
+}
+
+/** A stored conversation -> the in-memory shapes the chat view renders. Pairs
+ * each user turn with the assistant turn that follows it; a user turn with no
+ * answer yet (or an assistant payload that wasn't stored) still renders. */
+function turnsFromDetail(detail: ConversationDetail): { turns: ChatTurn[]; history: Message[] } {
+  const turns: ChatTurn[] = [];
+  const history: Message[] = [];
+  const msgs = detail.messages;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== "user") continue;
+    const next = msgs[i + 1];
+    const answer = next && next.role === "assistant" ? next : null;
+    turns.push({
+      question: m.content,
+      response: answer?.payload ?? null,
+      dir: dirOf(m.content),
+    });
+    history.push({ role: "user", content: m.content });
+    if (answer) history.push({ role: "assistant", content: answer.content });
+  }
+  return { turns, history };
 }
 
 function errorResponse(e: unknown): ChatResponse {
@@ -56,30 +89,66 @@ function errorResponse(e: unknown): ChatResponse {
   };
 }
 
-export function useChat({ clientId, drillContext, persistKey }: UseChatOptions) {
+/** The contextual follow-up to offer after an answer: the agent's own top
+ * recommended action. Reuses what the backend already returned -- no extra
+ * request -- and returns null when there's nothing relevant, so the composer
+ * shows no suggestion rather than a generic one. */
+function pickFollowUp(resp: ChatResponse): string | null {
+  const action = resp.actions?.find((a) => a.trim().length > 0);
+  return action ? action.trim() : null;
+}
+
+export function useChat({ clientId, drillContext, persistKey, onConversationChanged }: UseChatOptions) {
   const initial = useRef(load(persistKey));
   const [turns, setTurns] = useState<ChatTurn[]>(initial.current.turns);
   const [history, setHistory] = useState<Message[]>(initial.current.history);
   const [loading, setLoading] = useState(false);
+  // Contextual follow-up suggestion for the composer. Set ONLY when a fresh
+  // answer completes successfully this session; cleared on every other
+  // transition (new send, reset, reopen, error, cancel) so a stale suggestion
+  // never lingers.
+  const [followUp, setFollowUp] = useState<string | null>(null);
+  // The server conversation this chat is appending to. Held in a ref (not just
+  // state) so a rapid second send within the same tick still sees the id the
+  // first response established, instead of minting a duplicate conversation.
+  const conversationIdRef = useRef<string | null>(initial.current.conversationId ?? null);
+  const [conversationId, setConversationIdState] = useState<string | null>(
+    initial.current.conversationId ?? null,
+  );
+  const setConversationId = useCallback((id: string | null) => {
+    conversationIdRef.current = id;
+    setConversationIdState(id);
+  }, []);
 
   const abortRef = useRef<AbortController | null>(null);
   const timersRef = useRef<number[]>([]);
+
+  // Latest callback without making it a dependency of runRequest (which would
+  // rebuild the request identity on every render of the parent).
+  const onConversationChangedRef = useRef(onConversationChanged);
+  useEffect(() => {
+    onConversationChangedRef.current = onConversationChanged;
+  }, [onConversationChanged]);
 
   const clearTimers = () => {
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
   };
 
-  // Persist only completed turns (never a mid-flight/stopped one) + history.
+  // Persist only completed turns (never a mid-flight/stopped one) + history +
+  // the conversation id, so a refresh reopens the same server conversation.
   useEffect(() => {
     if (!persistKey) return;
     const done = turns.filter((t) => t.response && t.response.status === "ok");
     try {
-      localStorage.setItem(persistKey, JSON.stringify({ turns: done, history }));
+      localStorage.setItem(
+        persistKey,
+        JSON.stringify({ turns: done, history, conversationId }),
+      );
     } catch {
       /* storage full / unavailable */
     }
-  }, [turns, history, persistKey]);
+  }, [turns, history, conversationId, persistKey]);
 
   const setLastPhase = (phase: string) =>
     setTurns((t) => {
@@ -99,6 +168,7 @@ export function useChat({ clientId, drillContext, persistKey }: UseChatOptions) 
   const runRequest = useCallback(
     async (question: string, dir: "rtl" | "ltr") => {
       setLoading(true);
+      setFollowUp(null); // a new/retried question retires the previous suggestion
       clearTimers();
       timersRef.current = PHASE_AT_MS.map((ms, i) =>
         window.setTimeout(() => setLastPhase(PHASES[i + 1]), ms),
@@ -106,10 +176,25 @@ export function useChat({ clientId, drillContext, persistKey }: UseChatOptions) 
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const resp = await api.chat(question, history, clientId, controller.signal, drillContext);
+        const resp = await api.chat(
+          question,
+          history,
+          clientId,
+          controller.signal,
+          drillContext,
+          conversationIdRef.current,
+        );
         replaceLast({ question, response: resp, dir });
         if (resp.status === "ok") {
           setHistory((h) => [...h, { role: "user", content: question }, { role: "assistant", content: resp.answer }]);
+          // Offer the agent's top recommendation as the next follow-up.
+          setFollowUp(pickFollowUp(resp));
+          // Adopt (or confirm) the server conversation id, then let the
+          // sidebar refresh -- a brand-new chat now has a title and a row.
+          if (resp.conversation_id) {
+            setConversationId(resp.conversation_id);
+            onConversationChangedRef.current?.(resp.conversation_id);
+          }
         }
       } catch (e) {
         const aborted = e instanceof DOMException && e.name === "AbortError";
@@ -150,13 +235,39 @@ export function useChat({ clientId, drillContext, persistKey }: UseChatOptions) 
     [loading, turns, send],
   );
 
+  // New chat: clear the view AND the conversation id, so the next question
+  // starts a fresh server conversation. Previous conversations are untouched
+  // (they live server-side); only this browser's active view resets.
   const reset = useCallback(() => {
     clearTimers();
     abortRef.current?.abort();
     setTurns([]);
     setHistory([]);
+    setConversationId(null);
+    setFollowUp(null);
     if (persistKey) localStorage.removeItem(persistKey);
-  }, [persistKey]);
+  }, [persistKey, setConversationId]);
 
-  return { turns, loading, send, stop, retry, reset };
+  // Reopen an existing conversation: fetch its transcript and adopt its id so
+  // the next question continues it. Cancels any in-flight request first.
+  const openConversation = useCallback(
+    async (id: string) => {
+      clearTimers();
+      abortRef.current?.abort();
+      setLoading(true);
+      setFollowUp(null); // a restored chat shows no suggestion until a new answer
+      try {
+        const detail = await api.conversation(id, clientId);
+        const { turns: loaded, history: loadedHistory } = turnsFromDetail(detail);
+        setTurns(loaded);
+        setHistory(loadedHistory);
+        setConversationId(id);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clientId, setConversationId],
+  );
+
+  return { turns, loading, followUp, conversationId, send, stop, retry, reset, openConversation };
 }

@@ -32,6 +32,7 @@ body {
    doesn't run, it's still visible rather than stuck off-screen. */
 @keyframes sema-slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes sema-slide-out-right { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes sema-slide-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 @keyframes sema-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sema-fade-out { from { opacity: 1; } to { opacity: 0; } }
 

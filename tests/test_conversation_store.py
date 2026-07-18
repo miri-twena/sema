@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import pytest
 
+import sqlite3
+
 from sema_core.conversation_store import (
     ConversationNotFoundError,
     SqliteConversationStore,
+    derive_title,
     truncate_by_tokens,
 )
 
@@ -53,6 +56,120 @@ def test_wrong_tenant_cannot_read_or_write(store):
 
     # The original tenant's data is untouched.
     assert len(store.get_turns(conv_id, "ecommerce")) == 1
+
+
+# --- conversation management (the sidebar) -----------------------------------
+def test_title_derives_from_first_question_only(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "Why did revenue drop in March?")
+    store.append(conv_id, "ecommerce", "assistant", "Because Electronics fell.")
+    store.append(conv_id, "ecommerce", "user", "And by channel?")  # must NOT retitle
+
+    (row,) = store.list_conversations("ecommerce")
+    assert row["title"] == "Why did revenue drop in March?"
+    assert row["message_count"] == 3
+
+
+def test_derive_title_collapses_whitespace_and_truncates():
+    assert derive_title("  hello   world  ") == "hello world"
+    long = "word " * 40
+    out = derive_title(long)
+    assert len(out) <= 80 and out.endswith("…")
+    assert derive_title("") == "New chat"
+
+
+def test_list_is_pinned_first_then_recent(store):
+    a = store.create("ecommerce")
+    store.append(a, "ecommerce", "user", "first chat")
+    b = store.create("ecommerce")
+    store.append(b, "ecommerce", "user", "second chat")
+    # b is newer, so unpinned order is b, a. Pinning a floats it to the top.
+    store.set_pinned(a, "ecommerce", True)
+
+    rows = store.list_conversations("ecommerce")
+    assert [r["id"] for r in rows] == [a, b]
+    assert rows[0]["pinned"] is True and rows[1]["pinned"] is False
+
+
+def test_rename_pin_archive_delete(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "original")
+
+    store.rename(conv_id, "ecommerce", "  Renamed chat  ")
+    assert store.list_conversations("ecommerce")[0]["title"] == "Renamed chat"
+
+    store.set_archived(conv_id, "ecommerce", True)
+    assert store.list_conversations("ecommerce") == []  # hidden by default
+    assert len(store.list_conversations("ecommerce", include_archived=True)) == 1
+
+    store.set_archived(conv_id, "ecommerce", False)
+    store.delete(conv_id, "ecommerce")
+    assert store.list_conversations("ecommerce", include_archived=True) == []
+    with pytest.raises(ConversationNotFoundError):
+        store.get_turns(conv_id, "ecommerce")
+
+
+def test_empty_conversation_is_not_listed(store):
+    store.create("ecommerce")  # created but never messaged -> a ghost
+    assert store.list_conversations("ecommerce") == []
+
+
+def test_get_messages_includes_assistant_payload(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "hi")
+    store.append(conv_id, "ecommerce", "assistant", "hello", payload='{"answer":"hello"}')
+
+    msgs = store.get_messages(conv_id, "ecommerce")
+    assert msgs[0]["payload"] is None
+    assert msgs[1]["payload"] == '{"answer":"hello"}'
+    # get_turns stays text-only (what the agent consumes).
+    assert all("payload" not in t for t in store.get_turns(conv_id, "ecommerce"))
+
+
+def test_management_ops_are_tenant_isolated(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "mine")
+    for op in (
+        lambda: store.rename(conv_id, "insurance", "hacked"),
+        lambda: store.set_pinned(conv_id, "insurance", True),
+        lambda: store.set_archived(conv_id, "insurance", True),
+        lambda: store.delete(conv_id, "insurance"),
+        lambda: store.get_messages(conv_id, "insurance"),
+    ):
+        with pytest.raises(ConversationNotFoundError):
+            op()
+
+
+def test_migration_from_legacy_schema(tmp_path):
+    """A store created before conversation management existed had only
+    (id, client_id, created_at) and no payload column. Opening it must add the
+    new columns, backfill titles, and archive the legacy rows -- without data
+    loss -- and be safe to run twice."""
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE conversations (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, "
+            "role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO conversations VALUES ('c1', 'ecommerce', '2026-01-01T00:00:00')")
+        conn.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) "
+            "VALUES ('c1', 'user', 'legacy question', '2026-01-01T00:01:00')"
+        )
+
+    store = SqliteConversationStore(path)  # runs the migration
+    legacy = store.list_conversations("ecommerce", include_archived=True)
+    assert len(legacy) == 1
+    assert legacy[0]["archived"] is True  # legacy rows archived, not deleted
+    assert legacy[0]["title"] == "legacy question"  # backfilled
+    assert store.list_conversations("ecommerce") == []  # hidden from the default view
+
+    # Re-opening (re-running the migration) is a no-op, not a double-archive error.
+    SqliteConversationStore(path)
+    assert len(store.list_conversations("ecommerce", include_archived=True)) == 1
 
 
 # --- popular questions --------------------------------------------------------

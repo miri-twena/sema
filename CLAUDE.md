@@ -104,6 +104,15 @@ evolves.
   (schema, reports, DB connections) must be keyed by `client_id`, never
   global.
 - Prefer structured (JSON) outputs from the AI over parsing free-form text.
+- Conversations are **server-side and durable**: `sema_core/conversation_store.py`
+  (SQLite metadata store, separate from tenant analytics DBs) owns each chat's
+  turns, title, pinned/archived flags, and the assistant turns' rendered
+  `payload` (so reopening a chat restores its KPI cards/charts, not just text).
+  The React client always round-trips `conversation_id` so a chat is one
+  server conversation, not a new row per turn; the sidebar (list/rename/pin/
+  archive/delete) is the CRUD in `api/main.py`'s `/api/conversations*`. The
+  store self-migrates old schemas via guarded `ALTER TABLE`s — extend it the
+  same way rather than adding a migration framework.
 - Respect the folder structure defined in `README.md` and
   `docs/project_vision.md` — discuss before introducing new top-level
   folders.
@@ -206,3 +215,34 @@ existing patterns, (3) token-efficient, (4) clean/readable, (5) documented.
   bubble, and a `:has(.sema-rtl-flag)` CSS rule in `styles.py` flips the whole
   card. **Do not change this frozen implementation.** New RTL work happens in
   `frontend/` (see `frontend/src/lib/rtl.ts`).
+
+- **React product UI (the current chat surface):**
+  - **Home dashboard** (`HomeDashboard.tsx`): the empty state is a proactive
+    Business Overview (greeting, executive-brief chips, KPI cards from
+    `/api/overview`, top recommendation, conversation starters), not a blank
+    page. KPIs default to the latest **complete** month, judged against the
+    data's max order date (`sql/queries/data_bounds.sql`), with a month-range
+    period picker.
+  - **Conversation sidebar** (`Sidebar.tsx` + `ConversationList.tsx` +
+    `ConversationItem.tsx`, state in `useConversations.ts`): ChatGPT-style
+    New chat, **Search chats** (magnifying-glass toggle, client-side title
+    filter), and always-visible collapsible **Pinned** / **Recent** sections
+    (open-state persisted in localStorage; empty sections show a hint rather
+    than disappearing). Per-row hover ⋯ menu: rename (inline), pin/unpin,
+    archive, delete (two-step confirm). Alerts live in the dashboard's brief
+    chips — there is no separate alerts rail. Mobile: the sidebar is an
+    off-canvas drawer.
+  - **Composer** (`ChatInput.tsx`): after a successful answer it shows one
+    contextual **follow-up suggestion** as gray ghost text (the agent's top
+    recommended action, reused — no extra LLM call). Accept with click or Tab
+    (empty input only), Escape dismisses, typing overrides; it never becomes
+    the message unless accepted, and clears on new send / retry / reset /
+    reopen / error / cancel.
+  - **Message actions** (`MessageActions.tsx`, under each answer): Copy text,
+    Copy image (rasterizes the chart SVG → PNG to the clipboard, only when a
+    chart exists), and Retry.
+  - **Animation gotcha (Tailwind v4):** a state-toggled `transition` on
+    `transform` can leave a `position:fixed` element stuck off-screen (its
+    translate utility emits the separate `translate` CSS property). Use a
+    keyframe whose resting state is on-screen instead — see the drawer and
+    the drill panel in `index.css` (`sema-slide-in-*`).

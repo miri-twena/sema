@@ -111,6 +111,48 @@ class ChatResponse(BaseModel):
     conversation_id: str | None = None
 
 
+# --- conversation management (the sidebar) ----------------------------------
+class ConversationSummary(BaseModel):
+    """One row in the chat-history sidebar."""
+
+    id: str
+    title: str
+    pinned: bool = False
+    archived: bool = False
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ConversationMessage(BaseModel):
+    """One stored turn. `payload` carries the assistant turn's rendered answer
+    (a ChatResponse as JSON) so reopening a chat restores its KPI cards and
+    charts rather than degrading to plain text. None for user turns and for
+    turns recorded before payloads were stored."""
+
+    role: Literal["user", "assistant"]
+    content: str
+    payload: ChatResponse | None = None
+
+
+class ConversationDetail(BaseModel):
+    """A conversation plus its full transcript -- what "reopen this chat" needs."""
+
+    id: str
+    title: str
+    pinned: bool = False
+    archived: bool = False
+    messages: list[ConversationMessage] = []
+
+
+class ConversationUpdate(BaseModel):
+    """PATCH body. Every field is optional: send only what changed."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    pinned: bool | None = None
+    archived: bool | None = None
+
+
 # --- home dashboard ----------------------------------------------------------
 class Overview(BaseModel):
     """Headline KPIs for the home dashboard (computed from the saved report

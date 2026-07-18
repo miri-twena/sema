@@ -1,9 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Menu, X } from "lucide-react";
 import { api, type Client, type Alert, type Overview, type PopularQuestion } from "./lib/api";
 import { useChat } from "./hooks/useChat";
-import { useQuestionHistory } from "./hooks/useQuestionHistory";
+import { useConversations } from "./hooks/useConversations";
 import { Sidebar } from "./components/Sidebar";
+import type { ConversationActions } from "./components/ConversationItem";
 import { ChatInput } from "./components/ChatInput";
 import { HomeDashboard } from "./components/HomeDashboard";
 import { TurnView } from "./components/TurnView";
@@ -26,9 +27,15 @@ export default function App() {
   const [agentConfigured, setAgentConfigured] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false); // mobile sidebar drawer
 
-  const chat = useChat({ clientId: activeId, persistKey: "sema:chat" });
-  const questionHistory = useQuestionHistory(activeId);
+  const conversations = useConversations(activeId);
+  const chat = useChat({
+    clientId: activeId,
+    persistKey: "sema:chat",
+    // Refresh the sidebar whenever a turn creates or updates a conversation.
+    onConversationChanged: conversations.refresh,
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,18 +96,39 @@ export default function App() {
     [chat],
   );
 
-  // Top-level questions (typed or picked from the sidebar) are logged to this
-  // browser's per-client history; drill-down follow-ups and alert-triggered
-  // questions are scoped/synthesized, not a real "question I asked", so they
-  // don't get recorded here.
-  const sendQuestion = useCallback(
-    (q: string) => {
-      const trimmed = q.trim();
-      if (trimmed) questionHistory.record(trimmed);
-      chat.send(q);
+  const sendQuestion = useCallback((q: string) => chat.send(q), [chat]);
+
+  // New chat: clear the view (previous conversations stay in the sidebar) and
+  // close the mobile drawer.
+  const newChat = useCallback(() => {
+    chat.reset();
+    setDrawerOpen(false);
+  }, [chat]);
+
+  // Reopen a stored conversation with its full transcript.
+  const openConversation = useCallback(
+    (id: string) => {
+      void chat.openConversation(id);
+      setDrawerOpen(false);
     },
-    [chat, questionHistory],
+    [chat],
   );
+
+  const conversationActions: ConversationActions = {
+    onOpen: openConversation,
+    onRename: conversations.rename,
+    onTogglePin: conversations.togglePin,
+    // Archiving or deleting the conversation that's currently open leaves the
+    // chat view showing an orphan, so clear it back to a new chat.
+    onArchive: (id) => {
+      conversations.archive(id);
+      if (id === chat.conversationId) chat.reset();
+    },
+    onDelete: (id) => {
+      conversations.remove(id);
+      if (id === chat.conversationId) chat.reset();
+    },
+  };
 
   const onDrill = useCallback((ctx: DrillContext) => setDrill(ctx), []);
   const onRetry = useCallback((i: number) => chat.retry(i), [chat]);
@@ -112,25 +140,60 @@ export default function App() {
 
   const empty = chat.turns.length === 0;
 
+  const sidebar = (
+    <Sidebar
+      clients={clients}
+      activeId={activeId}
+      onClientChange={switchClient}
+      suggested={activeClient?.suggested_questions ?? []}
+      popularQuestions={popularQuestions}
+      conversations={conversations.conversations}
+      activeConversationId={chat.conversationId}
+      conversationsLoading={conversations.loading}
+      conversationsError={conversations.error}
+      conversationActions={conversationActions}
+      onPick={sendQuestion}
+      onNewConversation={newChat}
+      dbConnected={dbConnected}
+    />
+  );
+
   return (
     <div className="flex h-screen bg-bg text-ink">
-      <Sidebar
-        clients={clients}
-        activeId={activeId}
-        onClientChange={switchClient}
-        suggested={activeClient?.suggested_questions ?? []}
-        questionHistory={questionHistory.items}
-        popularQuestions={popularQuestions}
-        onPick={sendQuestion}
-        onNewConversation={chat.reset}
-        dbConnected={dbConnected}
-      />
+      {/* Desktop: persistent sidebar. */}
+      <div className="hidden md:block">{sidebar}</div>
+
+      {/* Mobile: off-canvas drawer + backdrop, mounted only while open.
+          Uses a slide-in KEYFRAME (not a state-toggled transition): the same
+          choice index.css documents for the drill panel -- a toggled transform
+          transition can leave a fixed element stuck off-screen, whereas a
+          keyframe's resting state is on-screen. */}
+      {drawerOpen && (
+        <div className="md:hidden">
+          <div
+            className="fixed inset-0 z-40 bg-ink/25 animate-[sema-fade-in_0.2s_ease-out]"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <div className="fixed inset-y-0 start-0 z-50 animate-[sema-slide-in-left_0.2s_ease-out]">
+            {sidebar}
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
-            <p className="text-sm text-muted">Ask your business anything.</p>
+        <header className="flex items-center justify-between px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setDrawerOpen((o) => !o)}
+              aria-label="Toggle chat history"
+              className="md:hidden w-9 h-9 -ms-1 rounded-lg flex items-center justify-center text-ink hover:bg-surfaceAlt transition"
+            >
+              {drawerOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
+              <p className="text-sm text-muted">Ask your business anything.</p>
+            </div>
           </div>
         </header>
 
@@ -165,7 +228,12 @@ export default function App() {
 
         <div className="px-8 py-4 border-t border-line bg-bg">
           <div className="max-w-3xl mx-auto">
-            <ChatInput onSend={sendQuestion} onStop={chat.stop} loading={chat.loading} />
+            <ChatInput
+              onSend={sendQuestion}
+              onStop={chat.stop}
+              loading={chat.loading}
+              suggestion={chat.followUp}
+            />
           </div>
         </div>
       </main>

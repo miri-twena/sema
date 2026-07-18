@@ -74,6 +74,34 @@ export interface ChatResponse {
   evidence: Evidence | null;
   status: "ok" | "error";
   error: string | null;
+  conversation_id?: string | null;
+}
+
+/** One row in the chat-history sidebar (mirrors api/models.py ConversationSummary). */
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  pinned: boolean;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+/** A stored turn; `payload` is the rendered answer for assistant turns. */
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+  payload: ChatResponse | null;
+}
+
+/** A conversation plus its transcript -- what "reopen this chat" returns. */
+export interface ConversationDetail {
+  id: string;
+  title: string;
+  pinned: boolean;
+  archived: boolean;
+  messages: ConversationMessage[];
 }
 
 export interface Alert {
@@ -133,6 +161,20 @@ async function postJSON<T>(path: string, body: unknown, signal?: AbortSignal): P
   return res.json() as Promise<T>;
 }
 
+async function sendJSON<T>(method: "PATCH" | "DELETE", path: string, body?: unknown): Promise<T | null> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.status === 204 ? null : ((await res.json()) as T);
+}
+
+function clientQuery(clientId: string, extra?: Record<string, string>): string {
+  return new URLSearchParams({ client_id: clientId, ...extra }).toString();
+}
+
 export const api = {
   health: () => getJSON<Health>("/api/health"),
   clients: () => getJSON<Client[]>("/api/clients"),
@@ -151,10 +193,32 @@ export const api = {
     clientId: string,
     signal?: AbortSignal,
     drillContext?: DrillContextPayload,
+    conversationId?: string | null,
   ) =>
     postJSON<ChatResponse>(
       "/api/chat",
-      { question, history, client_id: clientId, drill_context: drillContext ?? null },
+      {
+        question,
+        history,
+        client_id: clientId,
+        drill_context: drillContext ?? null,
+        // When set, the server appends to this conversation instead of
+        // minting a new one per turn -- what makes chats reopenable.
+        conversation_id: conversationId ?? null,
+      },
       signal,
     ),
+
+  // --- conversation history (the sidebar) ---
+  conversations: (clientId: string) =>
+    getJSON<ConversationSummary[]>(`/api/conversations?${clientQuery(clientId)}`),
+  conversation: (id: string, clientId: string) =>
+    getJSON<ConversationDetail>(`/api/conversations/${id}?${clientQuery(clientId)}`),
+  updateConversation: (
+    id: string,
+    clientId: string,
+    patch: { title?: string; pinned?: boolean; archived?: boolean },
+  ) => sendJSON<ConversationSummary>("PATCH", `/api/conversations/${id}?${clientQuery(clientId)}`, patch),
+  deleteConversation: (id: string, clientId: string) =>
+    sendJSON<null>("DELETE", `/api/conversations/${id}?${clientQuery(clientId)}`),
 };

@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, Code2 } from "lucide-react";
@@ -7,6 +7,7 @@ import { Card } from "./ui/Card";
 import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
+import { MessageActions } from "./MessageActions";
 import type { DrillContext } from "./DrillChat";
 import { ConfidenceBadge, EvidencePanel, PeriodBanner } from "./EvidencePanel";
 
@@ -17,11 +18,15 @@ export function AssistantResponseCard({
   response,
   dir,
   onDrill,
+  onRetry,
 }: {
   response: ChatResponse;
   dir: "rtl" | "ltr";
   onDrill?: (ctx: DrillContext) => void;
+  onRetry?: () => void;
 }) {
+  // Wraps the answer body so MessageActions can find the chart SVG to copy.
+  const contentRef = useRef<HTMLDivElement>(null);
   if (response.status === "error") {
     return (
       <Card className="p-4 border-critical-fg/30">
@@ -34,7 +39,7 @@ export function AssistantResponseCard({
 
   return (
     <Card className="p-4">
-      <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
+      <div ref={contentRef} dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
         <div className="flex items-center gap-2 mb-1.5">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
           <span className="text-xs font-semibold text-primary-dark">SEMA</span>
@@ -77,6 +82,13 @@ export function AssistantResponseCard({
         )}
 
         <EvidencePanel evidence={response.evidence} />
+
+        <MessageActions
+          text={response.answer}
+          hasImage={!!response.chart}
+          containerRef={contentRef}
+          onRetry={onRetry}
+        />
       </div>
     </Card>
   );

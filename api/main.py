@@ -43,6 +43,10 @@ from api.models import (
     ChatResponse,
     Client,
     ClientChangeRequest,
+    ConversationDetail,
+    ConversationMessage,
+    ConversationSummary,
+    ConversationUpdate,
     Health,
     Kpi,
     Overview,
@@ -193,7 +197,13 @@ def chat(req: ChatRequest) -> ChatResponse:
         # Persist this turn only on success -- a failed run leaves the
         # conversation as it was, rather than recording a broken exchange.
         conversation_store.append(conv_id, cid, "user", req.question)
-        conversation_store.append(conv_id, cid, "assistant", resp.get("insight_text", ""))
+        # Store the RENDERED answer alongside its text: reopening this chat
+        # from the sidebar then restores KPI cards/charts/tables, instead of
+        # degrading a rich answer to a paragraph. The agent still reads only
+        # the text (get_turns), so this costs the prompt nothing.
+        conversation_store.append(
+            conv_id, cid, "assistant", resp.get("insight_text", ""), payload=out.model_dump_json()
+        )
         log_event(
             logger,
             "api_chat",
@@ -306,6 +316,92 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             yield _sse(event, payload)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/conversations", response_model=list[ConversationSummary])
+def list_conversations(
+    client_id: str | None = None, include_archived: bool = False
+) -> list[ConversationSummary]:
+    """This client's chat history for the sidebar: pinned first, then most
+    recently updated. Archived chats are hidden unless asked for."""
+    cid = _resolve_client(client_id)
+    return [
+        ConversationSummary(**c)
+        for c in conversation_store.list_conversations(cid, include_archived=include_archived)
+    ]
+
+
+def _conversation_or_404(conversation_id: str, cid: str) -> dict:
+    """Look up one conversation's metadata, 404ing exactly like the chat
+    routes do -- unknown and wrong-tenant are indistinguishable on purpose."""
+    for c in conversation_store.list_conversations(cid, include_archived=True):
+        if c["id"] == conversation_id:
+            return c
+    raise HTTPException(status_code=404, detail="unknown conversation_id")
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
+def get_conversation(conversation_id: str, client_id: str | None = None) -> ConversationDetail:
+    """One conversation with its full transcript -- what "reopen this chat" needs."""
+    cid = _resolve_client(client_id)
+    meta = _conversation_or_404(conversation_id, cid)
+    try:
+        raw = conversation_store.get_messages(conversation_id, client_id=cid)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown conversation_id") from None
+
+    messages: list[ConversationMessage] = []
+    for m in raw:
+        payload = None
+        if m.get("payload"):
+            try:
+                payload = ChatResponse.model_validate_json(m["payload"])
+            except Exception:
+                # A payload written by an older//changed contract shouldn't
+                # make the whole chat unopenable -- fall back to text only.
+                logger.warning(
+                    "unreadable payload in conversation %s; falling back to text", conversation_id
+                )
+        messages.append(
+            ConversationMessage(role=m["role"], content=m["content"], payload=payload)
+        )
+
+    return ConversationDetail(
+        id=meta["id"],
+        title=meta["title"],
+        pinned=meta["pinned"],
+        archived=meta["archived"],
+        messages=messages,
+    )
+
+
+@app.patch("/api/conversations/{conversation_id}", response_model=ConversationSummary)
+def update_conversation(
+    conversation_id: str, req: ConversationUpdate, client_id: str | None = None
+) -> ConversationSummary:
+    """Rename / pin / archive. Only the fields present in the body change."""
+    cid = _resolve_client(client_id)
+    _conversation_or_404(conversation_id, cid)
+    try:
+        if req.title is not None:
+            conversation_store.rename(conversation_id, cid, req.title)
+        if req.pinned is not None:
+            conversation_store.set_pinned(conversation_id, cid, req.pinned)
+        if req.archived is not None:
+            conversation_store.set_archived(conversation_id, cid, req.archived)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown conversation_id") from None
+    return ConversationSummary(**_conversation_or_404(conversation_id, cid))
+
+
+@app.delete("/api/conversations/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: str, client_id: str | None = None) -> None:
+    cid = _resolve_client(client_id)
+    _conversation_or_404(conversation_id, cid)
+    try:
+        conversation_store.delete(conversation_id, cid)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown conversation_id") from None
 
 
 @app.get("/api/overview", response_model=Overview)

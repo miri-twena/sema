@@ -1,14 +1,15 @@
-import { Plus } from "lucide-react";
-import type { Client, PopularQuestion } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Search, X } from "lucide-react";
+import type { Client, ConversationSummary, PopularQuestion } from "../lib/api";
 import { ClientSelector } from "./ClientSelector";
+import { ConversationList } from "./ConversationList";
+import type { ConversationActions } from "./ConversationItem";
 import { KPI_TINTS } from "../lib/tokens";
 
 // Each sidebar question category gets its own pastel tint from the SAME
 // palette used for KPI cards elsewhere (KPI_TINTS: [bg, text] pairs), so the
-// three lists read as distinct groups at a glance without introducing new
-// colors into the app.
+// lists read as distinct groups at a glance without introducing new colors.
 const SUGGESTED_TINT = KPI_TINTS[2]; // lavender -- matches the app's primary accent
-const RECENT_TINT = KPI_TINTS[3]; // mint
 const POPULAR_TINT = KPI_TINTS[1]; // sky
 
 function QuestionList({
@@ -53,8 +54,12 @@ export function Sidebar({
   activeId,
   onClientChange,
   suggested,
-  questionHistory,
   popularQuestions,
+  conversations,
+  activeConversationId,
+  conversationsLoading,
+  conversationsError,
+  conversationActions,
   onPick,
   onNewConversation,
   dbConnected,
@@ -63,15 +68,33 @@ export function Sidebar({
   activeId: string;
   onClientChange: (id: string) => void;
   suggested: string[];
-  questionHistory: string[];
   popularQuestions: PopularQuestion[];
+  conversations: ConversationSummary[];
+  activeConversationId: string | null;
+  conversationsLoading: boolean;
+  conversationsError: boolean;
+  conversationActions: ConversationActions;
   onPick: (q: string) => void;
   onNewConversation: () => void;
   dbConnected: boolean;
 }) {
+  // Search is toggled by the magnifying-glass icon; open it, type to filter.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearch("");
+  };
+
   return (
     <aside className="w-72 shrink-0 h-full border-r border-line bg-surface flex flex-col">
-      <div className="p-5">
+      <div className="p-5 pb-3 shrink-0">
         {/* brand */}
         <div className="flex items-center gap-2.5 mb-1">
           <span className="inline-block w-7 h-7 rounded-lg bg-gradient-to-br from-primary via-sky to-mint" />
@@ -90,25 +113,74 @@ export function Sidebar({
           </span>
         </div>
 
-        <button
-          onClick={onNewConversation}
-          className="w-full mt-4 flex items-center justify-center gap-1.5 rounded-xl border border-lineSoft bg-primary/10 text-primary-dark text-sm font-medium py-2 hover:bg-primary/15 transition"
-        >
-          <Plus size={15} strokeWidth={2.5} /> New conversation
-        </button>
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            onClick={onNewConversation}
+            className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white text-sm font-medium py-2.5 shadow-bubble hover:bg-primary/90 transition"
+          >
+            <Plus size={16} strokeWidth={2.5} /> New chat
+          </button>
+          <button
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            aria-label={searchOpen ? "Close search" : "Search chats"}
+            aria-expanded={searchOpen}
+            title="Search chats"
+            className={`shrink-0 w-10 h-10 rounded-xl border flex items-center justify-center transition ${
+              searchOpen
+                ? "border-primary text-primary bg-primary/10"
+                : "border-line text-muted hover:text-ink hover:bg-surfaceAlt"
+            }`}
+          >
+            <Search size={17} />
+          </button>
+        </div>
+
+        {searchOpen && (
+          <div className="mt-2 flex items-center gap-1.5 rounded-xl border border-line bg-surface px-2.5 focus-within:border-primary transition">
+            <Search size={14} className="shrink-0 text-faint" />
+            <input
+              ref={searchRef}
+              value={search}
+              dir="auto"
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+              placeholder="Search chats..."
+              className="flex-1 min-w-0 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-faint"
+            />
+            {search && (
+              <button
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+                aria-label="Clear search"
+                className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-muted hover:bg-surfaceAlt hover:text-ink transition"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="px-5 pb-5 overflow-auto sema-scroll">
+      {/* conversation history -- the primary, scrollable content */}
+      <div className="flex-1 min-h-0 overflow-auto sema-scroll px-4 py-1">
+        <ConversationList
+          conversations={conversations}
+          activeId={activeConversationId}
+          actions={conversationActions}
+          loading={conversationsLoading}
+          error={conversationsError}
+          search={searchOpen ? search : ""}
+        />
+      </div>
+
+      {/* discovery aids, pinned to the bottom */}
+      <div className="shrink-0 border-t border-line px-5 py-4 max-h-[42%] overflow-auto sema-scroll">
         <QuestionList
           label="Suggested questions"
           items={suggested.map((q) => ({ text: q }))}
           tint={SUGGESTED_TINT}
-          onPick={onPick}
-        />
-        <QuestionList
-          label="Your recent questions"
-          items={questionHistory.map((q) => ({ text: q }))}
-          tint={RECENT_TINT}
           onPick={onPick}
         />
         <QuestionList

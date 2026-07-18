@@ -45,7 +45,12 @@ export const TurnView = memo(function TurnView({
           </div>
         ) : (
           <ErrorBoundary>
-            <AssistantResponseCard response={r} dir={turn.dir} onDrill={onDrill} />
+            <AssistantResponseCard
+              response={r}
+              dir={turn.dir}
+              onDrill={onDrill}
+              onRetry={onRetry ? () => onRetry(index) : undefined}
+            />
           </ErrorBoundary>
         )
       ) : turn.stopped ? (
