@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 Persistent instructions for working in this project. Read this at the start
 of every session.
@@ -233,14 +233,31 @@ existing patterns, (3) token-efficient, (4) clean/readable, (5) documented.
     chips — there is no separate alerts rail. Mobile: the sidebar is an
     off-canvas drawer.
   - **Composer** (`ChatInput.tsx`): after a successful answer it shows one
-    contextual **follow-up suggestion** as gray ghost text (the agent's top
-    recommended action, reused — no extra LLM call). Accept with click or Tab
-    (empty input only), Escape dismisses, typing overrides; it never becomes
-    the message unless accepted, and clears on new send / retry / reset /
-    reopen / error / cancel.
+    contextual **follow-up suggestion** as gray ghost text. Accept with click
+    or Tab (empty input only), Escape dismisses, typing overrides; it never
+    becomes the message unless accepted, and clears on new send / retry /
+    reset / reopen / error / cancel.
+  - **Follow-up suggestions must be answerable** — this is a correctness rule,
+    not a preference. The suggestion comes from the agent's dedicated
+    `follow_up_questions` field (data questions it can query), **never** from
+    `recommended_actions`, which are business advice that often requires
+    systems SEMA doesn't control ("send a win-back email", "launch a
+    campaign"). Suggesting one of those got the user "I can't do that" when
+    they accepted it. `pickFollowUp` in `useChat.ts` also applies a bilingual
+    execution-keyword backstop; if nothing qualifies it shows **no**
+    suggestion. Same rule applies anywhere else the app proposes a question.
   - **Message actions** (`MessageActions.tsx`, under each answer): Copy text,
     Copy image (rasterizes the chart SVG → PNG to the clipboard, only when a
     chart exists), and Retry.
+  - **SQL viewer** (`SqlBlock.tsx` + `lib/sql.ts`, behind "View SQL"): a
+    read-only code block — auto-formatted SQL (clause line breaks, indented
+    subqueries/CTEs), syntax highlighting, line numbers, monospace, a Copy
+    toolbar + toast, and horizontal scroll only when needed. Always renders
+    `dir="ltr"` even inside an RTL answer card. The formatter and highlighter
+    are **dependency-free** (`lib/sql.ts`) — do not add a SQL library. The
+    formatter only reflows whitespace and **falls back to the original text if
+    any non-whitespace character would change**, so the viewer can never show
+    corrupted SQL; keep that guarantee if you touch it.
   - **Animation gotcha (Tailwind v4):** a state-toggled `transition` on
     `transform` can leave a `position:fixed` element stuck off-screen (its
     translate utility emits the separate `translate` CSS property). Use a

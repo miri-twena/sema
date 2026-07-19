@@ -400,7 +400,7 @@ tight while leaving an obvious, well-understood extension point.
 
 ```
 product-analytics-ai/
-├── CLAUDE.md
+├── AGENTS.md
 ├── README.md
 ├── docs/
 │   ├── project_vision.md
