@@ -221,7 +221,17 @@ export default function App() {
             )}
 
             {chat.turns.map((turn, i) => (
-              <TurnView key={i} turn={turn} index={i} isFirst={i === 0} onDrill={onDrill} onRetry={onRetry} />
+              <TurnView
+                key={i}
+                turn={turn}
+                index={i}
+                isFirst={i === 0}
+                onDrill={onDrill}
+                onRetry={onRetry}
+                // Clarification choices / cannot-answer alternatives continue
+                // the SAME conversation (chat.send keeps conversation_id).
+                onAsk={sendQuestion}
+              />
             ))}
           </div>
         </div>

@@ -181,8 +181,10 @@ function emit(tokens: Tok[]): string {
   const top = () => scope[scope.length - 1];
   const pad = (n: number) => "  ".repeat(Math.max(0, n));
   const nl = (lvl: number) => {
-    // Never emit a leading blank line (cur empty before anything is written).
-    if (cur.trim() !== "" || lines.length > 0) lines.push(cur.replace(/\s+$/, ""));
+    // A whitespace-only line is never worth emitting -- it would show up as a
+    // stray blank (e.g. a clause break right after a line comment already
+    // broke). Deliberate blank lines are pushed directly, by the `;` handler.
+    if (cur.trim() !== "") lines.push(cur.replace(/\s+$/, ""));
     cur = pad(lvl);
     prev = null; // first token on a line takes no leading space
   };
@@ -201,6 +203,36 @@ function emit(tokens: Tok[]): string {
     const tk = tokens[k];
     const up = tk.v.toUpperCase();
     const sc = top();
+
+    if (tk.t === "comment") {
+      if (tk.v.startsWith("--")) {
+        // A line comment runs to end-of-line, so ANY token emitted after it on
+        // the same line would be commented out -- silently changing the query.
+        // The whitespace-equality net can't catch that (it ignores newlines),
+        // so forcing the break here is what makes line comments safe to reflow.
+        cur += spaceBefore(tk) + tk.v;
+        // Resume at the indent this line already had (e.g. a SELECT-list item),
+        // not the clause indent, so the comment doesn't dedent what follows.
+        const lineIndent = Math.floor((/^ */.exec(cur)?.[0].length ?? 0) / 2);
+        nl(Math.max(sc.indent, lineIndent));
+      } else {
+        // Block comment: inline where it sits, or alone on a fresh line.
+        cur += cur.trim() === "" ? tk.v : spaceBefore(tk) + tk.v;
+        prev = tk;
+      }
+      continue;
+    }
+
+    if (tk.v === ";") {
+      // Statement separator. `sql_used` concatenates every query the agent ran,
+      // so without this the next SELECT continues the previous line.
+      cur += ";";
+      scope.length = 1;
+      scope[0] = { indent: 0, statement: true, clause: "", subquery: false, openIndent: 0 };
+      nl(0);
+      lines.push(""); // blank line between statements (\n{3,} collapse tidies up)
+      continue;
+    }
 
     if (tk.v === ")") {
       const popped = scope.length > 1 ? scope.pop()! : sc;
@@ -265,9 +297,9 @@ export function formatSql(raw: string): string {
   if (!input) return input;
   try {
     const all = lex(input);
-    // Reflowing around comments risks mangling them; leave commented SQL as-is.
-    if (all.some((t) => t.t === "comment")) return input;
-
+    // Comments are kept in the token stream and laid out by emit() -- the agent
+    // annotates drill-down SQL, and bailing out on any comment left exactly
+    // those queries unformatted.
     const sig = mergeKeywords(all.filter((t) => t.t !== "ws"));
     for (let i = 0; i < sig.length; i++) {
       // A function call is a plain word (not a keyword, not a merged multi-word
@@ -279,9 +311,19 @@ export function formatSql(raw: string): string {
     }
     const out = emit(sig).replace(/\n{3,}/g, "\n\n").replace(/\s+$/g, "");
 
-    // Safety net: identical once all whitespace is removed => nothing lost.
+    // Safety net 1: identical once all whitespace is removed => nothing lost.
     const bare = (s: string) => s.replace(/\s+/g, "");
     if (bare(out) !== bare(input)) return input;
+
+    // Safety net 2, for line comments only. Net 1 strips newlines, so it cannot
+    // tell `a -- c\nFROM t` from `a -- c FROM t` -- yet the second silently
+    // comments out FROM t. Re-lex the output and require every `--` comment to
+    // be the last token on its line.
+    for (const line of out.split("\n")) {
+      const toks = lex(line);
+      const at = toks.findIndex((t) => t.t === "comment" && t.v.startsWith("--"));
+      if (at !== -1 && toks.slice(at + 1).some((t) => t.t !== "ws")) return input;
+    }
     return out;
   } catch {
     return input;

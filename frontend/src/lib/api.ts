@@ -1,6 +1,9 @@
 // Typed client for the SEMA FastAPI layer. Types mirror api/models.py (the
 // Pydantic contract) -- the single source of truth for the response shape.
 
+import type { ProgressEvent } from "./progress";
+import type { AnalysisStep } from "./evidence";
+
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export interface Message {
@@ -43,6 +46,11 @@ export interface DataTableModel {
   title?: string | null;
   columns: string[];
   rows: Record<string, unknown>[];
+  /** Rows the backing query returned. Older persisted turns lack it, so the
+   * table falls back to rows.length. */
+  total_rows?: number;
+  /** True when the SQL safety cap trimmed the result set. */
+  truncated?: boolean;
 }
 
 export interface DateRange {
@@ -59,12 +67,33 @@ export interface Evidence {
   date_range: DateRange | null;
   filters_applied: string[];
   data_sources: string[];
+  /** The connection the tables came from -- engine + database NAME only,
+   * never host/user/credentials. Present only when a query really ran. */
+  data_engine?: string | null;
+  database?: string | null;
   data_freshness: string | null;
   records_used: number | null;
+  /** Deterministic execution facts. Optional so conversations persisted
+   * before these fields still parse. */
+  query_status?: "ok" | "failed" | "none";
+  queries_run?: number;
+  queries_failed?: number;
+  /** Structured operations ({op, ...params}); the client renders the wording
+   * in the user's language. See lib/evidence.ts. */
+  analysis_steps?: AnalysisStep[];
+  assumptions?: string[];
 }
 
 export interface ChatResponse {
   answer: string;
+  /** How SEMA responded. Render by this, never by sniffing the prose.
+   * Optional so conversations persisted before this field still parse. */
+  mode?: "answer" | "clarification" | "cannot_answer" | "off_topic";
+  reason_code?: string | null;
+  /** mode="clarification": tappable choices that resolve the ambiguity. */
+  clarification_options?: string[];
+  /** mode="cannot_answer": the specific data/definition gap. */
+  missing?: string | null;
   kpis: Kpi[];
   chart: Chart | null;
   table: DataTableModel | null;
@@ -211,6 +240,64 @@ export const api = {
       },
       signal,
     ),
+
+  /**
+   * Streaming variant: emits the agent's REAL progress stages as they happen,
+   * then the final answer. Same server call as `chat` -- only the framing
+   * differs -- so the two can't drift apart.
+   */
+  chatStream: async (
+    question: string,
+    history: Message[],
+    clientId: string,
+    onStatus: (e: ProgressEvent) => void,
+    signal?: AbortSignal,
+    drillContext?: DrillContextPayload,
+    conversationId?: string | null,
+  ): Promise<ChatResponse> => {
+    const res = await fetch(`${BASE}/api/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        history,
+        client_id: clientId,
+        drill_context: drillContext ?? null,
+        conversation_id: conversationId ?? null,
+      }),
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let answer: ChatResponse | null = null;
+
+    // SSE frames are separated by a blank line; each carries `event:` + `data:`.
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop() ?? ""; // keep the trailing partial frame
+      for (const frame of frames) {
+        let event = "message";
+        const dataLines: string[] = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) continue;
+        const payload = JSON.parse(dataLines.join("\n"));
+        if (event === "status") onStatus(payload as ProgressEvent);
+        else if (event === "answer") answer = payload as ChatResponse;
+        else if (event === "error") throw new Error(payload.error ?? "stream error");
+      }
+    }
+    if (!answer) throw new Error("stream ended without an answer");
+    return answer;
+  },
 
   // --- conversation history (the sidebar) ---
   conversations: (clientId: string) =>

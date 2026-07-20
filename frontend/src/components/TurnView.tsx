@@ -4,6 +4,7 @@ import type { ChatTurn } from "../hooks/useChat";
 import { ChatMessage } from "./ChatMessage";
 import { AssistantResponseCard } from "./AssistantResponseCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { AnalysisDetails, ProgressPanel } from "./ProgressPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { DrillContext } from "./DrillChat";
 
@@ -16,12 +17,14 @@ export const TurnView = memo(function TurnView({
   isFirst,
   onDrill,
   onRetry,
+  onAsk,
 }: {
   turn: ChatTurn;
   index: number;
   isFirst: boolean;
   onDrill?: (ctx: DrillContext) => void;
   onRetry?: (index: number) => void;
+  onAsk?: (q: string) => void;
 }) {
   const r = turn.response;
   return (
@@ -50,13 +53,19 @@ export const TurnView = memo(function TurnView({
               dir={turn.dir}
               onDrill={onDrill}
               onRetry={onRetry ? () => onRetry(index) : undefined}
+              onAsk={onAsk}
             />
+            {turn.progress && turn.progress.length > 0 && (
+              <AnalysisDetails events={turn.progress} dir={turn.dir} />
+            )}
           </ErrorBoundary>
         )
       ) : turn.stopped ? (
         <div className="px-1 py-3 text-sm italic text-muted">Response stopped.</div>
+      ) : turn.progress?.length ? (
+        <ProgressPanel events={turn.progress} dir={turn.dir} />
       ) : (
-        <ThinkingIndicator phase={turn.phase} />
+        <ThinkingIndicator />
       )}
     </div>
   );

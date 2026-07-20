@@ -1,5 +1,6 @@
 import { CalendarDays, ShieldCheck } from "lucide-react";
 import type { DateRange, Evidence } from "../lib/api";
+import { EV_LABELS, sqlStatusText, stepText, type AnalysisStep, type Lang } from "../lib/evidence";
 
 const CONFIDENCE_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   high: { bg: "#EAFBF4", fg: "#1B7A5E", label: "High confidence" },
@@ -59,31 +60,120 @@ function formatFreshness(iso: string): string {
  * pattern as the existing "View SQL" block, so trust affordances read as one
  * family of UI rather than a bolt-on. Renders nothing if there's no evidence
  * to show (e.g. a pure-prose answer that ran no query). */
-export function EvidencePanel({ evidence }: { evidence: Evidence | null | undefined }) {
+export function EvidencePanel({
+  evidence,
+  dir = "ltr",
+}: {
+  evidence: Evidence | null | undefined;
+  /** Direction of the QUESTION -- drives the panel's language too, so a
+   * Hebrew answer never shows an English trust panel. */
+  dir?: "rtl" | "ltr";
+}) {
   if (!evidence) return null;
-  const { semantic_definitions, date_range, filters_applied, data_sources, data_freshness } = evidence;
+  const lang: Lang = dir === "rtl" ? "he" : "en";
+  const L = EV_LABELS[lang];
+  const {
+    semantic_definitions,
+    date_range,
+    filters_applied,
+    data_sources,
+    data_engine,
+    database,
+    data_freshness,
+    records_used,
+    query_status,
+    queries_run,
+    queries_failed,
+    analysis_steps,
+    assumptions,
+  } = evidence;
   const hasDateRange = date_range && (date_range.start || date_range.end);
+  const steps = analysis_steps ?? [];
   const hasAnything =
-    semantic_definitions.length > 0 || data_sources.length > 0 || hasDateRange || filters_applied.length > 0 || data_freshness;
+    semantic_definitions.length > 0 ||
+    data_sources.length > 0 ||
+    hasDateRange ||
+    filters_applied.length > 0 ||
+    data_freshness ||
+    steps.length > 0;
   if (!hasAnything) return null;
+
+  // Only claim execution when a query actually ran.
+  const ran = query_status === "ok";
+  const failed = query_status === "failed";
 
   return (
     <details className="mt-4">
       <summary className="cursor-pointer list-none flex items-center gap-1.5 text-xs font-medium text-muted hover:text-primary transition w-fit">
-        <ShieldCheck size={14} /> Evidence
+        <ShieldCheck size={14} /> {L.evidence}
       </summary>
-      <div className="mt-2 rounded-lg border border-line bg-surfaceAlt p-3 text-[0.78rem] leading-relaxed">
+      <div
+        dir={dir}
+        className="mt-2 rounded-lg border border-line bg-surfaceAlt p-3 text-[0.78rem] leading-relaxed"
+      >
         {semantic_definitions.length > 0 && (
-          <Row label="Definition">{semantic_definitions.join(", ")}</Row>
+          <Row label={L.definition}>{semantic_definitions.join(", ")}</Row>
         )}
-        {data_sources.length > 0 && <Row label="Data sources">{data_sources.join(", ")}</Row>}
-        {hasDateRange && (
-          <Row label="Date range">
-            {date_range?.start ?? "?"} – {date_range?.end ?? "?"}
+
+        {/* The actual connection the tables came from. Engine + database NAME
+         * only -- host, user and credentials must never reach the UI. */}
+        {(data_engine || database) && (
+          <Row label={L.connection}>
+            <span dir="ltr">{[data_engine, database].filter(Boolean).join(" · ")}</span>
           </Row>
         )}
-        {filters_applied.length > 0 && <Row label="Filters">{filters_applied.join("; ")}</Row>}
-        {data_freshness && <Row label="As of">{formatFreshness(data_freshness)}</Row>}
+        {data_sources.length > 0 ? (
+          <Row label={L.sources}>
+            <span dir="ltr">{data_sources.join(", ")}</span>
+          </Row>
+        ) : (
+          ran && <Row label={L.sources}>{L.unavailable}</Row>
+        )}
+
+        {hasDateRange && (
+          <Row label={L.dateRange}>
+            <span dir="ltr">
+              {date_range?.start ?? "?"} – {date_range?.end ?? "?"}
+            </span>
+          </Row>
+        )}
+        {filters_applied.length > 0 && (
+          <Row label={L.filters}>
+            <span dir="ltr">{filters_applied.join("; ")}</span>
+          </Row>
+        )}
+
+        {/* Execution facts -- server-computed, never model-asserted. */}
+        {query_status && query_status !== "none" && (
+          <Row label={L.sqlStatus}>
+            <span className={failed ? "text-orange-700" : "text-emerald-700"}>
+              {sqlStatusText(query_status, queries_run ?? 0, queries_failed ?? 0, lang)}
+            </span>
+          </Row>
+        )}
+        {ran && typeof records_used === "number" && (
+          <Row label={L.rows}>{records_used.toLocaleString()}</Row>
+        )}
+
+        {/* Labelled as query time, not "last refresh" -- SEMA has no warehouse
+         * refresh signal and must not imply one. */}
+        {data_freshness && <Row label={L.queriedAt}>{formatFreshness(data_freshness)}</Row>}
+
+        <Row label={L.assumptions}>
+          {assumptions && assumptions.length > 0 ? assumptions.join("; ") : L.noAssumptions}
+        </Row>
+
+        {steps.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-lineSoft">
+            <div className="text-muted mb-1">{L.checked}</div>
+            <ol className="list-decimal ps-4 text-ink flex flex-col gap-0.5">
+              {steps.map((s, i) => {
+                const text = stepText(s as AnalysisStep, lang);
+                return text ? <li key={i}>{text}</li> : null;
+              })}
+            </ol>
+          </div>
+        )}
       </div>
     </details>
   );

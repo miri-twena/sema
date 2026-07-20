@@ -50,3 +50,62 @@ body {
 .sema-sql .sql-op      { color: #64748B; }                    /* operators */
 .sema-sql .sql-punct   { color: #94A3B8; }                    /* punctuation */
 .sema-sql .sql-comment { color: #94A3B8; font-style: italic; }
+
+/* Per-block copy control: hidden until the block is hovered or focused.
+   Plain CSS rather than Tailwind's named-group variant (group-hover/copy) so
+   the hover, keyboard-focus and touch rules for this affordance all live
+   together in one readable place. */
+.sema-copy-host { position: relative; }
+.sema-copy-affordance { opacity: 0; transition: opacity 0.15s ease; }
+.sema-copy-host:hover > .sema-copy-affordance,
+.sema-copy-host:focus-within > .sema-copy-affordance,
+.sema-copy-affordance:focus-within { opacity: 1; }
+
+/* On touch there is no hover state at all, so the control must stay visible
+   or it would be unreachable. */
+@media (hover: none) {
+  .sema-copy-affordance { opacity: 1; }
+}
+
+/* Code is always left-to-right, whatever the surrounding UI language.
+   `unicode-bidi: isolate` is the load-bearing part: without it the bidi
+   algorithm lets an RTL paragraph reorder the block's neutral characters --
+   parentheses, commas and semicolons drift to the wrong end and the copied
+   query is no longer valid SQL. `direction`/`text-align` alone don't fix that. */
+.sema-sql,
+.sema-code,
+.sema-code-inline,
+.sema-prose pre,
+.sema-prose code {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+/* Fenced code blocks in answer markdown (previously unstyled). */
+.sema-code {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #e8edf3;
+  border-radius: 0.75rem;
+  background: #f1f5f9;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: #1e293b;
+  white-space: pre;
+}
+.sema-code code { font: inherit; background: none; padding: 0; }
+
+/* Inline code spans. */
+.sema-code-inline {
+  display: inline-block;
+  padding: 0.05rem 0.32rem;
+  border-radius: 0.35rem;
+  background: #f1f5f9;
+  border: 1px solid #e8edf3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  color: #334155;
+}

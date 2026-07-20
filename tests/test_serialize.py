@@ -41,6 +41,28 @@ def test_table_dates_and_decimals_are_json_safe():
     assert float(row["revenue"]) == 1234.56
 
 
+def test_table_reports_full_row_count_and_ships_every_row():
+    """The UI's "Showing 1-50 of 406" counter and CSV export both depend on the
+    whole result set arriving, with total_rows agreeing with it."""
+    df = pd.DataFrame({"customer_id": range(406), "revenue": range(406)})
+    out = to_chat_response(_resp_dict(table=df, table_title="VIPs"))
+    assert out.table is not None
+    assert len(out.table.rows) == 406
+    assert out.table.total_rows == 406
+    assert out.table.truncated is False
+
+
+def test_table_flags_truncation_at_the_safety_cap():
+    """A result sitting exactly on SEMA_ROW_LIMIT was almost certainly cut
+    there, so it must not present itself as a complete list."""
+    from sema_core.settings import settings
+
+    df = pd.DataFrame({"customer_id": range(settings.row_limit)})
+    out = to_chat_response(_resp_dict(table=df, table_title="All"))
+    assert out.table is not None
+    assert out.table.truncated is True
+
+
 def test_chart_spec_maps_to_contract():
     df = pd.DataFrame({"month": ["2026-01"], "revenue": [10]})
     out = to_chat_response(

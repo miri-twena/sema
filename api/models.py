@@ -74,6 +74,12 @@ class Table(BaseModel):
     title: str | None = None
     columns: list[str] = []
     rows: list[dict[str, Any]] = []
+    # Rows the backing query actually returned. Equals len(rows) unless the SQL
+    # safety cap (SEMA_ROW_LIMIT) trimmed the result -- the UI shows this as
+    # "Showing 1-50 of 406" and warns when `truncated` is set, so a capped list
+    # can never masquerade as a complete one.
+    total_rows: int = 0
+    truncated: bool = False
 
 
 class DateRange(BaseModel):
@@ -93,12 +99,32 @@ class Evidence(BaseModel):
     date_range: DateRange | None = None
     filters_applied: list[str] = []
     data_sources: list[str] = []  # DB tables the backing SQL actually queried (parsed, not asserted)
+    data_engine: str | None = None  # e.g. "PostgreSQL" -- only when a query ran
+    database: str | None = None  # database NAME only; never host/user/credentials
     data_freshness: str | None = None  # ISO timestamp: when the backing query ran
+    # Deterministic execution facts (server-computed, never model-asserted).
+    query_status: Literal["ok", "failed", "none"] = "none"
+    queries_run: int = 0
+    queries_failed: int = 0
+    # Short factual statements about the operations performed -- built from
+    # executed tools and result metadata, never from model reasoning.
+    analysis_steps: list[dict[str, Any]] = []
+    # Model self-report, shown verbatim when an assumption was required.
+    assumptions: list[str] = []
     records_used: int | None = None  # total rows returned by the SQL that backs this answer
 
 
 class ChatResponse(BaseModel):
     answer: str
+    # How SEMA responded. Explicit on the contract so the client renders by
+    # mode rather than sniffing the prose. Defaults to "answer" so responses
+    # from the rule-based insight_builder stay valid unchanged.
+    mode: Literal["answer", "clarification", "cannot_answer", "off_topic"] = "answer"
+    reason_code: str | None = None
+    # mode="clarification": 2-4 tappable choices that resolve the ambiguity.
+    clarification_options: list[str] = []
+    # mode="cannot_answer": the specific data/definition gap.
+    missing: str | None = None
     kpis: list[Kpi] = []
     chart: Chart | None = None
     table: Table | None = None

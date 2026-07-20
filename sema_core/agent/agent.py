@@ -28,7 +28,7 @@ import os
 import time
 
 from sema_core.agent.prompts import SYSTEM_PROMPT, build_user_message
-from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response
+from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response, tables_in_sql as _tables_in
 from sema_core.agent.tools import TOOL_SCHEMAS, AgentTools
 from sema_core.client_registry import active_client_id
 from sema_core.obs import get_logger, log_event
@@ -74,6 +74,10 @@ def api_key_configured() -> bool:
 
 def _empty_response() -> dict:
     return {
+        # Fallback paths (API error, prose answer, max iterations) are plain
+        # narrative, not a graded analysis -- they carry the default mode and
+        # the serializer treats a missing mode the same way.
+        "mode": "answer",
         "insight_text": "",
         "kpis": [],
         "charts": [],
@@ -95,7 +99,9 @@ def _basic_response(insight_text: str, tools: AgentTools) -> dict:
     if tools.results:
         last = tools.results[-1]["df"]
         if last is not None and not last.empty:
-            resp["table"] = last.head(15)
+            # Full result, not a preview -- bounded by the SQL safety row cap
+            # and paginated by the UI. See build_response() for the same rule.
+            resp["table"] = last
             resp["table_title"] = "Query result"
     return resp
 
@@ -122,12 +128,14 @@ def _api_error_class():
 
 
 
-# Human-readable status per tool name, shown to the user while the loop runs
-# (via on_progress). "run_sql" gets a per-call counter appended ("...2").
-_TOOL_STATUS = {
-    "get_schema": "Reading the database schema",
-    "get_semantic_layer": "Consulting the semantic layer",
-    "run_sql": "Running query",
+# Progress STAGE KEYS (not prose): each one corresponds to an actual tool
+# dispatch, and the client renders the label in the user's language. Emitting
+# keys + real numbers -- never sentences -- is what keeps the progress panel
+# truthful and localizable without a second model call.
+_TOOL_STAGE = {
+    "get_schema": "schema",
+    "get_semantic_layer": "semantic",
+    "run_sql": "run_sql",
 }
 
 
@@ -158,7 +166,7 @@ def run(
     the UI renders.
     """
     if on_progress is None:
-        on_progress = lambda _msg: None  # no-op: identical code path either way
+        on_progress = lambda _event: None  # no-op: identical code path either way
     # Missing-key guard: only relevant when we'd build a real client.
     if client is None and not api_key_configured():
         return not_configured_response()
@@ -197,6 +205,10 @@ def run(
             question_len=len(question),
             duration_ms=round((time.perf_counter() - started) * 1000),
             outcome=outcome,
+            # Response mode + reason travel on the run line too, so a single
+            # request_id correlates the mode with its tool/cost context.
+            mode=resp.get("mode"),
+            reason_code=resp.get("reason_code"),
             rounds=rounds,
             tool_calls=tool_calls,
             sql_statements=len(tools.results),
@@ -284,7 +296,7 @@ def run(
         for block in response.content:
             if block.type == "tool_use" and block.name == PRESENT_ANSWER_TOOL["name"]:
                 tool_calls += 1
-                on_progress("Writing the answer")
+                on_progress({"stage": "writing"})
                 return _finish(build_response(block.input, tools), "present_answer")
 
         # Otherwise run the data tools and send results back for the next turn.
@@ -292,11 +304,32 @@ def run(
         for block in response.content:
             if block.type == "tool_use":
                 tool_calls += 1
-                status = _TOOL_STATUS.get(block.name, block.name)
-                if block.name == "run_sql":
-                    status = f"{status} {len(tools.results) + 1}"
-                on_progress(status)
+                stage = _TOOL_STAGE.get(block.name, "tool")
+                # 1-based index of THIS query among the successful ones so far.
+                query_index = len(tools.results) + 1
+                on_progress(
+                    {"stage": stage, "index": query_index}
+                    if block.name == "run_sql"
+                    else {"stage": stage}
+                )
                 result = tools.dispatch(block.name, block.input)
+
+                # Report the OUTCOME too -- a stage that only announces intent
+                # would keep showing "running" for a query that already failed.
+                if block.name == "run_sql":
+                    if result.get("error"):
+                        on_progress({"stage": "run_sql_error", "index": query_index})
+                    else:
+                        on_progress(
+                            {
+                                "stage": "run_sql_done",
+                                "index": query_index,
+                                "rows": int(result.get("row_count") or 0),
+                                # Real tables from the executed SQL, so the panel
+                                # can name sources while the run is in flight.
+                                "tables": _tables_in(result.get("sql_executed", "")),
+                            }
+                        )
                 tool_results.append(
                     {
                         "type": "tool_result",

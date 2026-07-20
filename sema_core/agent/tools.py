@@ -147,6 +147,10 @@ class AgentTools:
         # Each entry: {"sql": str, "df": pd.DataFrame}. Used later to build
         # the table/chart in the final response.
         self.results: list[dict] = []
+        # Failed run_sql attempts, kept SEPARATE from `results` so the model's
+        # result_index bindings stay aligned with the successful queries. Used
+        # only for truthful execution status in the evidence panel.
+        self.failures: list[dict] = []
 
     # --- the three tools ---------------------------------------------------
     def get_schema(self) -> dict:
@@ -182,12 +186,14 @@ class AgentTools:
         try:
             safe_sql = validate_and_prepare(query)
         except SQLSafetyError as e:
+            self.failures.append({"stage": "validation", "error": str(e)})
             return {"error": f"Rejected by safety check: {e}"}
 
         # Layer 1 + 3: read-only role + statement timeout.
         try:
             df = run_sql_readonly(safe_sql)
         except Exception as e:  # timeout, SQL error caught by Postgres, etc.
+            self.failures.append({"stage": "execution", "error": str(e).splitlines()[0]})
             return {"error": f"Query failed: {str(e).splitlines()[0]}"}
 
         self.results.append({"sql": safe_sql, "df": df})

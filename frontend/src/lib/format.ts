@@ -1,29 +1,74 @@
 // Shared formatting helpers. Single source of truth for numbers/dates across
 // KPI cards, charts, and tables (previously duplicated in three components).
 
-/** 1,672,356 -> "1.67M", 824,068 -> "824.1K" -- for glanceable KPI cards. */
+/** How a value should read. `count` and `currency` differ deliberately:
+ * money abbreviates (K/M) because magnitude is what matters at a glance,
+ * counts never do because "1.2K customers" hides whether it's 1,200 or 1,249. */
+export type MetricType = "currency" | "count" | "id" | "percent" | "ratio" | "text";
+
+/** "1.30" -> "1.3", "600.0" -> "600"; keeps "2.85" intact. */
+function trimZeros(s: string): string {
+  return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
+}
+
+/** 1,672,356 -> "1.67M", 824,068 -> "824.1K", 600,000 -> "600K".
+ * Currency only -- counts never abbreviate, see MetricType. */
 export function compact(n: number): string {
   const a = Math.abs(n);
-  if (a >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (a >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (a >= 1_000_000) return `${trimZeros((n / 1_000_000).toFixed(2))}M`;
+  if (a >= 1_000) return `${trimZeros((n / 1_000).toFixed(1))}K`;
   return n.toLocaleString();
 }
 
-/** KPI value per its declared format. */
-export function formatValue(value: number | string, fmt: string): string {
-  if (typeof value !== "number") return String(value);
-  switch (fmt) {
+/** Columns whose values identify an entity. Such values are TEXT even when
+ * they parse as numbers -- customer 1047 must never render as "1,047".
+ * Anchored to a word boundary so "paid"/"valid"/"void" don't match "id". */
+const ID_COLUMN = /(^|_)(id|ids|sku|upc|ean|isbn|uuid|guid|code)$/;
+
+export function isIdColumn(name: string): boolean {
+  return ID_COLUMN.test(name.trim().toLowerCase().replace(/\s+/g, "_"));
+}
+
+/** Single source of truth for rendering a metric. Every card, chart, tooltip
+ * and table cell goes through here so the count/currency/id rules can't drift. */
+export function formatMetric(value: unknown, type: MetricType): string {
+  if (value === null || value === undefined) return "";
+
+  // Identifiers are stringified verbatim -- no separators, no abbreviation.
+  // String() also normalizes the 1047.0 that JSON/pandas can hand back for an
+  // integer id down to "1047".
+  if (type === "id") return String(value);
+
+  if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
+
+  switch (type) {
     case "currency":
       return `$${compact(value)}`;
+    case "count":
+      // Always full precision with thousands separators: "1,247", never "1.2K".
+      return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
     case "percent":
       return `${value.toFixed(1)}%`;
-    case "number":
-      return compact(value);
     case "ratio":
       return `${value.toFixed(2)}x`;
     default:
       return String(value);
   }
+}
+
+/** Maps the backend's declared KPI format onto a MetricType. The backend's
+ * "number" means "numeric, non-monetary" -- i.e. a count. */
+const KPI_FORMATS: Record<string, MetricType> = {
+  currency: "currency",
+  percent: "percent",
+  number: "count",
+  ratio: "ratio",
+  text: "text",
+};
+
+/** KPI value per its declared format. */
+export function formatValue(value: number | string, fmt: string): string {
+  return formatMetric(value, KPI_FORMATS[fmt] ?? "text");
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
@@ -51,10 +96,12 @@ function isoToLabel(v: string): string {
 }
 
 /** A raw table cell -> human string: ISO dates become "Jun 2025", numbers get
- *  thousands separators, everything else passes through. */
-export function formatCell(v: unknown): string {
+ *  thousands separators, everything else passes through. Pass `column` so
+ *  id-like columns render as plain text rather than formatted numbers. */
+export function formatCell(v: unknown, column?: string): string {
   if (v === null || v === undefined) return "";
-  if (typeof v === "number") return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (column && isIdColumn(column)) return formatMetric(v, "id");
+  if (typeof v === "number") return formatMetric(v, "count");
   if (typeof v === "string" && ISO_DATE.test(v)) return isoToLabel(v);
   return String(v);
 }
@@ -69,17 +116,9 @@ export function formatX(v: unknown): string {
   return String(v ?? "");
 }
 
-/** Chart y-axis / tooltip tick formatter, aware of the metric type. */
+/** Chart y-axis / tooltip tick formatter, aware of the metric type. Routes
+ * through formatMetric so axes and tooltips match the KPI cards exactly. */
 export function makeAxisTickFormatter(yFormat?: string | null) {
-  return (v: unknown): string => {
-    if (typeof v !== "number") return String(v ?? "");
-    if (yFormat === "currency") {
-      const a = Math.abs(v);
-      if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-      if (a >= 1_000) return `$${(v / 1_000).toFixed(0)}k`;
-      return `$${v}`;
-    }
-    if (yFormat === "percent") return `${v}%`;
-    return v.toLocaleString();
-  };
+  const type: MetricType = yFormat ? (KPI_FORMATS[yFormat] ?? "count") : "count";
+  return (v: unknown): string => formatMetric(v, type);
 }

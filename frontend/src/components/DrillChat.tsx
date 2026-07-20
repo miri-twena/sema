@@ -48,6 +48,9 @@ export function DrillChat({
   );
   const chat = useChat({ clientId, drillContext, persistKey: null });
   const dir = widget.dir ?? "ltr";
+  // The header shows the title in full; the placeholder still needs a short
+  // form so it stays readable on one line.
+  const shortTitle = widget.title.length > 40 ? widget.title.slice(0, 40) + "…" : widget.title;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Exit animation: the panel is on-screen by default (robust -- if animation
@@ -108,10 +111,13 @@ export function DrillChat({
           closing ? "animate-[sema-slide-out-right_0.2s_ease-in_forwards]" : "animate-[sema-slide-in-right_0.2s_ease-out]"
         }`}
       >
-        <header className="flex items-center justify-between px-5 py-4 border-b border-line bg-surface shrink-0">
+        <header className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line bg-surface shrink-0">
           <div className="min-w-0">
             <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">Drill-down</div>
-            <div className="text-sm font-semibold text-ink truncate">{widget.title}</div>
+            {/* No truncation: the full action/widget title wraps to 2-3 lines.
+             * The header is shrink-0 in a flex column, so the panel below just
+             * shifts down. */}
+            <div className="text-sm font-semibold text-ink break-words leading-snug">{widget.title}</div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
@@ -165,7 +171,7 @@ export function DrillChat({
           )}
 
           {chat.turns.map((turn, i) => (
-            <TurnView key={i} turn={turn} index={i} isFirst={i === 0} onRetry={chat.retry} />
+            <TurnView key={i} turn={turn} index={i} isFirst={i === 0} onRetry={chat.retry} onAsk={chat.send} />
           ))}
         </div>
 
@@ -174,8 +180,11 @@ export function DrillChat({
             onSend={chat.send}
             onStop={chat.stop}
             loading={chat.loading}
-            initialValue={widget.initialInput}
-            placeholder={dir === "rtl" ? `שאל/י לגבי ${widget.title}...` : `Ask about ${widget.title}...`}
+            expandable
+            // Ghost text, not a pre-filled value -- a pre-filled input blocked
+            // the user from just typing their own question.
+            suggestion={widget.initialInput}
+            placeholder={dir === "rtl" ? `שאל/י לגבי ${shortTitle}...` : `Ask about ${shortTitle}...`}
           />
         </div>
       </aside>

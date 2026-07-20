@@ -13,11 +13,14 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import { MessageSquareText } from "lucide-react";
+import { useRef } from "react";
+import { MessageSquareText, Image as ImageIcon, Table2 } from "lucide-react";
 import type { Chart } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { formatX, makeAxisTickFormatter } from "../lib/format";
 import { CHART_PALETTE as PALETTE } from "../lib/tokens";
+import { CopyableBlock } from "./CopyButton";
+import { copyPng, copyRich, svgToPngBlob, toHTMLTable, toTSV } from "../lib/clipboard";
 
 type Row = Record<string, unknown>;
 
@@ -44,9 +47,10 @@ export function ChartRenderer({
   dir?: "rtl" | "ltr";
   onDrill?: (ctx: DrillContext) => void;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const { kind, rows, x, y, color, names, values, y_format, title } = chart;
-  if (!rows?.length) return null;
   const fmt = makeAxisTickFormatter(y_format);
+  if (!rows?.length) return null;
 
   const axis = { stroke: "#94A3B8", fontSize: 12 };
   const grid = <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F7" vertical={false} />;
@@ -61,7 +65,7 @@ export function ChartRenderer({
             <Cell key={i} fill={PALETTE[i % PALETTE.length]} stroke="#fff" strokeWidth={2} />
           ))}
         </Pie>
-        <Tooltip />
+        <Tooltip formatter={fmt as never} />
         <Legend />
       </PieChart>
     );
@@ -119,6 +123,22 @@ export function ChartRenderer({
 
   if (!body) return null;
 
+  const copyImage = async () => {
+    // Must target the Recharts surface specifically: a bare querySelector("svg")
+    // picks up the "Ask about this" button's Lucide icon, which sits earlier in
+    // DOM order and would rasterize a 14px icon instead of the chart.
+    const svg = wrapRef.current?.querySelector(".recharts-surface");
+    if (!svg) throw new Error("Chart is not ready yet");
+    // svgToPngBlob is passed UNAWAITED so the rasterize stays inside the click
+    // gesture -- see copyPng.
+    await copyPng(svgToPngBlob(svg as SVGSVGElement));
+  };
+
+  const copyData = async () => {
+    const cols = chart.columns?.length ? chart.columns : Object.keys((rows[0] as Row) ?? {});
+    await copyRich(toTSV(cols, rows as Row[]), toHTMLTable(cols, rows as Row[]));
+  };
+
   const drill = () =>
     onDrill?.({
       kind: "chart",
@@ -130,22 +150,32 @@ export function ChartRenderer({
     });
 
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between mb-1 gap-2">
-        {title && <div className="text-sm font-semibold text-ink">{title}</div>}
-        {onDrill && (
-          <button
-            onClick={drill}
-            className="shrink-0 flex items-center gap-1 text-xs text-muted hover:text-primary transition"
-            title="Ask about this chart"
-          >
-            <MessageSquareText size={14} /> Ask about this
-          </button>
-        )}
+    <CopyableBlock
+      className="mt-3"
+      title="Copy chart as image"
+      actions={[
+        { label: "Copy image", icon: <ImageIcon size={13} />, run: copyImage },
+        { label: "Copy underlying data", icon: <Table2 size={13} />, run: copyData },
+      ]}
+    >
+      <div ref={wrapRef}>
+        <div className="flex items-center justify-between mb-1 gap-2">
+          {title && <div className="text-sm font-semibold text-ink">{title}</div>}
+          {onDrill && (
+            // me-9 keeps this clear of the floating copy control.
+            <button
+              onClick={drill}
+              className="shrink-0 ms-auto me-9 flex items-center gap-1 text-xs text-muted hover:text-primary transition"
+              title="Ask about this chart"
+            >
+              <MessageSquareText size={14} /> Ask about this
+            </button>
+          )}
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
+          {body as React.ReactElement}
+        </ResponsiveContainer>
       </div>
-      <ResponsiveContainer width="100%" height={280}>
-        {body as React.ReactElement}
-      </ResponsiveContainer>
-    </div>
+    </CopyableBlock>
   );
 }

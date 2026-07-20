@@ -11,6 +11,10 @@ import { MessageActions } from "./MessageActions";
 import { SqlBlock } from "./SqlBlock";
 import type { DrillContext } from "./DrillChat";
 import { ConfidenceBadge, EvidencePanel, PeriodBanner } from "./EvidencePanel";
+import { CopyableBlock } from "./CopyButton";
+import { CodeBlock, InlineCode } from "./CodeBlock";
+import { ModeCard } from "./ModeCard";
+import { copyRich } from "../lib/clipboard";
 
 // Recharts is heavy (~half the bundle); load it only when an answer has a chart.
 const ChartRenderer = lazy(() => import("./ChartRenderer").then((m) => ({ default: m.ChartRenderer })));
@@ -20,14 +24,17 @@ export function AssistantResponseCard({
   dir,
   onDrill,
   onRetry,
+  onAsk,
 }: {
   response: ChatResponse;
   dir: "rtl" | "ltr";
   onDrill?: (ctx: DrillContext) => void;
   onRetry?: () => void;
+  /** Sends a follow-up in the SAME conversation -- drives clarification
+   * choices and cannot-answer alternatives. */
+  onAsk?: (q: string) => void;
 }) {
-  // Wraps the answer body so MessageActions can find the chart SVG to copy.
-  const contentRef = useRef<HTMLDivElement>(null);
+  const proseRef = useRef<HTMLDivElement>(null);
   if (response.status === "error") {
     return (
       <Card className="p-4 border-critical-fg/30">
@@ -38,9 +45,29 @@ export function AssistantResponseCard({
     );
   }
 
+  // Non-answer modes render as their own calm state: no confidence badge, no
+  // period banner, and none of the analytical sections below. The server has
+  // already stripped KPIs/charts/evidence for these, so this is belt-and-braces
+  // -- the mode alone decides, never the prose.
+  const mode = response.mode ?? "answer";
+  if (mode !== "answer") {
+    return (
+      <Card className="p-4">
+        <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
+            <span className="text-xs font-semibold text-primary-dark">SEMA</span>
+          </div>
+          <ModeCard response={response} dir={dir} onAsk={onAsk} />
+          <MessageActions text={response.answer} onRetry={onRetry} />
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-4">
-      <div ref={contentRef} dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
+      <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
         <div className="flex items-center gap-2 mb-1.5">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
           <span className="text-xs font-semibold text-primary-dark">SEMA</span>
@@ -49,9 +76,25 @@ export function AssistantResponseCard({
 
         <PeriodBanner dateRange={response.evidence?.date_range} />
 
-        <div className="sema-prose text-ink text-[0.94rem]">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{response.answer}</ReactMarkdown>
-        </div>
+        {/* Plain text gets the raw markdown source; rich targets get the
+         * rendered HTML straight off the DOM node. */}
+        <CopyableBlock
+          title="Copy this text"
+          actions={[
+            {
+              label: "Copy text",
+              run: () => copyRich(response.answer, proseRef.current?.innerHTML ?? response.answer),
+            },
+          ]}
+        >
+          <div ref={proseRef} className="sema-prose text-ink text-[0.94rem]">
+            {/* Code in an answer gets its own LTR-isolated block + copy button;
+             * `pre` covers fenced blocks, `code` the inline spans. */}
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, code: InlineCode }}>
+              {response.answer}
+            </ReactMarkdown>
+          </div>
+        </CopyableBlock>
 
         {response.kpis.length > 0 && (
           <div className="mt-3">
@@ -77,14 +120,9 @@ export function AssistantResponseCard({
           </details>
         )}
 
-        <EvidencePanel evidence={response.evidence} />
+        <EvidencePanel evidence={response.evidence} dir={dir} />
 
-        <MessageActions
-          text={response.answer}
-          hasImage={!!response.chart}
-          containerRef={contentRef}
-          onRetry={onRetry}
-        />
+        <MessageActions text={response.answer} onRetry={onRetry} />
       </div>
     </Card>
   );

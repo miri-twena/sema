@@ -27,6 +27,7 @@ import pandas as pd
 import sqlglot
 from sqlglot import expressions as exp
 
+from sema_core.client_registry import active_client_id
 from sema_core.obs import get_logger, log_event
 
 logger = get_logger("agent")
@@ -44,10 +45,51 @@ PRESENT_ANSWER_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["answer", "clarification", "cannot_answer", "off_topic"],
+                "description": (
+                    "How you are responding. 'answer': the result is grounded in "
+                    "executed queries. 'clarification': business question you COULD "
+                    "answer, but one detail is materially ambiguous -- ask instead of "
+                    "guessing. 'cannot_answer': the connected data cannot reliably "
+                    "support an answer. 'off_topic': not about this business at all. "
+                    "Default to 'answer' only when genuinely grounded."
+                ),
+            },
+            "reason_code": {
+                "type": "string",
+                "enum": [
+                    "ambiguous_metric",
+                    "missing_date_range",
+                    "missing_data_source",
+                    "empty_result",
+                    "unsupported_prediction",
+                    "off_topic",
+                    "insufficient_grounding",
+                ],
+                "description": "Machine-readable reason for a non-'answer' mode.",
+            },
+            "clarification_options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "For mode='clarification': 2-4 SHORT selectable "
+                "options that resolve the ambiguity (e.g. ['Gross revenue', 'Net "
+                "revenue']). The user taps one and it continues this same "
+                "analysis, so each must be a complete, self-contained choice.",
+            },
+            "missing": {
+                "type": "string",
+                "description": "For mode='cannot_answer': the specific data, table "
+                "or business definition that is missing. One short sentence.",
+            },
             "insight_text": {
                 "type": "string",
                 "description": "The narrative answer in markdown. Lead with the "
-                "direct answer and key numbers; quantify drivers.",
+                "direct answer and key numbers; quantify drivers. For "
+                "clarification/cannot_answer/off_topic this is the message itself "
+                "-- for off_topic keep it to 1-2 light, friendly sentences that "
+                "redirect to business analysis, in the user's language.",
             },
             "kpis": {
                 "type": "array",
@@ -186,16 +228,34 @@ PRESENT_ANSWER_TOOL = {
                         "description": "Human-readable filters your SQL applied, "
                         "e.g. [\"status = 'completed'\", \"segment = 'VIP'\"].",
                     },
+                    "assumptions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Any assumption you had to make that the "
+                        "data did not state outright (e.g. 'treated NULL channel "
+                        "as Direct'). Shown to the user verbatim. Omit when there "
+                        "were none -- never invent one.",
+                    },
                 },
             },
         },
-        "required": ["insight_text", "recommended_actions"],
+        "required": ["mode", "insight_text"],
     },
 }
+
+VALID_MODES = ("answer", "clarification", "cannot_answer", "off_topic")
+# Modes that must never carry analytical furniture (KPI cards, charts, tables,
+# confidence badges, evidence). Enforced server-side in _apply_mode_policy so a
+# model slip can't render a confident-looking card on an unanswered question.
+NON_ANSWER_MODES = ("clarification", "cannot_answer", "off_topic")
 
 
 def _empty_response() -> dict:
     return {
+        "mode": "answer",
+        "reason_code": None,
+        "clarification_options": [],
+        "missing": None,
         "insight_text": "",
         "kpis": [],
         "charts": [],
@@ -218,6 +278,23 @@ def _df_at(tools, index) -> pd.DataFrame | None:
     if 0 <= i < len(tools.results):
         return tools.results[i]["df"]
     return None
+
+
+def _database_name() -> str | None:
+    """The database this client's queries actually ran against. Name only --
+    never host, user or password, which must not reach the UI."""
+    try:
+        from sema_core.db import _db_name
+
+        return _db_name(active_client_id())
+    except Exception:
+        return None  # unavailable -> the UI omits it rather than guessing
+
+
+def tables_in_sql(sql: str) -> list[str]:
+    """Public alias -- the agent loop uses this to name real data sources in
+    progress events while a run is still in flight."""
+    return _tables_in(sql)
 
 
 def _tables_in(sql: str) -> list[str]:
@@ -268,6 +345,16 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
     for r in results:
         data_sources.update(_tables_in(r.get("sql", "")))
 
+    failures = list(getattr(tools, "failures", None) or [])
+    # Factual execution status -- "ok" only if a query actually ran and
+    # returned. Never claim verification when nothing was executed.
+    if results:
+        status = "ok"
+    elif failures:
+        status = "failed"
+    else:
+        status = "none"
+
     return {
         "semantic_definitions": list(raw.get("semantic_definitions", [])),
         "date_range": (
@@ -277,9 +364,76 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
         ),
         "filters_applied": list(raw.get("filters_applied", [])),
         "data_sources": sorted(data_sources),
+        # The connection the tables actually came from. Resolved from the real
+        # per-client DB config -- shown only when a query ran, so it can never
+        # imply a source that wasn't touched.
+        "data_engine": "PostgreSQL" if results else None,
+        "database": _database_name() if results else None,
+        # NOTE: this is when the backing query RAN, not when the warehouse last
+        # refreshed -- SEMA has no refresh signal, so the UI labels it as such
+        # rather than implying a freshness it cannot know.
         "data_freshness": datetime.now(timezone.utc).isoformat(),
         "records_used": sum(len(r["df"]) for r in results if r.get("df") is not None),
+        "query_status": status,
+        "queries_run": len(results),
+        "queries_failed": len(failures),
+        # Model self-report, same trust level as filters_applied. Shown verbatim
+        # so a required assumption is visible instead of silently baked in.
+        "assumptions": [
+            a.strip() for a in (raw.get("assumptions") or []) if isinstance(a, str) and a.strip()
+        ],
     }
+
+
+def _analysis_steps(resp: dict, tools) -> list[dict]:
+    """What actually happened, as STRUCTURED operations -- never prose.
+
+    Each entry is {"op": <key>, ...params}: the client renders the sentence in
+    the user's language, exactly like progress stages. Emitting English strings
+    here would make a Hebrew answer's trust panel read in English.
+
+    Every entry is backed by something observable: a semantic metric the model
+    cited, a filter it reported, tables parsed out of the executed SQL, real
+    row counts, and widgets actually bound to a result.
+    """
+    ev = resp.get("evidence") or {}
+    results = _executed_results(tools)
+    steps: list[dict] = []
+
+    for metric in ev.get("semantic_definitions", []):
+        steps.append({"op": "metric", "name": metric})
+
+    dr = ev.get("date_range") or {}
+    if dr.get("start") or dr.get("end"):
+        steps.append({"op": "date_range", "start": dr.get("start"), "end": dr.get("end")})
+
+    for f in ev.get("filters_applied", []):
+        steps.append({"op": "filter", "value": f})
+
+    if results:
+        steps.append(
+            {"op": "queries", "count": len(results), "sources": ev.get("data_sources") or []}
+        )
+        steps.append({"op": "rows", "count": ev.get("records_used", 0)})
+
+    # A delta only exists when the model computed one against a baseline, so
+    # this is evidence of a real comparison rather than an assumed one.
+    if any(k.get("delta") is not None for k in resp.get("kpis", [])):
+        steps.append({"op": "comparison"})
+
+    for spec in resp.get("charts", []):
+        by = spec.get("x") or spec.get("names")
+        if by:
+            steps.append({"op": "breakdown", "by": by})
+
+    if resp.get("table") is not None:
+        steps.append({"op": "table_rows", "count": len(resp["table"])})
+
+    failed = ev.get("queries_failed") or 0
+    if failed:
+        steps.append({"op": "failed_queries", "count": failed})
+
+    return steps
 
 
 def _coerce_scalar(v):
@@ -356,9 +510,97 @@ def _clean_kpi(raw: dict, tools) -> dict:
     return kpi
 
 
+def _executed_results(tools) -> list:
+    """The run_sql results this answer could be grounded in."""
+    return list(getattr(tools, "results", None) or [])
+
+
+def _apply_mode_policy(resp: dict, tools) -> dict:
+    """Deterministic grounding gate, applied AFTER the model has spoken.
+
+    The model proposes a mode; this decides whether the evidence actually
+    supports it. Self-reported confidence is deliberately NOT a factor -- the
+    signals here are observable facts about what ran:
+
+      * mode='answer' with no executed SQL      -> insufficient_grounding
+      * mode='answer' with only empty results   -> empty_result
+
+    Both downgrade to cannot_answer, so an ungrounded claim can never reach the
+    user wearing a confidence badge. Non-answer modes get their analytical
+    furniture stripped, since a KPI card or chart next to "I can't answer this"
+    is exactly the false-confidence signal this flow exists to remove.
+    """
+    results = _executed_results(tools)
+    ran_sql = len(results) > 0
+    any_rows = any(
+        r.get("df") is not None and not r["df"].empty for r in results
+    )
+
+    if resp["mode"] == "answer":
+        if not ran_sql:
+            resp["mode"] = "cannot_answer"
+            resp["reason_code"] = "insufficient_grounding"
+            resp["missing"] = resp["missing"] or (
+                "No query was executed, so there is no data behind this answer."
+            )
+        elif not any_rows:
+            resp["mode"] = "cannot_answer"
+            resp["reason_code"] = "empty_result"
+            resp["missing"] = resp["missing"] or (
+                "The query ran but returned no rows for the requested scope."
+            )
+
+    if resp["mode"] in NON_ANSWER_MODES:
+        # No analytical furniture and no trust signals on a non-answer.
+        resp["kpis"] = []
+        resp["charts"] = []
+        resp["table"] = None
+        resp["table_title"] = None
+        resp["confidence"] = None
+        resp["evidence"] = None
+        if resp["mode"] != "cannot_answer":
+            # Clarification never runs speculative SQL, and off-topic must not
+            # touch business tools at all -- so neither shows a query.
+            resp["sql_used"] = None
+        if resp["mode"] == "off_topic":
+            resp["reason_code"] = "off_topic"
+            resp["recommended_actions"] = []
+    else:
+        resp["clarification_options"] = []
+
+    if resp["mode"] != "clarification":
+        resp["clarification_options"] = []
+
+    log_event(
+        logger,
+        "response_mode",
+        client_id=active_client_id(),
+        mode=resp["mode"],
+        reason_code=resp["reason_code"],
+        tools_executed=ran_sql,
+        sql_statements=len(results),
+        returned_rows=any_rows,
+        # Whether the model cited a semantic-layer metric it actually applied.
+        semantic_match=bool((resp.get("evidence") or {}).get("semantic_definitions")),
+    )
+    return resp
+
+
 def build_response(tool_input: dict, tools) -> dict:
     """Turn a present_answer payload into the UI's response dict."""
     resp = _empty_response()
+
+    mode = tool_input.get("mode")
+    resp["mode"] = mode if mode in VALID_MODES else "answer"
+    reason = tool_input.get("reason_code")
+    resp["reason_code"] = reason if isinstance(reason, str) and reason else None
+    missing = tool_input.get("missing")
+    resp["missing"] = missing.strip() if isinstance(missing, str) and missing.strip() else None
+    resp["clarification_options"] = [
+        o.strip()
+        for o in (tool_input.get("clarification_options") or [])
+        if isinstance(o, str) and o.strip()
+    ][:4]
     resp["insight_text"] = tool_input.get("insight_text", "")
     resp["recommended_actions"] = list(tool_input.get("recommended_actions", []))
     # Answerable follow-up questions -- kept only if they're non-empty strings;
@@ -383,7 +625,11 @@ def build_response(tool_input: dict, tools) -> dict:
     if isinstance(table, dict) and "result_index" in table:
         df = _df_at(tools, table["result_index"])
         if df is not None and not df.empty:
-            resp["table"] = df.head(15)
+            # Pass the FULL result through. It is already bounded by the SQL
+            # safety layer's row cap (SEMA_ROW_LIMIT), and the UI paginates --
+            # so a "list all 406 VIP customers" answer must not be silently
+            # cut to a preview here.
+            resp["table"] = df
             resp["table_title"] = table.get("title", "Result")
 
     # Surface the SQL the agent actually ran (for the UI's "View SQL" trust
@@ -393,5 +639,7 @@ def build_response(tool_input: dict, tools) -> dict:
 
     resp["confidence"] = tool_input.get("confidence")
     resp["evidence"] = _clean_evidence(tool_input.get("evidence"), tools)
+    if resp["evidence"] is not None:
+        resp["evidence"]["analysis_steps"] = _analysis_steps(resp, tools)
 
-    return resp
+    return _apply_mode_policy(resp, tools)

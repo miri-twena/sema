@@ -20,7 +20,7 @@ export function RecommendedActions({
             ? () =>
                 onDrill({
                   kind: "action",
-                  title: action.length > 48 ? action.slice(0, 48) + "…" : action,
+                  title: action,
                   detail: action,
                   initialInput: action,
                   dir,

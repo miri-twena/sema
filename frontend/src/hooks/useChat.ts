@@ -7,19 +7,19 @@ import {
   type Message,
 } from "../lib/api";
 import { dirOf, isRtl } from "../lib/rtl";
+import { UNDERSTANDING, type ProgressEvent } from "../lib/progress";
 
 export interface ChatTurn {
   question: string;
   response: ChatResponse | null; // null while loading / stopped
   dir: "rtl" | "ltr";
   stopped?: boolean;
-  phase?: string; // staged progress label while loading
+  /** REAL backend progress stages, in the order the server emitted them.
+   * Every entry corresponds to an actual tool dispatch -- there are no
+   * timer-driven or invented stages. Retained after the answer arrives so the
+   * turn can show a collapsed "Analysis details" section. */
+  progress?: ProgressEvent[];
 }
-
-// Staged "thinking" progress so a long request feels responsive instead of a
-// silent spinner (no server streaming yet). Labels advance on a timer.
-const PHASES = ["Understanding your question", "Querying the data", "Analyzing the results", "Composing the answer"];
-const PHASE_AT_MS = [1500, 5000, 11000];
 
 interface UseChatOptions {
   clientId: string;
@@ -143,7 +143,6 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
   }, []);
 
   const abortRef = useRef<AbortController | null>(null);
-  const timersRef = useRef<number[]>([]);
 
   // Latest callback without making it a dependency of runRequest (which would
   // rebuild the request identity on every render of the parent).
@@ -151,11 +150,6 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
   useEffect(() => {
     onConversationChangedRef.current = onConversationChanged;
   }, [onConversationChanged]);
-
-  const clearTimers = () => {
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-  };
 
   // Persist only completed turns (never a mid-flight/stopped one) + history +
   // the conversation id, so a refresh reopens the same server conversation.
@@ -172,11 +166,13 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
     }
   }, [turns, history, conversationId, persistKey]);
 
-  const setLastPhase = (phase: string) =>
+  // Append one real server stage to the in-flight turn.
+  const pushProgress = (e: ProgressEvent) =>
     setTurns((t) => {
       if (!t.length || t[t.length - 1].response) return t;
       const copy = [...t];
-      copy[copy.length - 1] = { ...copy[copy.length - 1], phase };
+      const last = copy[copy.length - 1];
+      copy[copy.length - 1] = { ...last, progress: [...(last.progress ?? []), e] };
       return copy;
     });
 
@@ -191,22 +187,24 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
     async (question: string, dir: "rtl" | "ltr") => {
       setLoading(true);
       setFollowUp(null); // a new/retried question retires the previous suggestion
-      clearTimers();
-      timersRef.current = PHASE_AT_MS.map((ms, i) =>
-        window.setTimeout(() => setLastPhase(PHASES[i + 1]), ms),
-      );
       const controller = new AbortController();
       abortRef.current = controller;
+      // Captured so the finished turn keeps the stages it actually went through.
+      const seen: ProgressEvent[] = [UNDERSTANDING];
       try {
-        const resp = await api.chat(
+        const resp = await api.chatStream(
           question,
           history,
           clientId,
+          (e) => {
+            seen.push(e);
+            pushProgress(e);
+          },
           controller.signal,
           drillContext,
           conversationIdRef.current,
         );
-        replaceLast({ question, response: resp, dir });
+        replaceLast({ question, response: resp, dir, progress: seen });
         if (resp.status === "ok") {
           setHistory((h) => [...h, { role: "user", content: question }, { role: "assistant", content: resp.answer }]);
           // Offer the agent's top recommendation as the next follow-up.
@@ -220,9 +218,12 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
         }
       } catch (e) {
         const aborted = e instanceof DOMException && e.name === "AbortError";
-        replaceLast(aborted ? { question, dir, response: null, stopped: true } : { question, dir, response: errorResponse(e) });
+        replaceLast(
+          aborted
+            ? { question, dir, response: null, stopped: true, progress: seen }
+            : { question, dir, response: errorResponse(e), progress: seen },
+        );
       } finally {
-        clearTimers();
         abortRef.current = null;
         setLoading(false);
       }
@@ -237,7 +238,7 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
       const q = question.trim();
       if (!q || loading) return;
       const dir = isRtl(q) ? "rtl" : "ltr";
-      setTurns((t) => [...t, { question: q, response: null, dir, phase: PHASES[0] }]);
+      setTurns((t) => [...t, { question: q, response: null, dir, progress: [UNDERSTANDING] }]);
       void runRequest(q, dir);
     },
     [loading, runRequest],
@@ -261,7 +262,6 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
   // starts a fresh server conversation. Previous conversations are untouched
   // (they live server-side); only this browser's active view resets.
   const reset = useCallback(() => {
-    clearTimers();
     abortRef.current?.abort();
     setTurns([]);
     setHistory([]);
@@ -274,7 +274,6 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
   // the next question continues it. Cancels any in-flight request first.
   const openConversation = useCallback(
     async (id: string) => {
-      clearTimers();
       abortRef.current?.abort();
       setLoading(true);
       setFollowUp(null); // a restored chat shows no suggestion until a new answer

@@ -84,9 +84,20 @@ def test_table_bound_and_sql_used_joined():
         },
         tools,
     )
-    assert len(resp["table"]) == 15  # head(15) cap
+    assert len(resp["table"]) == 20  # full result: no display-side cap
     assert resp["table_title"] == "Top rows"
     assert resp["sql_used"] == "SELECT 0;\n\nSELECT 1"
+
+
+def test_table_is_not_truncated_for_large_results():
+    """A "list all 406 customers" answer must reach the UI whole -- the SQL
+    safety cap is the only thing allowed to bound a result set."""
+    tools = FakeTools([_df(406)])
+    resp = build_response(
+        {"insight_text": "t", "recommended_actions": [], "table": {"result_index": 0, "title": "VIPs"}},
+        tools,
+    )
+    assert len(resp["table"]) == 406
 
 
 # --- KPI data binding ---------------------------------------------------------
@@ -134,7 +145,9 @@ def test_unresolvable_binding_falls_back_to_model_value():
 
 
 def test_unbound_kpi_unchanged():
-    resp = build_response(_kpi_input(value=52.3), FakeTools([]))
+    # A result must exist or the grounding gate downgrades to cannot_answer and
+    # strips the cards; the point here is that an UNBOUND kpi keeps its value.
+    resp = build_response(_kpi_input(value=52.3), FakeTools([_df()]))
     assert resp["kpis"][0]["value"] == 52.3
 
 

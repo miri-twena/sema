@@ -2,6 +2,8 @@ import type { Kpi } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { formatValue } from "../lib/format";
 import { KPI_TINTS } from "../lib/tokens";
+import { CopyButton } from "./CopyButton";
+import { copyText } from "../lib/clipboard";
 
 export function KpiCards({
   kpis,
@@ -51,14 +53,22 @@ export function KpiCards({
             role={drill ? "button" : undefined}
             tabIndex={drill ? 0 : undefined}
             aria-label={drill ? `Ask about ${kpi.label}` : undefined}
-            className={`rounded-xl p-4 flex flex-col justify-between transition ${
+            className={`sema-copy-host rounded-xl p-4 flex flex-col justify-between transition ${
               drill
                 ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 : ""
             }`}
             style={{ background: bg }}
           >
-            <div className="text-[0.68rem] font-semibold uppercase tracking-wide leading-tight min-h-[2.2em]" style={{ color: labelColor }}>
+            {/* CopyButton stops click/keydown propagation so copying a card
+             * never opens its drill-down. */}
+            <div className="sema-copy-affordance absolute top-1 end-1 z-20">
+              <CopyButton
+                title={`Copy "${kpi.label}"`}
+                actions={[{ label: "Copy KPI", run: () => copyText(`${kpi.label}: ${valueText}`) }]}
+              />
+            </div>
+            <div className="text-[0.68rem] font-semibold uppercase tracking-wide leading-tight min-h-[2.2em] pe-8" style={{ color: labelColor }}>
               {kpi.label}
             </div>
             <div className="mt-1 text-2xl font-semibold text-ink whitespace-nowrap">{valueText}</div>

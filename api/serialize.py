@@ -14,6 +14,8 @@ from typing import Any
 
 import pandas as pd
 
+from sema_core.settings import settings
+
 from api.models import (
     Chart,
     ChatResponse,
@@ -62,7 +64,15 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
     table: Table | None = None
     t = resp.get("table")
     if t is not None and not t.empty:
-        table = Table(title=resp.get("table_title"), columns=_columns(t), rows=_records(t))
+        # A result sitting exactly on the safety cap was almost certainly cut
+        # there, so flag it rather than presenting a capped list as complete.
+        table = Table(
+            title=resp.get("table_title"),
+            columns=_columns(t),
+            rows=_records(t),
+            total_rows=int(len(t)),
+            truncated=bool(len(t) >= settings.row_limit),
+        )
 
     evidence: Evidence | None = None
     raw_evidence = resp.get("evidence")
@@ -75,10 +85,25 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
             data_sources=raw_evidence.get("data_sources", []),
             data_freshness=raw_evidence.get("data_freshness"),
             records_used=raw_evidence.get("records_used"),
+            data_engine=raw_evidence.get("data_engine"),
+            database=raw_evidence.get("database"),
+            query_status=raw_evidence.get("query_status") or "none",
+            queries_run=raw_evidence.get("queries_run") or 0,
+            queries_failed=raw_evidence.get("queries_failed") or 0,
+            analysis_steps=list(raw_evidence.get("analysis_steps") or []),
+            assumptions=list(raw_evidence.get("assumptions") or []),
         )
+
+    mode = resp.get("mode") or "answer"
+    if mode not in ("answer", "clarification", "cannot_answer", "off_topic"):
+        mode = "answer"
 
     return ChatResponse(
         answer=resp.get("insight_text", ""),
+        mode=mode,
+        reason_code=resp.get("reason_code"),
+        clarification_options=list(resp.get("clarification_options") or []),
+        missing=resp.get("missing"),
         kpis=kpis,
         chart=chart,
         table=table,

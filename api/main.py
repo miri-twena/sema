@@ -267,7 +267,12 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 req.question,
                 history=history,
                 request_id=request_id,
-                on_progress=lambda msg: q.put(("status", {"message": msg})),
+                # The agent emits {"stage": ..., "index"/"rows"/"tables": ...}.
+                # A bare string is still accepted so any caller (and the older
+                # tests) that reports prose keeps working.
+                on_progress=lambda ev: q.put(
+                    ("status", ev if isinstance(ev, dict) else {"message": ev})
+                ),
                 internal_context=_internal_context(req),
             )
             out = to_chat_response(resp)
