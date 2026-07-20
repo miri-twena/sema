@@ -8,6 +8,26 @@
 #   db_env             env var (in .env) holding this client's database name
 #   semantic_dir       path (from project root) to the client's *.yaml metrics
 #   suggested_questions starter questions shown in the sidebar + empty state
+#   analytics_config   OPTIONAL governed defaults that drive the clarification
+#                      flow deterministically (see client_registry.get_analytics_config).
+#                      Every key is optional; an omitted key means "no special
+#                      configuration", which resolves to the safe, unambiguous
+#                      default (calendar periods, calendar days, semantic-layer
+#                      canonical metric) so SEMA does NOT ask about it.
+#                        timezone          IANA name (e.g. "Asia/Jerusalem"). When
+#                                          set, time-of-day terms ("today") resolve
+#                                          in it and SEMA never asks about timezone.
+#                        fiscal_calendar   Only set when the client's fiscal year
+#                                          differs from the calendar year. Presence
+#                                          is what makes "quarter"/"Q1" ambiguous and
+#                                          triggers a calendar-vs-fiscal clarification.
+#                          start_month     1-12, the month the fiscal year begins.
+#                        business_days     Only set when day-count questions should
+#                                          distinguish business days. Presence triggers
+#                                          the calendar-vs-business-days clarification.
+#                          working_week    weekday numbers worked (0=Mon .. 6=Sun).
+#                        revenue_definition Default revenue meaning ("gross"/"net")
+#                                          when the semantic layer alone is ambiguous.
 
 clients:
   - id: ecommerce
@@ -19,6 +39,13 @@ clients:
       - "Who are our most valuable customers?"
       - "Why did revenue drop in March 2026?"
       - "Which campaign performs best?"
+    # This client runs on the calendar year (no fiscal_calendar), counts plain
+    # calendar days (no business_days), and uses the semantic layer's canonical
+    # Revenue -- so SEMA does NOT clarify any of those. Only a timezone is set,
+    # so "today"/"yesterday" resolve deterministically and are shown as the
+    # applied interpretation instead of prompting a question.
+    analytics_config:
+      timezone: "Asia/Jerusalem"
 
   - id: insurance
     label: "Auto Insurance"

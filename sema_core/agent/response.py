@@ -62,13 +62,23 @@ PRESENT_ANSWER_TOOL = {
                 "enum": [
                     "ambiguous_metric",
                     "missing_date_range",
+                    # Clarification ambiguity taxonomy -- the specific axis that
+                    # was unresolved (see the system prompt / governed config).
+                    "calendar_vs_fiscal",
+                    "business_vs_calendar_days",
+                    "ambiguous_date_range",
+                    "ambiguous_comparison",
+                    "ambiguous_scope",
+                    "ambiguous_inclusion_rule",
+                    "missing_timezone",
                     "missing_data_source",
                     "empty_result",
                     "unsupported_prediction",
                     "off_topic",
                     "insufficient_grounding",
                 ],
-                "description": "Machine-readable reason for a non-'answer' mode.",
+                "description": "Machine-readable reason for a non-'answer' mode. "
+                "For mode='clarification' it names the specific ambiguity axis.",
             },
             "clarification_options": {
                 "type": "array",
@@ -236,6 +246,25 @@ PRESENT_ANSWER_TOOL = {
                         "as Direct'). Shown to the user verbatim. Omit when there "
                         "were none -- never invent one.",
                     },
+                    "resolved_interpretation": {
+                        "type": "array",
+                        "description": "How you read an otherwise-ambiguous part of "
+                        "the question -- the interpretation you APPLIED, whether "
+                        "from the governed config or a resolved clarification. Each "
+                        "item is a short {label, value} pair shown to the user so "
+                        "they can verify it (e.g. {'label': 'Quarter type', 'value': "
+                        "'Fiscal'}, {'label': 'Timezone', 'value': 'Asia/Jerusalem'}). "
+                        "Phrase both in the user's language. Omit when nothing was "
+                        "ambiguous.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["label", "value"],
+                        },
+                    },
                 },
             },
         },
@@ -382,7 +411,26 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
         "assumptions": [
             a.strip() for a in (raw.get("assumptions") or []) if isinstance(a, str) and a.strip()
         ],
+        # How an ambiguous part of the question was read (governed default or
+        # resolved clarification). Model self-report, kept only as clean
+        # {label, value} string pairs so a malformed entry can't reach the UI.
+        "resolved_interpretation": _clean_interpretation(raw.get("resolved_interpretation")),
     }
+
+
+def _clean_interpretation(raw) -> list[dict]:
+    """Keep only well-formed {label, value} string pairs from the model's
+    resolved_interpretation self-report -- so the trust panel never renders a
+    half-empty or wrongly-typed row."""
+    out: list[dict] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        value = item.get("value")
+        if isinstance(label, str) and label.strip() and isinstance(value, str) and value.strip():
+            out.append({"label": label.strip(), "value": value.strip()})
+    return out
 
 
 def _analysis_steps(resp: dict, tools) -> list[dict]:

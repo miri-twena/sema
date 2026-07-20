@@ -4,7 +4,7 @@ import type { ChatTurn } from "../hooks/useChat";
 import { ChatMessage } from "./ChatMessage";
 import { AssistantResponseCard } from "./AssistantResponseCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { AnalysisDetails, ProgressPanel } from "./ProgressPanel";
+import { ProgressPanel } from "./ProgressPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { DrillContext } from "./DrillChat";
 
@@ -55,9 +55,6 @@ export const TurnView = memo(function TurnView({
               onRetry={onRetry ? () => onRetry(index) : undefined}
               onAsk={onAsk}
             />
-            {turn.progress && turn.progress.length > 0 && (
-              <AnalysisDetails events={turn.progress} dir={turn.dir} />
-            )}
           </ErrorBoundary>
         )
       ) : turn.stopped ? (

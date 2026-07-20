@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from sema_core import insight_builder
 from sema_core.agent import agent
-from sema_core.obs import get_logger
+from sema_core.client_registry import active_client_id
+from sema_core.obs import get_logger, log_event
 from sema_core.query_router import detect_intent
 
 logger = get_logger("wiring")
@@ -47,6 +48,9 @@ def get_response(
     is SERVER-built drill-down framing (never client free text) -- see
     agent.run.
     """
+    # True when the agent was configured but crashed, so the router is a
+    # DEGRADED path (not the normal no-key path) -- surfaced to the user.
+    agent_failed = False
     if agent.api_key_configured():
         try:
             return agent.run(
@@ -57,15 +61,26 @@ def get_response(
                 internal_context=internal_context,
             )
         except Exception:
-            # Don't swallow silently: record the traceback before falling back
-            # to the rule-based router, so agent failures are diagnosable.
+            # Don't swallow silently: record the traceback AND flag the run so
+            # the answer discloses that a built-in report stood in for the agent.
+            agent_failed = True
             logger.exception("agent.run failed; falling back to rule-based router (request_id=%s)", request_id)
+            log_event(
+                logger,
+                "fallback",
+                request_id=request_id,
+                client_id=active_client_id(),
+                kind="router",
+                reason="agent_exception",
+            )
 
     intent_id = detect_intent(question)
     if intent_id is not None:
-        response = insight_builder.build(intent_id)
-        if not agent.api_key_configured():
-            response = dict(response)
+        response = dict(insight_builder.build(intent_id))
+        if agent_failed:
+            # The agent errored: a visible amber badge, not a silent swap.
+            response["notices"] = [{"kind": "router_fallback"}]
+        elif not agent.api_key_configured():
             response["insight_text"] = FALLBACK_NOTE + response["insight_text"]
         return response
 

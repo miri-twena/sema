@@ -22,6 +22,7 @@ from api.models import (
     DateRange,
     Evidence,
     Kpi,
+    Notice,
     SchemaColumn,
     SchemaResponse,
     SchemaTable,
@@ -92,11 +93,19 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
             queries_failed=raw_evidence.get("queries_failed") or 0,
             analysis_steps=list(raw_evidence.get("analysis_steps") or []),
             assumptions=list(raw_evidence.get("assumptions") or []),
+            resolved_interpretation=list(raw_evidence.get("resolved_interpretation") or []),
         )
 
     mode = resp.get("mode") or "answer"
     if mode not in ("answer", "clarification", "cannot_answer", "off_topic"):
         mode = "answer"
+
+    # Only keep well-formed notices -- an unknown-shaped entry is dropped rather
+    # than crashing serialization of an otherwise-good answer.
+    notices: list[Notice] = []
+    for n in resp.get("notices") or []:
+        if isinstance(n, dict) and n.get("kind"):
+            notices.append(Notice(kind=str(n["kind"]), attempts=n.get("attempts")))
 
     return ChatResponse(
         answer=resp.get("insight_text", ""),
@@ -112,6 +121,7 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
         sql_used=resp.get("sql_used") or sql_used,
         confidence=resp.get("confidence"),
         evidence=evidence,
+        notices=notices,
         status="ok",
     )
 

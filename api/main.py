@@ -28,7 +28,7 @@ from fastapi.responses import StreamingResponse
 # editable install (pip install -e ., see pyproject.toml) -- no sys.path hack.
 from sema_core import client_registry
 from sema_core.agent import agent
-from sema_core.agent.prompts import build_drill_context
+from sema_core.agent.prompts import build_drill_context, build_tenant_context
 from sema_core import alerts_engine
 from sema_core.conversation_store import ConversationNotFoundError, SqliteConversationStore, truncate_by_tokens
 from sema_core.db import check_connection, run_query
@@ -131,15 +131,20 @@ def _resolve_conversation(cid: str, req: ChatRequest) -> tuple[str, list[dict]]:
     return conv_id, truncate_by_tokens(history, settings.history_token_budget)
 
 
-def _internal_context(req: ChatRequest) -> str | None:
-    """Server-side construction of the drill-down context block. The client
-    sends structured fields (kind/title/detail); the framing text is built
-    HERE, so no client-provided free text ever reaches the model as
-    instructions."""
+def _internal_context(req: ChatRequest, client_id: str) -> str | None:
+    """Server-side construction of the [SEMA-CONTEXT] block.
+
+    Always carries the client's governed analytics defaults (build_tenant_context)
+    so the clarification flow is driven deterministically by config on BOTH the
+    main chat and drill-downs. When the question came from a widget, the
+    drill-down focus is appended -- both are SERVER-built from structured inputs,
+    so no client free text ever reaches the model as instructions.
+    """
+    tenant = build_tenant_context(client_registry.get_analytics_config(client_id))
     if req.drill_context is None:
-        return None
+        return tenant
     dc = req.drill_context
-    return build_drill_context(dc.kind, dc.title, dc.detail)
+    return tenant + "\n\n" + build_drill_context(dc.kind, dc.title, dc.detail)
 
 
 def _client_model(c: dict) -> Client:
@@ -190,7 +195,7 @@ def chat(req: ChatRequest) -> ChatResponse:
             req.question,
             history=history,
             request_id=request_id,
-            internal_context=_internal_context(req),
+            internal_context=_internal_context(req, cid),
         )
         out = to_chat_response(resp)
         out.conversation_id = conv_id
@@ -273,7 +278,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 on_progress=lambda ev: q.put(
                     ("status", ev if isinstance(ev, dict) else {"message": ev})
                 ),
-                internal_context=_internal_context(req),
+                internal_context=_internal_context(req, cid),
             )
             out = to_chat_response(resp)
             out.conversation_id = conv_id

@@ -16,6 +16,7 @@ import json
 import logging
 import sys
 import uuid
+from datetime import datetime, timezone
 
 _CONFIGURED = False
 
@@ -42,8 +43,13 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def log_event(logger: logging.Logger, event: str, **fields) -> None:
-    """Emit one structured JSON log line: {"event": <event>, ...fields}."""
-    logger.info(json.dumps({"event": event, **fields}, default=str))
+    """Emit one structured JSON log line: {"event", "ts", ...fields}.
+
+    `ts` is a UTC ISO timestamp on every event so offline reporting (e.g. the
+    daily cache report) can bucket events by day -- the stderr handler's format
+    is bare `%(message)s`, so the time has to travel inside the JSON."""
+    ts = datetime.now(timezone.utc).isoformat()
+    logger.info(json.dumps({"event": event, "ts": ts, **fields}, default=str))
 
 
 def new_request_id() -> str:

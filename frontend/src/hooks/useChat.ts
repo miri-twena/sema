@@ -16,8 +16,8 @@ export interface ChatTurn {
   stopped?: boolean;
   /** REAL backend progress stages, in the order the server emitted them.
    * Every entry corresponds to an actual tool dispatch -- there are no
-   * timer-driven or invented stages. Retained after the answer arrives so the
-   * turn can show a collapsed "Analysis details" section. */
+   * timer-driven or invented stages. Drives the live ProgressPanel shown while
+   * the answer is streaming (cleared from view once the answer lands). */
   progress?: ProgressEvent[];
 }
 

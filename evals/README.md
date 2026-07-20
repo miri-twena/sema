@@ -32,6 +32,40 @@ checked against `wiring.get_response()`'s response dict:
   text or a KPI value is within `tolerance_pct` of `value`.
 - `expects_sql: true` -- `sql_used` is non-empty, i.e. the agent actually
   queried the database rather than answering from thin air.
+- `expects_components: [table|chart|kpi]` -- the answer rendered each named
+  component (catches "answered in prose without the expected widget").
+- `faithful: true` -- no *large* number in the prose (>= 10,000, so years and
+  percentages are ignored) is ungrounded: every one must match a KPI value or
+  a result-table cell within 1%. Catches hallucinated revenue/count figures.
+- `kpi_formats: [{label_contains, format}]` -- a KPI whose label contains the
+  substring must carry that `format` (e.g. an ID metric must be `text`, so the
+  UI never renders it with thousands separators).
+- `mode: answer|clarification|cannot_answer|off_topic` -- the response mode,
+  e.g. an ambiguous question should `clarification`, not guess.
+
+> **Formatting note.** The eval harness grades the *response dict*, so it can
+> only check the data-level side of formatting (a KPI's `format`, a full result
+> table vs. a prose summary). The actual rendering rules -- comma-less IDs, the
+> `K`/`M` abbreviation, SQL shown LTR, ghost-text input, per-component Copy --
+> live in the React layer and are covered by `frontend/` component tests, not
+> here.
+
+## Run-to-run diff (and CI)
+
+Each run writes `{case_id: passed}` to `evals/.last_run/<client>.json`
+(gitignored) and, on the next run, prints a **diff**: which cases regressed
+(were passing, now failing), got fixed, were added, or removed. **A regression
+fails the run** (exit 1) even if the absolute pass count looks fine -- so a
+prompt/model change that breaks a previously-green case is caught explicitly.
+
+This is a **nightly / pre-merge gate, not a per-commit CI check**: every case
+makes a real, billed LLM call against the live database, so it can't run in an
+ordinary sandboxed CI job. Wire it into a scheduled job (or a manual
+pre-release step) with `ANTHROPIC_API_KEY` and the Postgres container
+available; the exit code gates the pipeline.
+
+The pure scoring/diff logic (no DB, no key) is unit-tested in
+`tests/test_evals_scoring.py`, which *does* run in ordinary CI.
 
 ## Adding a question
 

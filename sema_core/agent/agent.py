@@ -43,6 +43,7 @@ ALL_TOOLS = TOOL_SCHEMAS + [PRESENT_ANSWER_TOOL]
 # Tunables now live in settings.py (read from env with these defaults):
 #   SEMA_MODEL, SEMA_MAX_ITERATIONS, SEMA_MAX_TOKENS, SEMA_MAX_HISTORY_TURNS.
 MODEL = settings.anthropic_model
+FALLBACK_MODEL = settings.anthropic_model_fallback  # standby model on API error ("" disables)
 MAX_ITERATIONS = settings.max_iterations      # safety cap on tool-use rounds
 MAX_TOKENS = settings.max_tokens              # multi-turn conversations carry more context
 MAX_HISTORY_TURNS = settings.max_history_turns  # keep at most the last N turns
@@ -110,6 +111,28 @@ def not_configured_response() -> dict:
     resp = _empty_response()
     resp["insight_text"] = NOT_CONFIGURED_MESSAGE
     return resp
+
+
+def _build_notices(tools: AgentTools, used_fallback_model: bool) -> list[dict]:
+    """Structured "we degraded" signals for the UI to render as amber badges.
+
+    Each notice is {"kind": <key>, ...params} -- localized on the client (like
+    progress stages and evidence steps), never English prose, so a Hebrew
+    answer gets a Hebrew badge. Truthful by construction: every kind is backed
+    by an observable fact, so a badge can never claim a fallback that didn't
+    actually happen.
+    """
+    notices: list[dict] = []
+    if used_fallback_model:
+        # The primary model API-errored and the backup model answered instead.
+        notices.append({"kind": "fallback_model"})
+    failures = getattr(tools, "failures", None) or []
+    results = getattr(tools, "results", None) or []
+    if failures and results:
+        # At least one run_sql failed but the agent still produced grounded
+        # results -- it corrected the query (or dropped a bad one) and answered.
+        notices.append({"kind": "sql_retried", "attempts": len(failures)})
+    return notices
 
 
 def _api_error_class():
@@ -194,9 +217,17 @@ def run(
     tool_calls = 0
     rounds = 0
     last_stop: str | None = None
+    # Which model is currently answering, and whether we ever had to swap. Both
+    # are read by _finish (below) to disclose a fallback on the answer itself.
+    active_model = MODEL
+    used_fallback_model = False
 
     def _finish(resp: dict, outcome: str) -> dict:
         """Emit one structured log line summarizing the run, then return resp."""
+        # Disclose any degradation (fallback model, self-corrected SQL) as
+        # structured notices the UI renders as amber badges. Every exit path
+        # funnels through here, so no degraded answer escapes without them.
+        resp["notices"] = _build_notices(tools, used_fallback_model)
         log_event(
             logger,
             "agent_run",
@@ -212,6 +243,8 @@ def run(
             rounds=rounds,
             tool_calls=tool_calls,
             sql_statements=len(tools.results),
+            failed_sql=len(tools.failures),  # self-corrected/dropped queries -> fallback frequency
+            used_fallback_model=used_fallback_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             # Prompt-cache effectiveness: cache_read should dominate input_tokens
@@ -247,28 +280,58 @@ def run(
     # the next round's breakpoint still reads through it.
     prev_cache_block: dict | None = None
 
+    def _create(model_id: str):
+        """One model call with the shared, cached prefix (tools + system)."""
+        return client.messages.create(
+            model=model_id,
+            max_tokens=MAX_TOKENS,
+            system=CACHED_SYSTEM,  # tools + system cached (see CACHED_SYSTEM)
+            tools=ALL_TOOLS,
+            messages=messages,
+        )
+
+    unavailable_text = (
+        "The AI service is temporarily unavailable. Please try again in a moment."
+    )
+
     for _ in range(MAX_ITERATIONS):
         rounds += 1
         try:
-            response = client.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=CACHED_SYSTEM,  # tools + system cached (see CACHED_SYSTEM)
-                tools=ALL_TOOLS,
-                messages=messages,
-            )
+            response = _create(active_model)
         except api_error:
-            # AI-service failure (overloaded, 5xx, auth): a friendly answer,
-            # not the generic error path -- and logged as an availability
-            # event, not a code bug.
-            logger.exception("Anthropic API error (request_id=%s)", request_id)
-            return _finish(
-                _basic_response(
-                    "The AI service is temporarily unavailable. Please try "
-                    "again in a moment.",
-                    tools,
-                ),
-                "api_error",
+            # Primary model unavailable (overloaded/5xx/auth). Before giving up,
+            # retry the SAME request once on the standby model -- like failing
+            # over to a replica. If we can't (no fallback configured, or the
+            # fallback is what just errored), return the friendly unavailable
+            # answer. A successful failover switches active_model for the rest
+            # of this run and is disclosed via the fallback_model notice.
+            can_failover = bool(FALLBACK_MODEL) and active_model != FALLBACK_MODEL
+            if not can_failover:
+                logger.exception("Anthropic API error (request_id=%s)", request_id)
+                return _finish(_basic_response(unavailable_text, tools), "api_error")
+            logger.warning(
+                "primary model %s errored; failing over to %s (request_id=%s)",
+                active_model, FALLBACK_MODEL, request_id,
+            )
+            try:
+                response = _create(FALLBACK_MODEL)
+            except api_error:
+                # Both models are down -- now it's a real outage.
+                logger.exception(
+                    "Anthropic API error on fallback too (request_id=%s)", request_id
+                )
+                return _finish(_basic_response(unavailable_text, tools), "api_error")
+            active_model = FALLBACK_MODEL
+            used_fallback_model = True
+            log_event(
+                logger,
+                "fallback",
+                request_id=request_id,
+                client_id=active_client_id(),
+                kind="model",
+                reason="primary_api_error",
+                from_model=MODEL,
+                to_model=FALLBACK_MODEL,
             )
 
         # Accumulate token usage + stop_reason for cost/observability logging.

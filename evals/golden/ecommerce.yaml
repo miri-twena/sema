@@ -128,3 +128,61 @@ questions:
     assertions:
       contains_any: ["Email"] # 29.72% vs Direct 24.96%; Email is normally 3rd
       expects_sql: true
+
+  # --- component-type + faithfulness coverage ------------------------------
+  # These exercise the structural assertions (expects_components, faithful)
+  # rather than exact numbers, so they stay green across the model's phrasing
+  # variation while still catching "answered without the expected widget" and
+  # "quoted a revenue figure that isn't in any query result" regressions.
+
+  - id: revenue_trend_renders_chart
+    question: "Show me the monthly revenue trend as a chart."
+    assertions:
+      expects_sql: true
+      expects_components: ["chart"] # a trend question must draw a line/bar chart
+      faithful: true # no large revenue number in the prose may be ungrounded
+
+  - id: vip_list_full_table
+    question: "List all our VIP customers (top 5% by lifetime revenue) with their lifetime revenue."
+    assertions:
+      # The "406-row list" class of question: the answer must render the FULL
+      # table, not fold the list into prose. ~203 customers qualify (see
+      # revenue_concentration_top5pct), well past any preview cap.
+      expects_sql: true
+      expects_components: ["table"]
+
+  - id: top_customers_faithful
+    question: "Who are our top 10 customers by total revenue, and how much has each spent?"
+    assertions:
+      expects_sql: true
+      expects_components: ["table"]
+      faithful: true
+
+  # --- Hebrew mirrors -------------------------------------------------------
+  # Same verified ground truth as their English twins, asked in Hebrew, so a
+  # prompt change that silently degrades the Hebrew path (wrong language, lost
+  # RTL story, dropped numbers) is caught. Numbers re-use the English cases'
+  # live-DB-verified values.
+
+  - id: revenue_trend_peak_month_he
+    question: "הצג את מגמת ההכנסות לפי חודש." # "Show revenue trend by month."
+    assertions:
+      contains_any: ["דצמבר", "December", "Dec"] # December is the Q4 peak
+      numeric_within:
+        - value: 1698041 # December 2025 revenue (see revenue_trend_peak_month)
+          tolerance_pct: 10
+      expects_sql: true
+
+  - id: march_dip_overall_he
+    question: "למה ההכנסות ירדו במרץ 2026?" # "Why did revenue drop in March 2026?"
+    assertions:
+      direction: down
+      expects_sql: true
+
+  - id: revenue_concentration_top5pct_he
+    question: "כמה אחוזים מסך ההכנסות מגיעים מ-5% הלקוחות המובילים?"
+    assertions:
+      numeric_within:
+        - value: 48.2 # top 5% of paying customers = 48.2% of revenue
+          tolerance_pct: 15
+      expects_sql: true

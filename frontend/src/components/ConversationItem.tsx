@@ -19,10 +19,13 @@ export function ConversationItem({
   conversation,
   active,
   actions,
+  tint,
 }: {
   conversation: ConversationSummary;
   active: boolean;
   actions: ConversationActions;
+  /** Fixed category colour (background, text/border) applied when not active. */
+  tint?: readonly [string, string];
 }) {
   const { id, title, pinned } = conversation;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -91,14 +94,24 @@ export function ConversationItem({
     );
   }
 
+  // Fixed category colour when not active; the active chat keeps the primary
+  // highlight so selection never relies on the category tint alone.
+  const tinted = tint && !active;
+  const [bg, fg] = tint ?? ["", ""];
+
   return (
     <div ref={rowRef} className="relative group">
       <button
         type="button"
         onClick={() => actions.onOpen(id)}
         title={title}
-        className={`w-full text-start rounded-lg pl-3 pr-8 py-2 text-[0.82rem] leading-snug transition flex items-center ${
-          active ? "bg-primary/12 text-primary-dark font-medium" : "text-ink hover:bg-surfaceAlt"
+        style={tinted ? { background: bg, color: fg, borderColor: `${fg}2e` } : undefined}
+        className={`w-full text-start rounded-lg border pl-3 pr-8 py-2 text-[0.82rem] leading-snug transition flex items-center ${
+          active
+            ? "bg-primary/12 text-primary-dark font-medium border-transparent"
+            : tinted
+              ? "hover:brightness-[0.97]"
+              : "text-ink border-transparent hover:bg-surfaceAlt"
         }`}
       >
         <span className="truncate" dir="auto">

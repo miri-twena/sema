@@ -30,6 +30,7 @@ export const EV_LABELS: Record<Lang, Record<string, string>> = {
     checked: "What SEMA checked",
     noAssumptions: "No unsupported assumptions",
     unavailable: "Source detail unavailable",
+    interpretation: "How this was interpreted",
   },
   he: {
     evidence: "למה אפשר לסמוך על התשובה",
@@ -45,8 +46,50 @@ export const EV_LABELS: Record<Lang, Record<string, string>> = {
     checked: "מה SEMA בדקה",
     noAssumptions: "לא נדרשו הנחות",
     unavailable: "פרטי המקור אינם זמינים",
+    interpretation: "כיצד השאלה פורשה",
   },
 };
+
+/** Amber "we degraded" badge copy, keyed by Notice.kind. `label` is the short
+ * pill text; `tip` is the hover explanation. Localized here (not server-side)
+ * so a Hebrew answer gets a Hebrew badge -- same approach as the trust panel.
+ * `unknown` kinds render nothing (see noticeText). */
+export const NOTICE_LABELS: Record<Lang, Record<string, { label: string; tip: string }>> = {
+  en: {
+    fallback_model: {
+      label: "Backup model",
+      tip: "The primary AI model was unavailable, so a backup model generated this answer. The analysis is still grounded in your data.",
+    },
+    sql_retried: {
+      label: "Query corrected",
+      tip: "A query hit an error and was automatically corrected before answering.",
+    },
+    router_fallback: {
+      label: "Built-in report",
+      tip: "The AI agent hit an error, so a built-in report answered instead of a live analysis.",
+    },
+  },
+  he: {
+    fallback_model: {
+      label: "מודל גיבוי",
+      tip: "מודל ה-AI הראשי לא היה זמין, ולכן מודל גיבוי הפיק את התשובה. הניתוח עדיין מבוסס על הנתונים שלך.",
+    },
+    sql_retried: {
+      label: "השאילתה תוקנה",
+      tip: "שאילתה נתקלה בשגיאה ותוקנה אוטומטית לפני מתן התשובה.",
+    },
+    router_fallback: {
+      label: "דוח מובנה",
+      tip: "סוכן ה-AI נתקל בשגיאה, ולכן דוח מובנה השיב במקום ניתוח חי.",
+    },
+  },
+};
+
+/** Notice.kind -> localized {label, tip}. Returns null for an unknown kind so
+ * a future server-side kind never renders a broken/empty badge. */
+export function noticeText(kind: string, lang: Lang): { label: string; tip: string } | null {
+  return NOTICE_LABELS[lang][kind] ?? null;
+}
 
 const n = (v: number | undefined) => (v ?? 0).toLocaleString();
 const one = (v: number | undefined) => (v ?? 0) === 1;

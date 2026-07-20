@@ -104,3 +104,41 @@ def active_client_id() -> str:
 def get_active_client() -> dict:
     """The full config dict of the currently-active client."""
     return get_client_by_id(active_client_id())
+
+
+def get_analytics_config(client_id: str) -> dict:
+    """Normalized governed defaults that drive the clarification flow.
+
+    Reads the optional `analytics_config` block for a client and resolves it to
+    a flat, always-present shape the agent/prompt layer can reason about without
+    None-checking raw YAML. The KEY product decision lives here: an unconfigured
+    axis resolves to its unambiguous default (calendar periods, calendar days,
+    semantic-layer canonical revenue), so SEMA does NOT ask about it. An axis is
+    only "ambiguous -> ask" when the client explicitly configured it to differ
+    (a real fiscal calendar, a business-day calendar). This makes the decision
+    to clarify a deterministic function of config, not of model self-confidence.
+
+    An unknown client_id raises (via get_client_by_id) rather than silently
+    returning another tenant's defaults -- same multi-tenant safety rule as the
+    rest of the registry.
+    """
+    raw = get_client_by_id(client_id).get("analytics_config") or {}
+
+    fiscal = raw.get("fiscal_calendar") or {}
+    business = raw.get("business_days") or {}
+    tz = raw.get("timezone")
+    revenue = raw.get("revenue_definition")
+
+    start_month = fiscal.get("start_month")
+    # A fiscal calendar only creates ambiguity when it actually differs from the
+    # calendar year (i.e. does not start in January). A "start_month: 1" config
+    # is the calendar year spelled out -- no ambiguity, no clarification.
+    fiscal_configured = bool(fiscal) and start_month not in (None, 1)
+
+    return {
+        "timezone": tz.strip() if isinstance(tz, str) and tz.strip() else None,
+        "fiscal_configured": fiscal_configured,
+        "fiscal_start_month": start_month if fiscal_configured else None,
+        "business_days_configured": bool(business.get("working_week")),
+        "revenue_default": revenue.strip() if isinstance(revenue, str) and revenue.strip() else None,
+    }

@@ -111,7 +111,22 @@ class Evidence(BaseModel):
     analysis_steps: list[dict[str, Any]] = []
     # Model self-report, shown verbatim when an assumption was required.
     assumptions: list[str] = []
+    # How an ambiguous part of the question was interpreted (governed default or
+    # resolved clarification), as {label, value} pairs -- the transparency line
+    # of the clarification flow. Empty when nothing was ambiguous.
+    resolved_interpretation: list[dict[str, str]] = []
     records_used: int | None = None  # total rows returned by the SQL that backs this answer
+
+
+class Notice(BaseModel):
+    """A disclosed degradation on one answer -- the agent fell back or
+    self-corrected. `kind` is a stable key the client localizes into an amber
+    badge (fallback_model / sql_retried / router_fallback); params like
+    `attempts` carry the detail. Structured, not prose, so a Hebrew answer
+    gets a Hebrew badge (same pattern as evidence analysis_steps)."""
+
+    kind: str
+    attempts: int | None = None  # sql_retried: how many run_sql calls failed first
 
 
 class ChatResponse(BaseModel):
@@ -136,6 +151,9 @@ class ChatResponse(BaseModel):
     sql_used: str | None = None
     confidence: Literal["high", "medium", "low"] | None = None
     evidence: Evidence | None = None
+    # Disclosed fallbacks/degradations for this answer (usually empty). Default
+    # keeps older persisted payloads valid without the field.
+    notices: list[Notice] = []
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
     conversation_id: str | None = None

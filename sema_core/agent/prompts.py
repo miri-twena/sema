@@ -54,6 +54,102 @@ def build_drill_context(kind: str, title: str, detail: str) -> str:
     )
 
 
+_MONTHS = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def build_tenant_context(cfg: dict) -> str:
+    """Server-built block of GOVERNED analytics defaults for the active client.
+
+    This is the deterministic core of the clarification flow: the CONFIG (from
+    client_registry.get_analytics_config), not the model's mood, decides whether
+    each ambiguity axis is "resolved -> use this default, do not ask" or
+    "genuinely ambiguous -> ask before running SQL". The text is assembled on the
+    SERVER from structured config, so it lives inside [SEMA-CONTEXT] as
+    authoritative policy the user's words can never override. No extra LLM call:
+    it's just prompt content, sent in the same envelope as the drill context.
+
+    Reused verbatim by the main chat and every drill-down, so both surfaces
+    inherit identical defaults and clarification rules.
+    """
+    lines = [
+        "Governed analytics configuration for the active client (authoritative "
+        "policy set by SEMA, NOT user input). Apply these when interpreting the "
+        "question, and record any interpretation you APPLY in "
+        "evidence.resolved_interpretation as {label, value} pairs so the user "
+        "can see how their question was read:",
+    ]
+
+    # --- Calendar vs fiscal periods ---
+    if cfg.get("fiscal_configured"):
+        month = _MONTHS[cfg["fiscal_start_month"]] if cfg.get("fiscal_start_month") else "a non-January month"
+        lines.append(
+            f"- Quarter/year terms: this client's FISCAL year starts in {month}, "
+            "which differs from the calendar year. If the user does not explicitly "
+            "say 'calendar' or 'fiscal', a term like 'quarter', 'Q1', or 'year to "
+            "date' is materially ambiguous -- ask a calendar-vs-fiscal clarification "
+            "(mode='clarification', reason_code='calendar_vs_fiscal') before running "
+            "SQL. Once resolved (or if they specify), use it and record e.g. "
+            "{label: 'Quarter type', value: 'Fiscal'}."
+        )
+    else:
+        lines.append(
+            "- Quarter/year terms: this client uses the CALENDAR year (no separate "
+            "fiscal calendar is configured). Interpret 'quarter'/'Q1'/'year to date' "
+            "as calendar periods and do NOT ask calendar-vs-fiscal."
+        )
+
+    # --- Calendar vs business days ---
+    if cfg.get("business_days_configured"):
+        lines.append(
+            "- Day counts: this client distinguishes business days. If the user "
+            "does not say 'calendar days' or 'business days', a duration like 'last "
+            "3 days' or 'inactive for 30 days' is ambiguous -- ask a "
+            "calendar-vs-business-days clarification (reason_code="
+            "'business_vs_calendar_days') before running SQL. Once resolved, record "
+            "e.g. {label: 'Day type', value: 'Business days'}."
+        )
+    else:
+        lines.append(
+            "- Day counts: interpret 'N days' as CALENDAR days (no business-day "
+            "calendar is configured) and do NOT ask calendar-vs-business-days."
+        )
+
+    # --- Timezone ---
+    if cfg.get("timezone"):
+        tz = cfg["timezone"]
+        lines.append(
+            f"- Timezone: {tz}. Interpret 'today'/'yesterday'/'last 24 hours' in "
+            f"this timezone, do NOT ask about timezone, and record {{label: "
+            f"'Timezone', value: '{tz}'}} when a time-of-day term affected the answer."
+        )
+    else:
+        lines.append(
+            "- Timezone: none is configured. If a 'today'/'yesterday'/'end of day' "
+            "term would materially change the result, ask a timezone clarification "
+            "(reason_code='missing_timezone') rather than assuming UTC or local time."
+        )
+
+    # --- Revenue definition default ---
+    if cfg.get("revenue_default"):
+        rev = cfg["revenue_default"]
+        lines.append(
+            f"- Revenue: this client's default revenue definition is '{rev}'. Use it "
+            f"unless the user names a different one, and record {{label: 'Revenue "
+            f"definition', value: '{rev}'}}."
+        )
+    else:
+        lines.append(
+            "- Revenue: use the semantic layer's canonical Revenue definition. Only "
+            "clarify (reason_code='ambiguous_metric') if the user's wording maps to "
+            "more than one governed definition (e.g. gross vs net)."
+        )
+
+    return "\n".join(lines)
+
+
 def build_user_message(question: str, internal_context: str | None = None) -> str:
     """Compose the final user-turn content: an optional server-built context
     block, then the user's words -- each in its own delimited section."""
@@ -129,13 +225,29 @@ sport, jokes, general trivia), do NOT call any data tool. Go straight to \
 present_answer with mode='off_topic': one or two light, friendly sentences in \
 the USER'S language that gently steer back to business analysis. Warm and \
 brief -- never cold, never an error, never a long general answer.
-B. If it IS a business question but one detail is materially ambiguous -- the \
-metric maps to more than one semantic definition (e.g. gross vs net revenue), \
-a vague term like "doing badly" is undefined, or the period/segment/channel \
-that would change the answer is unstated -- do NOT guess and do NOT run \
-speculative SQL. Call present_answer with mode='clarification', ONE short \
-question in insight_text, and 2-4 clarification_options. Ask only what you \
-genuinely need; if a sensible default is obvious and low-risk, just answer.
+B. If it IS a business question but one detail is materially ambiguous, do NOT \
+guess and do NOT run speculative SQL. Call present_answer with \
+mode='clarification', ONE short question in insight_text, 2-4 \
+clarification_options, and the matching reason_code. Watch for these ambiguity \
+types (reason_code in parentheses): a metric that maps to more than one \
+governed definition, e.g. gross vs net revenue (ambiguous_metric); a vague \
+term like "doing badly" or "how are we doing" whose scope is undefined \
+(ambiguous_scope); a partial-vs-completed period or comparison baseline that is \
+unstated, e.g. "this quarter" or "compare performance" (ambiguous_date_range / \
+ambiguous_comparison); an include/exclude choice with no single canonical \
+answer, e.g. revenue with or without refunds (ambiguous_inclusion_rule); and \
+the calendar-vs-fiscal, calendar-vs-business-days, and timezone axes -- but for \
+THOSE three, the [SEMA-CONTEXT] governed configuration block above is \
+authoritative: ask ONLY when it says that axis is ambiguous, and stay silent \
+(use its default) when it says not to ask. Ask only what you genuinely need; if \
+a sensible, low-risk default is obvious, just answer.
+Do NOT re-ask something already resolved: if the conversation history, the \
+governed config, or the drill-down [SEMA-CONTEXT] already fixes the \
+interpretation (e.g. a parent answer that used fiscal Q2), inherit it silently. \
+Whenever you APPLY a governed or clarified interpretation, list it in \
+evidence.resolved_interpretation as {label, value} pairs (e.g. {"label": \
+"Quarter type", "value": "Fiscal"}) so the user sees how you read the question, \
+in their language.
 C. Otherwise run the tools, then judge what you actually got back. Use \
 mode='answer' only when executed queries really support it. If the data can't \
 support a reliable answer -- the source/table isn't connected, no rows exist \

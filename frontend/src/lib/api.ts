@@ -82,6 +82,18 @@ export interface Evidence {
    * in the user's language. See lib/evidence.ts. */
   analysis_steps?: AnalysisStep[];
   assumptions?: string[];
+  /** How an ambiguous part of the question was interpreted (governed default or
+   * resolved clarification), as {label, value} pairs. The transparency line of
+   * the clarification flow; empty when nothing was ambiguous. */
+  resolved_interpretation?: { label: string; value: string }[];
+}
+
+/** A disclosed degradation on one answer (mirrors api/models.py Notice).
+ * `kind` is a stable key the UI localizes into an amber badge; `attempts`
+ * carries detail for sql_retried. */
+export interface Notice {
+  kind: string;
+  attempts?: number | null;
 }
 
 export interface ChatResponse {
@@ -104,6 +116,9 @@ export interface ChatResponse {
   sql_used: string | null;
   confidence: "high" | "medium" | "low" | null;
   evidence: Evidence | null;
+  /** Disclosed fallbacks/degradations for this answer (usually empty).
+   * Optional so conversations persisted before this field still parse. */
+  notices?: Notice[];
   status: "ok" | "error";
   error: string | null;
   conversation_id?: string | null;

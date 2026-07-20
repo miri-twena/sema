@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import type { ConversationSummary } from "../lib/api";
 import { ConversationItem, type ConversationActions } from "./ConversationItem";
+import { SidebarSection } from "./SidebarSection";
 
 const COLLAPSE_KEY = "sema:convSections"; // { pinned: bool, recent: bool } = open state
 
@@ -20,6 +20,7 @@ function Section({
   activeId,
   actions,
   emptyHint,
+  tint,
 }: {
   id: "pinned" | "recent";
   label: string;
@@ -27,6 +28,7 @@ function Section({
   activeId: string | null;
   actions: ConversationActions;
   emptyHint: React.ReactNode;
+  tint?: readonly [string, string];
 }) {
   // Open by default; the stored map only records deviations from that.
   const [open, setOpen] = useState<boolean>(() => loadCollapsed()[id] !== false);
@@ -44,33 +46,26 @@ function Section({
   // Both sections are always shown so the structure is stable and each can be
   // collapsed independently -- an empty section shows a hint rather than
   // disappearing (which used to make Recent look like it had replaced Pinned).
+  // Uses the shared SidebarSection so these headers match the Suggested/Popular
+  // categories exactly (same chevron, count, spacing and a11y).
   return (
-    <div className="mb-3">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="w-full flex items-center gap-1 px-1 mb-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted hover:text-ink transition"
-      >
-        <ChevronDown size={13} className={`transition-transform ${open ? "" : "-rotate-90"}`} />
-        {label}
-        <span className="ms-auto text-faint font-normal">{items.length}</span>
-      </button>
-      {open &&
-        (items.length > 0 ? (
-          <div className="flex flex-col gap-0.5">
-            {items.map((c) => (
-              <ConversationItem
-                key={c.id}
-                conversation={c}
-                active={c.id === activeId}
-                actions={actions}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="px-2 py-1.5 text-[0.76rem] text-faint leading-relaxed">{emptyHint}</div>
-        ))}
-    </div>
+    <SidebarSection title={label} count={items.length} open={open} onToggle={() => setOpen((o) => !o)}>
+      {items.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {items.map((c) => (
+            <ConversationItem
+              key={c.id}
+              conversation={c}
+              active={c.id === activeId}
+              actions={actions}
+              tint={tint}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="px-2 py-1.5 text-[0.76rem] text-faint leading-relaxed">{emptyHint}</div>
+      )}
+    </SidebarSection>
   );
 }
 
@@ -88,6 +83,8 @@ export function ConversationList({
   loading,
   error,
   search = "",
+  pinnedTint,
+  recentTint,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
@@ -96,6 +93,9 @@ export function ConversationList({
   error: boolean;
   /** When non-empty, show a flat list of title matches instead of sections. */
   search?: string;
+  /** Fixed pastel tints per category (background, text/border). */
+  pinnedTint?: readonly [string, string];
+  recentTint?: readonly [string, string];
 }) {
   if (error) {
     return <div className="px-1 py-2 text-[0.78rem] text-muted">Couldn't load chat history.</div>;
@@ -142,6 +142,7 @@ export function ConversationList({
         items={pinned}
         activeId={activeId}
         actions={actions}
+        tint={pinnedTint}
         emptyHint="Pin a chat from its ⋯ menu to keep it here."
       />
       <Section
@@ -150,6 +151,7 @@ export function ConversationList({
         items={recent}
         activeId={activeId}
         actions={actions}
+        tint={recentTint}
         emptyHint={
           <>
             No conversations yet. Start one with{" "}

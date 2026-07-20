@@ -1,6 +1,6 @@
-import { CalendarDays, ShieldCheck } from "lucide-react";
-import type { DateRange, Evidence } from "../lib/api";
-import { EV_LABELS, sqlStatusText, stepText, type AnalysisStep, type Lang } from "../lib/evidence";
+import { CalendarDays, Info, ShieldCheck } from "lucide-react";
+import type { DateRange, Evidence, Notice } from "../lib/api";
+import { EV_LABELS, noticeText, sqlStatusText, stepText, type AnalysisStep, type Lang } from "../lib/evidence";
 
 const CONFIDENCE_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   high: { bg: "#EAFBF4", fg: "#1B7A5E", label: "High confidence" },
@@ -20,6 +20,42 @@ export function ConfidenceBadge({ confidence }: { confidence: string | null }) {
     >
       {style.label}
     </span>
+  );
+}
+
+/** Row of subtle amber "we degraded" badges -- fallback model, self-corrected
+ * SQL, or a built-in report standing in for the agent. Informative, not
+ * alarming: muted amber + a small info icon, with the full explanation in the
+ * native tooltip. Localized from the question's direction (Hebrew answer ->
+ * Hebrew badge). Renders nothing when there are no notices (the common case). */
+export function NoticeBadges({
+  notices,
+  dir = "ltr",
+}: {
+  notices: Notice[] | null | undefined;
+  dir?: "rtl" | "ltr";
+}) {
+  if (!notices || notices.length === 0) return null;
+  const lang: Lang = dir === "rtl" ? "he" : "en";
+  const rendered = notices
+    .map((notice) => ({ notice, text: noticeText(notice.kind, lang) }))
+    .filter((x): x is { notice: Notice; text: { label: string; tip: string } } => x.text !== null);
+  if (rendered.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-2">
+      {rendered.map(({ notice, text }, i) => (
+        <span
+          key={i}
+          title={text.tip}
+          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-semibold cursor-help"
+          style={{ background: "#FEF3C7", color: "#B45309" }}
+        >
+          <Info size={11} className="shrink-0" />
+          {text.label}
+          {notice.kind === "sql_retried" && notice.attempts ? ` (${notice.attempts})` : ""}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -86,16 +122,19 @@ export function EvidencePanel({
     queries_failed,
     analysis_steps,
     assumptions,
+    resolved_interpretation,
   } = evidence;
   const hasDateRange = date_range && (date_range.start || date_range.end);
   const steps = analysis_steps ?? [];
+  const interpretation = resolved_interpretation ?? [];
   const hasAnything =
     semantic_definitions.length > 0 ||
     data_sources.length > 0 ||
     hasDateRange ||
     filters_applied.length > 0 ||
     data_freshness ||
-    steps.length > 0;
+    steps.length > 0 ||
+    interpretation.length > 0;
   if (!hasAnything) return null;
 
   // Only claim execution when a query actually ran.
@@ -141,6 +180,21 @@ export function EvidencePanel({
           <Row label={L.filters}>
             <span dir="ltr">{filters_applied.join("; ")}</span>
           </Row>
+        )}
+
+        {/* Transparency line of the clarification flow: how an otherwise-
+         * ambiguous part of the question was read (governed default or a
+         * resolved clarification), so the user can verify it. Labels/values
+         * arrive already in the user's language from the model. */}
+        {interpretation.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-lineSoft">
+            <div className="text-muted mb-1">{L.interpretation}</div>
+            {interpretation.map((it, i) => (
+              <Row key={`interp-${i}`} label={it.label}>
+                {it.value}
+              </Row>
+            ))}
+          </div>
         )}
 
         {/* Execution facts -- server-computed, never model-asserted. */}

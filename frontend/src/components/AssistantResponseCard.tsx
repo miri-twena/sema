@@ -10,7 +10,7 @@ import { RecommendedActions } from "./RecommendedActions";
 import { MessageActions } from "./MessageActions";
 import { SqlBlock } from "./SqlBlock";
 import type { DrillContext } from "./DrillChat";
-import { ConfidenceBadge, EvidencePanel, PeriodBanner } from "./EvidencePanel";
+import { ConfidenceBadge, EvidencePanel, NoticeBadges, PeriodBanner } from "./EvidencePanel";
 import { CopyableBlock } from "./CopyButton";
 import { CodeBlock, InlineCode } from "./CodeBlock";
 import { ModeCard } from "./ModeCard";
@@ -58,6 +58,7 @@ export function AssistantResponseCard({
             <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
             <span className="text-xs font-semibold text-primary-dark">SEMA</span>
           </div>
+          <NoticeBadges notices={response.notices} dir={dir} />
           <ModeCard response={response} dir={dir} onAsk={onAsk} />
           <MessageActions text={response.answer} onRetry={onRetry} />
         </div>
@@ -74,6 +75,7 @@ export function AssistantResponseCard({
           <ConfidenceBadge confidence={response.confidence} />
         </div>
 
+        <NoticeBadges notices={response.notices} dir={dir} />
         <PeriodBanner dateRange={response.evidence?.date_range} />
 
         {/* Plain text gets the raw markdown source; rich targets get the

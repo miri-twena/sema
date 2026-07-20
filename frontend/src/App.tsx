@@ -1,9 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Menu, X } from "lucide-react";
+import { AlertTriangle, Menu, PanelLeft, X } from "lucide-react";
 import { api, type Client, type Alert, type Overview, type PopularQuestion } from "./lib/api";
 import { useChat } from "./hooks/useChat";
 import { useConversations } from "./hooks/useConversations";
 import { Sidebar } from "./components/Sidebar";
+import { ClientSelector } from "./components/ClientSelector";
 import type { ConversationActions } from "./components/ConversationItem";
 import { ChatInput } from "./components/ChatInput";
 import { HomeDashboard } from "./components/HomeDashboard";
@@ -28,6 +29,17 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false); // mobile sidebar drawer
+  // Desktop sidebar collapse/expand, persisted across refreshes.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem("sema:sidebarCollapsed") === "1",
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem("sema:sidebarCollapsed", sidebarCollapsed ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  }, [sidebarCollapsed]);
 
   const conversations = useConversations(activeId);
   const chat = useChat({
@@ -140,11 +152,10 @@ export default function App() {
 
   const empty = chat.turns.length === 0;
 
-  const sidebar = (
+  // `onCollapse` hides the sidebar: on desktop it collapses the persistent
+  // panel (expand again from the header button); on mobile it closes the drawer.
+  const renderSidebar = (onCollapse: () => void) => (
     <Sidebar
-      clients={clients}
-      activeId={activeId}
-      onClientChange={switchClient}
       suggested={activeClient?.suggested_questions ?? []}
       popularQuestions={popularQuestions}
       conversations={conversations.conversations}
@@ -154,14 +165,17 @@ export default function App() {
       conversationActions={conversationActions}
       onPick={sendQuestion}
       onNewConversation={newChat}
-      dbConnected={dbConnected}
+      onGoHome={newChat}
+      onCollapse={onCollapse}
     />
   );
 
   return (
     <div className="flex h-screen bg-bg text-ink">
-      {/* Desktop: persistent sidebar. */}
-      <div className="hidden md:block">{sidebar}</div>
+      {/* Desktop: persistent sidebar, collapsible to reclaim width. */}
+      {!sidebarCollapsed && (
+        <div className="hidden md:block">{renderSidebar(() => setSidebarCollapsed(true))}</div>
+      )}
 
       {/* Mobile: off-canvas drawer + backdrop, mounted only while open.
           Uses a slide-in KEYFRAME (not a state-toggled transition): the same
@@ -175,7 +189,7 @@ export default function App() {
             onClick={() => setDrawerOpen(false)}
           />
           <div className="fixed inset-y-0 start-0 z-50 animate-[sema-slide-in-left_0.2s_ease-out]">
-            {sidebar}
+            {renderSidebar(() => setDrawerOpen(false))}
           </div>
         </div>
       )}
@@ -190,10 +204,34 @@ export default function App() {
             >
               {drawerOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
+            {/* Desktop: expand the sidebar again once it's collapsed. */}
+            {sidebarCollapsed && (
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                aria-label="Expand sidebar"
+                title="Expand sidebar"
+                className="hidden md:flex w-9 h-9 -ms-1 rounded-lg items-center justify-center text-ink hover:bg-surfaceAlt transition"
+              >
+                <PanelLeft size={20} />
+              </button>
+            )}
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
               <p className="text-sm text-muted">Ask your business anything.</p>
             </div>
+          </div>
+
+          {/* Active client + connection status, top-right. */}
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:flex items-center gap-1.5 text-[0.75rem]">
+              <span className={`w-2 h-2 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-red-500"}`} />
+              <span className={dbConnected ? "text-emerald-600" : "text-red-500"}>
+                {dbConnected ? "Connected" : "Disconnected"}
+              </span>
+            </span>
+            {clients.length > 0 && (
+              <ClientSelector compact clients={clients} activeId={activeId} onChange={switchClient} />
+            )}
           </div>
         </header>
 

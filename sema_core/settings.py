@@ -51,6 +51,10 @@ class Settings:
 
     # --- Anthropic / agent loop ---
     anthropic_model: str
+    # Backup model tried automatically when the primary model API-errors
+    # (overloaded/5xx). Blank disables the fallback. When it answers, the run
+    # carries a "fallback_model" notice so the swap is never silent.
+    anthropic_model_fallback: str
     max_iterations: int
     max_tokens: int
     max_history_turns: int
@@ -87,6 +91,9 @@ def load_settings() -> Settings:
     """
     return Settings(
         anthropic_model=os.environ.get("SEMA_MODEL", "claude-sonnet-4-6"),
+        anthropic_model_fallback=os.environ.get(
+            "SEMA_MODEL_FALLBACK", "claude-haiku-4-5-20251001"
+        ),
         max_iterations=_int("SEMA_MAX_ITERATIONS", 8),
         max_tokens=_int("SEMA_MAX_TOKENS", 4000),
         max_history_turns=_int("SEMA_MAX_HISTORY_TURNS", 10),
