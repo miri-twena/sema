@@ -55,6 +55,32 @@ def test_stream_emits_status_then_answer(monkeypatch):
     assert parsed.actions == ["Do X"]
 
 
+def test_stream_persists_the_rendered_payload(monkeypatch):
+    """Regression: /api/chat/stream once stored the answer as bare text while
+    /api/chat stored payload= too. Reopening a streamed chat then had no
+    response to render, and every turn sat on the loading indicator forever.
+    Both endpoints must persist the payload identically."""
+    monkeypatch.setattr(
+        main,
+        "get_response",
+        lambda question, history=None, request_id=None, on_progress=None, **kw: {
+            "insight_text": "Revenue is up.",
+            "recommended_actions": ["Do X"],
+        },
+    )
+    client = TestClient(main.app)
+
+    with client.stream("POST", "/api/chat/stream", json={"question": "hi"}) as resp:
+        raw = "".join(resp.iter_text())
+    conv_id = _events(raw)[-1][1]["conversation_id"]
+
+    stored = main.conversation_store.get_messages(conv_id, client_id="ecommerce")
+    answer = stored[1]
+    assert answer["role"] == "assistant"
+    assert answer["payload"], "streamed answer was stored without its rendered payload"
+    assert ChatResponse.model_validate_json(answer["payload"]).answer == "Revenue is up."
+
+
 def test_stream_emits_error_event_on_failure(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError(r"leaky C:\secret\path.py detail")

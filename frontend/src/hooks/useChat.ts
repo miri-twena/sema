@@ -51,9 +51,29 @@ function load(key: string | null | undefined): Persisted {
   return { turns: [], history: [] };
 }
 
+/** An answer stored before payloads were persisted (or whose payload failed to
+ * parse) -> a minimal renderable response. `response: null` means "still
+ * loading" to TurnView, so returning null for a turn that HAS an answer leaves
+ * it spinning forever; degrading to text-only is the correct fallback. */
+function textOnlyResponse(text: string): ChatResponse {
+  return {
+    answer: text,
+    kpis: [],
+    chart: null,
+    table: null,
+    actions: [],
+    follow_up_questions: [],
+    sql_used: null,
+    confidence: null,
+    evidence: null,
+    status: "ok",
+    error: null,
+  };
+}
+
 /** A stored conversation -> the in-memory shapes the chat view renders. Pairs
  * each user turn with the assistant turn that follows it; a user turn with no
- * answer yet (or an assistant payload that wasn't stored) still renders. */
+ * answer yet still renders as pending. */
 function turnsFromDetail(detail: ConversationDetail): { turns: ChatTurn[]; history: Message[] } {
   const turns: ChatTurn[] = [];
   const history: Message[] = [];
@@ -65,7 +85,7 @@ function turnsFromDetail(detail: ConversationDetail): { turns: ChatTurn[]; histo
     const answer = next && next.role === "assistant" ? next : null;
     turns.push({
       question: m.content,
-      response: answer?.payload ?? null,
+      response: answer ? (answer.payload ?? textOnlyResponse(answer.content)) : null,
       dir: dirOf(m.content),
     });
     history.push({ role: "user", content: m.content });

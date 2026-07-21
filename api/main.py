@@ -283,7 +283,12 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             out = to_chat_response(resp)
             out.conversation_id = conv_id
             conversation_store.append(conv_id, cid, "user", req.question)
-            conversation_store.append(conv_id, cid, "assistant", resp.get("insight_text", ""))
+            # Must pass payload= exactly like the non-streaming /api/chat above:
+            # without it the answer is stored as bare text, and reopening the
+            # chat has no rendered response to show.
+            conversation_store.append(
+                conv_id, cid, "assistant", resp.get("insight_text", ""), payload=out.model_dump_json()
+            )
             log_event(
                 logger,
                 "api_chat_stream",
