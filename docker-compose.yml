@@ -1,7 +1,11 @@
-# Local PostgreSQL instance for SEMA development.
+# The full SEMA local stack: Postgres + FastAPI + the React dev server.
 #
-# One container hosts BOTH client databases (the clean choice for dev -- one
-# engine, less overhead than two containers):
+# All three use `restart: unless-stopped`, so once Docker Desktop is running
+# the whole app comes back on its own after a reboot -- no terminals to keep
+# open. Stop it deliberately with `docker compose stop`.
+#
+# The postgres container hosts BOTH client databases (the clean choice for dev
+# -- one engine, less overhead than two containers):
 #   - sema_db       (ecommerce client)   created by the image from POSTGRES_DB
 #   - insurance_db  (insurance client)   created by sql/init/ on first boot
 # sql/init/*.sql also sets up the read-only agent role on both databases.
@@ -9,8 +13,14 @@
 # Usage:
 #   1. Copy .env.example to .env and adjust values if you like (defaults
 #      work fine for local development).
-#   2. Run: docker compose up -d
+#   2. Run: docker compose up -d --build
 #   3. Load data per client: data/load_data.py and data/insurance/load_data.py
+#      (still run from Windows against the published port 5432 -- unchanged)
+#   4. Open http://localhost:5173
+#
+# api and frontend run in DEV mode: the source tree is bind-mounted, so
+# editing a file on Windows hot-reloads inside the container. Rebuild only
+# when dependencies change (requirements*.txt / package-lock.json).
 #
 # Data is persisted in the "sema_pgdata" Docker volume, so stopping/starting
 # the container does NOT lose data. The sql/init scripts only run on a FRESH
@@ -27,12 +37,83 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sema_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sema_password}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 127.0.0.1: bound to loopback only. A bare "5432:5432" publishes on
+      # every host interface, exposing the database to the whole local network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - sema_pgdata:/var/lib/postgresql/data
       # Bootstrap scripts: create insurance_db + the read-only role on a fresh
       # volume. Mounted read-only; ignored once the volume already exists.
       - ./sql/init:/docker-entrypoint-initdb.d:ro
+    # Lets the api service wait for a database that actually accepts queries,
+    # not just a container that has started.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sema_user} -d ${POSTGRES_DB:-sema_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: sema-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Overrides POSTGRES_HOST from .env for THIS container only. Inside a
+      # container "localhost" is the container itself, so the .env value
+      # (localhost, correct for scripts run from Windows) would fail here.
+      # "postgres" is the compose service name, resolved on the shared network.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      # uvicorn --reload uses WatchFiles, which cannot see host file events
+      # through a Docker Desktop bind mount on Windows. Without polling the
+      # reloader runs but never fires. Read by WatchFiles itself, no code change.
+      WATCHFILES_FORCE_POLLING: "true"
+    ports:
+      # Loopback only -- the API has no auth when SEMA_API_KEY is empty (the
+      # local-dev default), so it must not be reachable from the network.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Live source for --reload. Also how the agent reads sql/semantic/*.yaml
+      # and how var/sema_state.db (the conversation store) persists on the host.
+      - .:/app
+      # Keeps the image's site-packages from being shadowed by the bind mount
+      # above -- without this, the editable install would still resolve, but a
+      # stray host .venv could confuse tooling inside the container.
+      - /app/.venv
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sema-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Deliberately localhost, NOT http://api:8000: this value is baked into
+      # code that runs in the BROWSER on Windows, which cannot resolve compose
+      # service names. Service names only work container-to-container.
+      VITE_API_URL: http://localhost:8000
+      # Same Windows bind-mount limitation as the api service: switches Vite's
+      # watcher to polling (see frontend/vite.config.ts) so HMR actually fires.
+      VITE_USE_POLLING: "true"
+    ports:
+      # Loopback only. To reach the UI from another device (phone testing),
+      # change this back to "5173:5173" deliberately -- and remember the API
+      # port must be opened too, since the browser calls it directly.
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume: keeps the Linux node_modules built by `npm ci` from
+      # being replaced by the Windows-built tree in the bind mount above.
+      # esbuild/rollup ship per-platform binaries, so the swap would crash Vite.
+      - /app/node_modules
 
 volumes:
   sema_pgdata:

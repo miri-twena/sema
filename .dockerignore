@@ -1,0 +1,31 @@
+# Build context for the api/ image. Everything listed here is excluded from
+# what Docker uploads to the daemon -- without this, .venv/ and data/output/
+# alone add hundreds of MB to every build.
+#
+# Do NOT exclude sema_core/, api/, pyproject.toml or requirements*.txt --
+# api/Dockerfile copies those.
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+.git/
+.gitignore
+
+# Secrets: injected at runtime via env_file, never baked into an image layer.
+.env
+
+# The frontend has its own build context (frontend/Dockerfile).
+frontend/
+
+# Regenerable data + runtime state (var/ is bind-mounted at runtime instead).
+data/output/
+data/insurance/output/
+var/
+evals/.last_run/
+
+notebooks/
+docs/

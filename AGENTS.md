@@ -126,11 +126,15 @@ evolves.
 
 The verified end-to-end startup sequence on this machine:
 
-1. **Database** — PostgreSQL runs as a Docker container (`sema-postgres`,
-   defined in `docker-compose.yml`, `restart: unless-stopped` so it
-   auto-starts once the Docker daemon is up). If it's not running, start
-   Docker Desktop, then `docker compose up -d`. Connection settings come
-   from `.env`.
+**The whole stack is dockerized** (`docker-compose.yml`): `sema-postgres`,
+`sema-api`, and `sema-frontend`, all `restart: unless-stopped`. Start Docker
+Desktop and everything comes up on its own — `docker compose up -d` only if
+they're stopped, add `--build` after dependency changes. Then open
+http://localhost:5173.
+
+1. **Database** — PostgreSQL container `sema-postgres`, port 5432 published
+   to the host so scripts run from Windows unchanged. Settings come from
+   `.env`.
 2. **Data** — `.venv\Scripts\python.exe data\load_data.py` applies
    `sql/schema.sql` (drops + recreates tables) and bulk-loads the CSVs in
    `data/output/`. The generator uses a fixed seed, so the dataset is
@@ -148,11 +152,35 @@ The verified end-to-end startup sequence on this machine:
 3. **API key** — the agent needs `ANTHROPIC_API_KEY=...` on its own line in
    `.env` (gitignored — never commit it, never paste it into chat). Without
    it the app still runs but falls back to the rule-based router.
-4. **Run the product UI (React + FastAPI)** — from the project root:
-   - Start the FastAPI backend: `.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000`
-   - In another terminal, start the React dev server: from `frontend/`, run `npm run dev`
-   - Open http://localhost:5173 (or the port shown by the React dev server)
-   - Swagger API docs at http://localhost:8000/docs
+4. **Product UI (React + FastAPI)** — already running from the compose stack:
+   http://localhost:5173, Swagger at http://localhost:8000/docs, logs via
+   `docker compose logs -f api|frontend`. Both containers run in **dev mode**
+   (source bind-mounted, uvicorn `--reload` + Vite HMR), so editing a file on
+   Windows hot-reloads inside the container.
+
+   Three Docker gotchas worth remembering, each already handled in config —
+   don't "fix" them back:
+   - **`POSTGRES_HOST` is overridden to `postgres`** for the api service only.
+     `.env` says `localhost`, which is correct for scripts run from Windows but
+     means "the container itself" inside a container.
+   - **`VITE_API_URL` stays `http://localhost:8000`**, *not* `http://api:8000`.
+     That value runs in the browser on Windows, which cannot resolve compose
+     service names — those only work container-to-container.
+   - **Both file watchers are forced to polling** (`WATCHFILES_FORCE_POLLING`,
+     `VITE_USE_POLLING` → `frontend/vite.config.ts`). Docker Desktop on Windows
+     does not propagate filesystem events into Linux containers; without polling
+     the watchers run but never fire. Polling is gated on the env var so running
+     Vite natively on Windows keeps cheap native events.
+
+   `node_modules` is a container-owned volume so the Linux build is never
+   shadowed by the Windows one (esbuild/rollup ship per-platform binaries).
+
+   **All ports publish to `127.0.0.1` only** — keep it that way. The API has no
+   auth when `SEMA_API_KEY` is empty (the local default), so a bare `"8000:8000"`
+   exposes the API and the tenant data to every device on the local network.
+
+   To run either service natively instead: `docker compose stop api` (frees the
+   port), then the old `uvicorn` / `npm run dev` commands.
 5. **Alternative: Run the Streamlit dev tool (frozen)** — from the project
    root, to use the original Streamlit interface for local sanity-checks only:
    `.venv\Scripts\python.exe -m streamlit run app\main.py`
@@ -161,8 +189,8 @@ The verified end-to-end startup sequence on this machine:
    pyproject.toml). `app/` is a frozen internal dev tool; do not modify it
    without explicit approval.
 6. Environment variables (including the API key) are read at startup, so
-   **restart the FastAPI backend or Streamlit after editing `.env`** for
-   changes to take effect.
+   **`docker compose restart api` after editing `.env`** for changes to take
+   effect (`.env` is injected via `env_file`, never baked into an image).
 
 ## Claude Code Working Style (Response Format & Workflow)
 

@@ -1,0 +1,9 @@
+# Build context for the frontend/ image.
+#
+# node_modules is excluded deliberately: the Windows-built tree must never
+# reach the image. `npm ci` rebuilds it for Linux inside the container.
+
+node_modules/
+dist/
+.git/
+.env

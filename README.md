@@ -174,10 +174,22 @@ Prerequisites: Docker Desktop, Python 3.12, and a virtualenv at `.venv` with
 `requirements.txt` installed (`pip install -r requirements.txt`). Commands
 below are PowerShell (Windows).
 
-1. **Start the database** (PostgreSQL via Docker):
+1. **Start the whole stack** (Postgres + FastAPI + React, all in Docker):
    ```powershell
-   docker compose up -d
+   docker compose up -d --build
    ```
+   All three services use `restart: unless-stopped`, so once Docker Desktop is
+   running the app comes back on its own after a reboot — nothing to keep open
+   in a terminal. `--build` is only needed the first time and after changing
+   `requirements*.txt` or `package-lock.json`.
+
+   All three ports are published to **`127.0.0.1` only**, not to every network
+   interface. This matters because the API has no authentication when
+   `SEMA_API_KEY` is empty (the local-dev default) — a bare `"8000:8000"` would
+   let any device on the local network query the API and the database. To reach
+   the UI from another device (e.g. phone testing), drop the `127.0.0.1:` prefix
+   deliberately, and note the API port must be opened too since the browser
+   calls it directly.
 2. **Load the synthetic data** (drops/recreates tables and bulk-loads the
    deterministic dataset — 5,000 customers, 20,000 orders, with the
    intentional patterns in [`data/README.md`](data/README.md)):
@@ -192,17 +204,25 @@ below are PowerShell (Windows).
    ```powershell
    .venv\Scripts\python.exe -m pip install -e .
    ```
-5. **Run the product UI (React + FastAPI)**:
-   - In one terminal, start the FastAPI backend:
-     ```powershell
-     .venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
-     ```
-   - In another terminal, start the React dev server (from `frontend/`):
-     ```powershell
-     npm run dev
-     ```
-   - Open http://localhost:5173 (or the port shown by React dev server)
+5. **Open the product UI** — it is already running from step 1:
+   - App at http://localhost:5173
    - Swagger API docs at http://localhost:8000/docs
+   - Logs: `docker compose logs -f api` (or `frontend`)
+   - Restart after editing `.env`: `docker compose restart api`
+
+   The `api` and `frontend` containers run in **dev mode**: the source tree is
+   bind-mounted, so editing a file on Windows hot-reloads inside the container
+   (uvicorn `--reload` and Vite HMR). Both watchers are forced into **polling**
+   mode (`WATCHFILES_FORCE_POLLING`, `VITE_USE_POLLING`) because Docker Desktop
+   on Windows does not propagate filesystem events into Linux containers —
+   without it the watchers run but silently never fire.
+
+   To run the API or frontend natively on Windows instead (no polling overhead),
+   the old commands still work — stop the container first so the port is free:
+   ```powershell
+   docker compose stop api
+   .venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
+   ```
 
 6. **Or run the Streamlit dev tool** (frozen, internal use only):
    ```powershell
