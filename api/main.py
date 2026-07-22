@@ -33,12 +33,15 @@ from sema_core import alerts_engine
 from sema_core.conversation_store import ConversationNotFoundError, SqliteConversationStore, truncate_by_tokens
 from sema_core.db import check_connection, run_query
 from sema_core.obs import get_logger, log_event, new_request_id
+from sema_core.brief import build_brief
 from sema_core.overview import build_overview
 from sema_core.settings import settings
 from sema_core.wiring import get_response
 
 from api.models import (
     Alert,
+    Brief,
+    BriefInsight,
     ChatRequest,
     ChatResponse,
     Client,
@@ -47,6 +50,7 @@ from api.models import (
     ConversationMessage,
     ConversationSummary,
     ConversationUpdate,
+    DateRange,
     Health,
     Kpi,
     Overview,
@@ -448,6 +452,42 @@ def overview(
         start=data["start"],
         end=data["end"],
         available_months=data["available_months"],
+    )
+
+
+@app.get("/api/brief", response_model=Brief)
+def brief(
+    client_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> Brief:
+    """The home dashboard's Daily Brief: 2-3 phrased insights about what moved
+    in the selected period. Deterministic and agent-free, so it runs on page
+    load like /api/overview.
+
+    Takes the SAME `start`/`end` month keys as /api/overview and resolves them
+    through the same period logic, so the brief always describes exactly the
+    period the KPI cards are showing. An empty `insights` list is a normal
+    response (a quiet period, or no baseline window to compare against).
+    """
+    cid = _resolve_client(client_id)
+    # Same ContextVar override as /api/overview, so the saved reports resolve
+    # this tenant and its caches stay keyed per client.
+    client_registry.set_active_client_override(cid)
+    try:
+        data = build_brief(start=start, end=end)
+    finally:
+        client_registry.set_active_client_override(None)
+    return Brief(
+        client_id=cid,
+        as_of=datetime.now(timezone.utc).isoformat(),
+        period=DateRange(**data["period"]),
+        comparison_period=(
+            DateRange(**data["comparison_period"]) if data["comparison_period"] else None
+        ),
+        comparison_available=data["comparison_available"],
+        unavailable_reason=data["unavailable_reason"],
+        insights=[BriefInsight(**i) for i in data["insights"]],
     )
 
 

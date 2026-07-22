@@ -191,6 +191,42 @@ export interface Overview {
   available_months: string[];
 }
 
+/** One phrased movement in the Daily Brief (mirrors api/models.py BriefInsight).
+ * Values are raw with a `value_format` tag so they render through format.ts,
+ * exactly like KPI values -- `detail` describes the move without the numbers. */
+export interface BriefInsight {
+  id: string;
+  metric: "revenue" | "orders" | "aov";
+  metric_label: string;
+  headline: string;
+  detail: string;
+  current_value: number;
+  previous_value: number;
+  change_pct: number | null;
+  direction: "up" | "down" | "flat";
+  /** From what the metric MEANS, not from any card colour. */
+  sentiment: "positive" | "negative";
+  value_format: "currency" | "number";
+  rank_score: number;
+  importance: "high" | "medium" | "low";
+  follow_up_question: string;
+  period: { start: string | null; end: string | null };
+  comparison_period: { start: string | null; end: string | null };
+}
+
+/** The home dashboard's Daily Brief (mirrors api/models.py Brief). An empty
+ * `insights` list is normal: `comparison_available` / `unavailable_reason`
+ * distinguish "quiet period" from "no baseline to compare against". */
+export interface Brief {
+  client_id: string;
+  as_of: string | null;
+  period: { start: string | null; end: string | null };
+  comparison_period: { start: string | null; end: string | null } | null;
+  comparison_available: boolean;
+  unavailable_reason: string | null;
+  insights: BriefInsight[];
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -233,6 +269,14 @@ export const api = {
     if (start) params.set("start", start);
     if (end) params.set("end", end);
     return getJSON<Overview>(`/api/overview?${params}`);
+  },
+  /** Same start/end month keys as overview() -- the brief must describe
+   * exactly the period the KPI cards are showing. */
+  brief: (clientId: string, start?: string, end?: string) => {
+    const params = new URLSearchParams({ client_id: clientId });
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    return getJSON<Brief>(`/api/brief?${params}`);
   },
   chat: (
     question: string,

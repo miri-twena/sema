@@ -218,6 +218,56 @@ class Overview(BaseModel):
     available_months: list[str] = []
 
 
+class BriefInsight(BaseModel):
+    """One phrased movement in the Daily Brief.
+
+    Values are raw with a `value_format` tag rather than pre-formatted strings,
+    so the client renders them through the same format.ts helpers the KPI cards
+    use. `detail` therefore describes the movement without restating numbers.
+    """
+
+    id: str  # stable per client/metric/window
+    metric: Literal["revenue", "orders", "aov"]
+    metric_label: str
+    headline: str
+    detail: str
+    current_value: float
+    previous_value: float
+    change_pct: float | None = None
+    direction: Literal["up", "down", "flat"]
+    # Derived from what the metric MEANS (a rise in revenue is good), not from
+    # any card colour. Kept separate from `direction` so the two can differ for
+    # a future metric where up is bad.
+    sentiment: Literal["positive", "negative"]
+    value_format: Literal["currency", "number"] = "number"
+    rank_score: float  # deterministic ordering key: |change_pct|
+    importance: Literal["high", "medium", "low"]
+    # An analytical question SEMA can answer from the data. Never a recommended
+    # action -- those often need systems SEMA doesn't control.
+    follow_up_question: str
+    period: DateRange
+    comparison_period: DateRange
+
+
+class Brief(BaseModel):
+    """The home dashboard's Daily Brief: what changed in the selected period.
+
+    Computed deterministically from the saved report library -- no model call
+    -- so it can run on page load. An empty `insights` list is a valid, normal
+    response (quiet period, or no baseline); `comparison_available` and
+    `unavailable_reason` say which case it is.
+    """
+
+    client_id: str
+    as_of: str | None = None  # ISO timestamp: when these numbers were computed
+    period: DateRange
+    comparison_period: DateRange | None = None
+    comparison_available: bool = False
+    # Stable key the client localizes ("insufficient_history" / "no_period_data").
+    unavailable_reason: str | None = None
+    insights: list[BriefInsight] = []
+
+
 # --- alerts / clients / schema / health ------------------------------------
 class Alert(BaseModel):
     id: str

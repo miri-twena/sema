@@ -26,6 +26,7 @@ frontend renders them with the same KpiCards component it uses for chat answers.
 from __future__ import annotations
 
 import calendar
+from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
@@ -103,37 +104,100 @@ def _resolve_window(start: str | None, end: str | None, selectable: list[str]) -
     return (e, s) if s > e else (s, e)  # type: ignore[return-value]
 
 
-def _period_kpis(df: pd.DataFrame, start: str, end: str) -> list[dict]:
+@dataclass(frozen=True)
+class ResolvedPeriod:
+    """The selected month window plus its comparison baseline.
+
+    THE single definition of "the selected period" and "the prior window",
+    shared by the overview cards and the daily brief (brief.py) so the two can
+    never drift into disagreeing about which months they describe.
+
+    `baseline` is None unless the FULL prior window exists -- a partial
+    baseline would understate the comparison and produce a misleading delta.
+    """
+
+    start: str
+    end: str
+    label: str
+    months: int
+    selectable: list[str]
+    window: pd.DataFrame
+    baseline: pd.DataFrame | None
+    baseline_start: str | None
+    baseline_end: str | None
+    baseline_label: str | None
+
+
+def resolve_period(start: str | None = None, end: str | None = None) -> ResolvedPeriod | None:
+    """Resolve a requested month range against the data this client actually has.
+
+    Returns None when the revenue-by-month report is empty or unavailable --
+    callers decide whether that means "no cards" or "no brief". `start`/`end`
+    are month keys ("2026-05"); omit both for the latest complete month.
+    """
+    df = queries.get_revenue_by_month()
+    if df is None or df.empty:
+        return None
+
+    df = df.copy()
+    df["key"] = df["month"].map(_month_key)
+    df = df.sort_values("key")
+    # Fall back to every month if none is provably complete, rather than
+    # resolving to an empty period.
+    selectable = _complete_months(list(df["key"]), _max_order_date()) or list(df["key"])
+    resolved_start, resolved_end = _resolve_window(start, end, selectable)
+
+    window = df[(df["key"] >= resolved_start) & (df["key"] <= resolved_end)]
+    months = len(window)
+    prior = df[df["key"] < resolved_start].tail(months) if months else df.iloc[0:0]
+    baseline = prior if months and len(prior) == months else None
+
+    baseline_start = str(prior["key"].iloc[0]) if baseline is not None else None
+    baseline_end = str(prior["key"].iloc[-1]) if baseline is not None else None
+
+    return ResolvedPeriod(
+        start=resolved_start,
+        end=resolved_end,
+        label=_period_label(resolved_start, resolved_end),
+        months=months,
+        selectable=selectable,
+        window=window,
+        baseline=baseline,
+        baseline_start=baseline_start,
+        baseline_end=baseline_end,
+        baseline_label=(
+            _period_label(baseline_start, baseline_end)
+            if baseline_start and baseline_end
+            else None
+        ),
+    )
+
+
+def _period_kpis(period: ResolvedPeriod) -> list[dict]:
     """Revenue / Orders / AOV for the selected window, vs the prior window."""
-    window = df[(df["key"] >= start) & (df["key"] <= end)]
+    window, baseline = period.window, period.baseline
     if window.empty:
         return []
 
-    months = len(window)
-    # Baseline: the same number of months immediately before the window. Only
-    # used when ALL of them are present, so a partial baseline can't produce a
-    # misleading delta.
-    prior = df[df["key"] < start].tail(months)
-    baseline = prior if len(prior) == months else None
-
+    months = period.months
     revenue = float(window["revenue"].sum())
     orders = int(window["order_count"].sum())
     prev_revenue = float(baseline["revenue"].sum()) if baseline is not None else None
     prev_orders = int(baseline["order_count"].sum()) if baseline is not None else None
 
-    period = _period_label(start, end)
+    period_label = period.label
     delta_label = "vs prior month" if months == 1 else f"vs prior {months} months"
 
     kpis = [
         {
-            "label": f"Revenue · {period}",
+            "label": f"Revenue · {period_label}",
             "value": round(revenue, 2),
             "format": "currency",
             "delta": _pct_change(revenue, prev_revenue),
             "delta_label": delta_label,
         },
         {
-            "label": f"Orders · {period}",
+            "label": f"Orders · {period_label}",
             "value": orders,
             "format": "number",
             "delta": _pct_change(orders, prev_orders),
@@ -145,7 +209,7 @@ def _period_kpis(df: pd.DataFrame, start: str, end: str) -> list[dict]:
         prev_aov = prev_revenue / prev_orders if prev_revenue and prev_orders else None
         kpis.append(
             {
-                "label": f"AOV · {period}",
+                "label": f"AOV · {period_label}",
                 "value": round(aov, 2),
                 "format": "currency",
                 "delta": _pct_change(aov, prev_aov),
@@ -169,16 +233,11 @@ def build_overview(start: str | None = None, end: str | None = None) -> dict:
     kpis: list[dict] = []
 
     try:
-        df = queries.get_revenue_by_month()
-        if df is not None and not df.empty:
-            df = df.copy()
-            df["key"] = df["month"].map(_month_key)
-            df = df.sort_values("key")
-            # Fall back to every month if none is provably complete, rather
-            # than rendering an empty overview.
-            selectable = _complete_months(list(df["key"]), _max_order_date()) or list(df["key"])
-            resolved_start, resolved_end = _resolve_window(start, end, selectable)
-            kpis.extend(_period_kpis(df, resolved_start, resolved_end))
+        period = resolve_period(start, end)
+        if period is not None:
+            selectable = period.selectable
+            resolved_start, resolved_end = period.start, period.end
+            kpis.extend(_period_kpis(period))
     except Exception:
         logger.warning("overview: revenue_by_month unavailable for this client", exc_info=True)
 
