@@ -17,10 +17,11 @@ import { useRef } from "react";
 import { MessageSquareText, Image as ImageIcon, Table2 } from "lucide-react";
 import type { Chart } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
-import { formatX, makeAxisTickFormatter } from "../lib/format";
+import { followUpsLabel, formatX, makeAxisTickFormatter } from "../lib/format";
 import { CHART_PALETTE as PALETTE } from "../lib/tokens";
 import { CopyableBlock } from "./CopyButton";
 import { copyPng, copyRich, svgToPngBlob, toHTMLTable, toTSV } from "../lib/clipboard";
+import { ThreadBadge } from "./ThreadBadge";
 
 type Row = Record<string, unknown>;
 
@@ -41,10 +42,14 @@ function pivot(rows: Row[], x: string, color: string, y: string) {
 export function ChartRenderer({
   chart,
   dir,
+  anchor,
+  threadCount,
   onDrill,
 }: {
   chart: Chart;
   dir?: "rtl" | "ltr";
+  anchor?: { conversationId: string; turnIndex: number };
+  threadCount?: (title: string) => number | undefined;
   onDrill?: (ctx: DrillContext) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -139,14 +144,18 @@ export function ChartRenderer({
     await copyRich(toTSV(cols, rows as Row[]), toHTMLTable(cols, rows as Row[]));
   };
 
+  const chartTitle = title || "Chart";
+  const badge = threadCount?.(chartTitle);
+
   const drill = () =>
     onDrill?.({
       kind: "chart",
-      title: title || "Chart",
+      title: chartTitle,
       detail:
         `a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}; ` +
         `data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}`,
       dir,
+      ...anchor,
     });
 
   return (
@@ -163,13 +172,17 @@ export function ChartRenderer({
           {title && <div className="text-sm font-semibold text-ink">{title}</div>}
           {onDrill && (
             // me-9 keeps this clear of the floating copy control.
-            <button
-              onClick={drill}
-              className="shrink-0 ms-auto me-9 flex items-center gap-1 text-xs text-muted hover:text-primary transition"
-              title="Ask about this chart"
-            >
-              <MessageSquareText size={14} /> Ask about this
-            </button>
+            <div className="shrink-0 ms-auto me-9 flex items-center gap-2">
+              {typeof badge === "number" && <ThreadBadge count={badge} />}
+              <button
+                onClick={drill}
+                className="flex items-center gap-1 text-xs text-muted hover:text-primary transition"
+                aria-label={`Ask about this chart${followUpsLabel(badge)}`}
+                title="Ask about this chart"
+              >
+                <MessageSquareText size={14} /> Ask about this
+              </button>
+            </div>
           )}
         </div>
         <ResponsiveContainer width="100%" height={280}>

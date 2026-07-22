@@ -93,6 +93,18 @@ PRESENT_ANSWER_TOOL = {
                 "description": "For mode='cannot_answer': the specific data, table "
                 "or business definition that is missing. One short sentence.",
             },
+            "summary": {
+                "type": "string",
+                "description": "For mode='answer' ONLY: a 1-2 sentence executive "
+                "summary shown above the full answer. State the central "
+                "CONCLUSION with its key numbers -- not an introduction like "
+                "'Here is a summary of campaign performance'. Explain the main "
+                "relationship between the metrics rather than listing the KPIs "
+                "again, and make it understandable without reading further. "
+                "Plain text only (no markdown), same language as the question, "
+                "and substantially shorter than insight_text -- never the same "
+                "sentences. Omit for non-'answer' modes.",
+            },
             "insight_text": {
                 "type": "string",
                 "description": "The narrative answer in markdown. Lead with the "
@@ -285,6 +297,7 @@ def _empty_response() -> dict:
         "reason_code": None,
         "clarification_options": [],
         "missing": None,
+        "summary": None,
         "insight_text": "",
         "kpis": [],
         "charts": [],
@@ -599,7 +612,11 @@ def _apply_mode_policy(resp: dict, tools) -> dict:
             )
 
     if resp["mode"] in NON_ANSWER_MODES:
-        # No analytical furniture and no trust signals on a non-answer.
+        # No analytical furniture and no trust signals on a non-answer. The
+        # executive summary belongs to that furniture: an "In short" takeaway
+        # above a question we did NOT answer is exactly the false-confidence
+        # signal this gate exists to remove.
+        resp["summary"] = None
         resp["kpis"] = []
         resp["charts"] = []
         resp["table"] = None
@@ -649,6 +666,10 @@ def build_response(tool_input: dict, tools) -> dict:
         for o in (tool_input.get("clarification_options") or [])
         if isinstance(o, str) and o.strip()
     ][:4]
+    # Executive summary shown above the answer. Whitespace-only is treated as
+    # absent so the UI never renders an empty tinted block.
+    summary = tool_input.get("summary")
+    resp["summary"] = summary.strip() if isinstance(summary, str) and summary.strip() else None
     resp["insight_text"] = tool_input.get("insight_text", "")
     resp["recommended_actions"] = list(tool_input.get("recommended_actions", []))
     # Answerable follow-up questions -- kept only if they're non-empty strings;

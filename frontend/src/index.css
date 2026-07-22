@@ -33,6 +33,28 @@ body {
 @keyframes sema-slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes sema-slide-out-right { from { transform: translateX(0); } to { transform: translateX(100%); } }
 @keyframes sema-slide-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+
+/* Direction-aware variants for the drill panel, which is pinned to the INLINE
+   END edge (`end-0`). translateX is physical, so a single keyframe would slide
+   the panel in from the wrong side under RTL -- it would fly across the screen
+   from the left while docking on the left. Same name, redefined per direction,
+   so the component just uses `sema-slide-in-end` and stays direction-agnostic.
+   Still keyframes, not toggled transitions, for the reason above: the resting
+   state is on-screen, so a panel whose animation never runs is still usable. */
+[dir="ltr"] {
+  --sema-slide-end: 100%;
+}
+[dir="rtl"] {
+  --sema-slide-end: -100%;
+}
+@keyframes sema-slide-in-end {
+  from { transform: translateX(var(--sema-slide-end, 100%)); }
+  to { transform: translateX(0); }
+}
+@keyframes sema-slide-out-end {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--sema-slide-end, 100%)); }
+}
 @keyframes sema-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sema-fade-out { from { opacity: 1; } to { opacity: 0; } }
 

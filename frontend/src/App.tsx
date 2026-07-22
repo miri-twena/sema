@@ -1,10 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Menu, PanelLeft, X } from "lucide-react";
-import { api, type Client, type Alert, type Overview, type PopularQuestion } from "./lib/api";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Menu, X } from "lucide-react";
+import { api, type Client, type Alert, type Brief, type Overview, type PopularQuestion } from "./lib/api";
 import { useChat } from "./hooks/useChat";
+import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
+import { useThreads } from "./hooks/useThreads";
+import { ScrollToLatest } from "./components/ScrollToLatest";
 import { Sidebar } from "./components/Sidebar";
-import { ClientSelector } from "./components/ClientSelector";
 import type { ConversationActions } from "./components/ConversationItem";
 import { ChatInput } from "./components/ChatInput";
 import { HomeDashboard } from "./components/HomeDashboard";
@@ -20,6 +22,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [popularQuestions, setPopularQuestions] = useState<PopularQuestion[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [brief, setBrief] = useState<Brief | null>(null);
   // The user's chosen period, tagged with the client it belongs to -- so
   // switching clients falls back to that client's default (its latest
   // complete month) instead of carrying over a period it may not even have.
@@ -29,17 +32,6 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false); // mobile sidebar drawer
-  // Desktop sidebar collapse/expand, persisted across refreshes.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
-    () => localStorage.getItem("sema:sidebarCollapsed") === "1",
-  );
-  useEffect(() => {
-    try {
-      localStorage.setItem("sema:sidebarCollapsed", sidebarCollapsed ? "1" : "0");
-    } catch {
-      /* storage unavailable */
-    }
-  }, [sidebarCollapsed]);
 
   const conversations = useConversations(activeId);
   const chat = useChat({
@@ -48,7 +40,12 @@ export default function App() {
     // Refresh the sidebar whenever a turn creates or updates a conversation.
     onConversationChanged: conversations.refresh,
   });
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, lastAnswerRef, onScroll, showScrollToLatest, scrollToLatest, reattach } =
+    useChatScroll(chat.turns);
+  // Drill-down thread summaries for the open conversation -- badges widgets
+  // that already have a follow-up thread, and lets onDrill (below) resolve
+  // which thread to resume when one exists.
+  const threads = useThreads(activeId, chat.conversationId);
 
   useEffect(() => {
     api.health()
@@ -89,14 +86,39 @@ export default function App() {
     };
   }, [activeId, activePeriod]);
 
+  // The Daily Brief reads the SAME activePeriod the overview does, in its own
+  // effect: a slow or failing brief must never delay or blank the KPI cards.
+  // A brief that can't load degrades to "no comparison available" rather than
+  // an error, since it is supplementary to the rest of the home screen.
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    setBrief(null); // skeleton while this client's / period's brief loads
+    api
+      .brief(activeId, activePeriod?.start, activePeriod?.end)
+      .then((b) => !cancelled && setBrief(b))
+      .catch(
+        () =>
+          !cancelled &&
+          setBrief({
+            client_id: activeId,
+            as_of: null,
+            period: { start: null, end: null },
+            comparison_period: null,
+            comparison_available: false,
+            unavailable_reason: "unavailable",
+            insights: [],
+          }),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, activePeriod]);
+
   const onPeriodChange = useCallback(
     (start: string, end: string) => setPeriod({ clientId: activeId, start, end }),
     [activeId],
   );
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [chat.turns, chat.loading]);
 
   const activeClient = clients.find((c) => c.id === activeId);
 
@@ -108,7 +130,15 @@ export default function App() {
     [chat],
   );
 
-  const sendQuestion = useCallback((q: string) => chat.send(q), [chat]);
+  // Sending or retrying is an explicit "show me what happens next", so it
+  // always resumes following the bottom regardless of where the user scrolled.
+  const sendQuestion = useCallback(
+    (q: string) => {
+      reattach();
+      chat.send(q);
+    },
+    [chat, reattach],
+  );
 
   // New chat: clear the view (previous conversations stay in the sidebar) and
   // close the mobile drawer.
@@ -142,8 +172,36 @@ export default function App() {
     },
   };
 
-  const onDrill = useCallback((ctx: DrillContext) => setDrill(ctx), []);
-  const onRetry = useCallback((i: number) => chat.retry(i), [chat]);
+  // Widgets embed their own anchor (conversationId + turnIndex) when they
+  // have one; here we resolve whether that anchor ALREADY has a thread, so
+  // DrillChat can load it instead of starting empty. A ctx with no anchor
+  // (the home dashboard's ephemeral KPIs) passes through unchanged -- there is
+  // nothing to look up and nothing will be persisted.
+  const onDrill = useCallback(
+    (ctx: DrillContext) => {
+      if (ctx.conversationId !== undefined && ctx.turnIndex !== undefined) {
+        const existing = threads.find(ctx.turnIndex, ctx.kind, ctx.title);
+        setDrill({ ...ctx, threadId: existing?.id });
+      } else {
+        setDrill(ctx);
+      }
+    },
+    // Depending on threads.find (not the whole `threads` object, a fresh
+    // literal every render) is deliberate: threads.find's own identity is
+    // already stable via useCallback inside useThreads, so this only changes
+    // when the summaries it reads actually change. Depending on `threads`
+    // itself would make onDrill's identity churn every render and defeat
+    // TurnView's memoization for every past turn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [threads.find],
+  );
+  const onRetry = useCallback(
+    (i: number) => {
+      reattach();
+      chat.retry(i);
+    },
+    [chat, reattach],
+  );
 
   const onAlertClick = useCallback(
     (a: Alert) => chat.send(`Why is "${a.alert_label}" flagged right now? ${a.message}`),
@@ -152,30 +210,26 @@ export default function App() {
 
   const empty = chat.turns.length === 0;
 
-  // `onCollapse` hides the sidebar: on desktop it collapses the persistent
-  // panel (expand again from the header button); on mobile it closes the drawer.
-  const renderSidebar = (onCollapse: () => void) => (
+  const renderSidebar = () => (
     <Sidebar
-      suggested={activeClient?.suggested_questions ?? []}
-      popularQuestions={popularQuestions}
+      clients={clients}
+      activeClientId={activeId}
+      dbConnected={dbConnected}
       conversations={conversations.conversations}
       activeConversationId={chat.conversationId}
       conversationsLoading={conversations.loading}
       conversationsError={conversations.error}
       conversationActions={conversationActions}
-      onPick={sendQuestion}
+      onSwitchClient={switchClient}
       onNewConversation={newChat}
       onGoHome={newChat}
-      onCollapse={onCollapse}
     />
   );
 
   return (
     <div className="flex h-screen bg-bg text-ink">
-      {/* Desktop: persistent sidebar, collapsible to reclaim width. */}
-      {!sidebarCollapsed && (
-        <div className="hidden md:block">{renderSidebar(() => setSidebarCollapsed(true))}</div>
-      )}
+      {/* Desktop: persistent, always-visible sidebar. */}
+      <div className="hidden md:block">{renderSidebar()}</div>
 
       {/* Mobile: off-canvas drawer + backdrop, mounted only while open.
           Uses a slide-in KEYFRAME (not a state-toggled transition): the same
@@ -189,13 +243,16 @@ export default function App() {
             onClick={() => setDrawerOpen(false)}
           />
           <div className="fixed inset-y-0 start-0 z-50 animate-[sema-slide-in-left_0.2s_ease-out]">
-            {renderSidebar(() => setDrawerOpen(false))}
+            {renderSidebar()}
           </div>
         </div>
       )}
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
+        {/* Title block only. The active client and its connection status now
+            live in the sidebar's bottom workspace switcher, so identity sits
+            with navigation instead of being split across two corners. */}
+        <header className="flex items-center px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setDrawerOpen((o) => !o)}
@@ -204,38 +261,19 @@ export default function App() {
             >
               {drawerOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            {/* Desktop: expand the sidebar again once it's collapsed. */}
-            {sidebarCollapsed && (
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                aria-label="Expand sidebar"
-                title="Expand sidebar"
-                className="hidden md:flex w-9 h-9 -ms-1 rounded-lg items-center justify-center text-ink hover:bg-surfaceAlt transition"
-              >
-                <PanelLeft size={20} />
-              </button>
-            )}
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
               <p className="text-sm text-muted">Ask your business anything.</p>
             </div>
           </div>
-
-          {/* Active client + connection status, top-right. */}
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:flex items-center gap-1.5 text-[0.75rem]">
-              <span className={`w-2 h-2 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-red-500"}`} />
-              <span className={dbConnected ? "text-emerald-600" : "text-red-500"}>
-                {dbConnected ? "Connected" : "Disconnected"}
-              </span>
-            </span>
-            {clients.length > 0 && (
-              <ClientSelector compact clients={clients} activeId={activeId} onChange={switchClient} />
-            )}
-          </div>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-auto sema-scroll px-8 py-6">
+        {/* relative: anchors the floating "back to latest" button. */}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="relative flex-1 overflow-auto sema-scroll px-8 py-6"
+        >
           <div className="max-w-3xl mx-auto">
             {loadError && (
               <div className="mb-4 flex items-center gap-2 rounded-xl border border-critical-fg/30 bg-critical-bg px-4 py-3 text-sm text-critical-fg">
@@ -249,6 +287,8 @@ export default function App() {
                 suggested={activeClient?.suggested_questions ?? []}
                 alerts={alerts}
                 overview={overview}
+                brief={brief}
+                popularQuestions={popularQuestions}
                 dbConnected={dbConnected}
                 agentConfigured={agentConfigured}
                 onPick={sendQuestion}
@@ -264,6 +304,10 @@ export default function App() {
                 turn={turn}
                 index={i}
                 isFirst={i === 0}
+                popularQuestions={popularQuestions}
+                answerRef={i === chat.turns.length - 1 ? lastAnswerRef : undefined}
+                conversationId={chat.conversationId ?? undefined}
+                getThreadCount={threads.getThreadCount}
                 onDrill={onDrill}
                 onRetry={onRetry}
                 // Clarification choices / cannot-answer alternatives continue
@@ -272,6 +316,7 @@ export default function App() {
               />
             ))}
           </div>
+          {showScrollToLatest && <ScrollToLatest onClick={scrollToLatest} />}
         </div>
 
         <div className="px-8 py-4 border-t border-line bg-bg">
@@ -288,7 +333,12 @@ export default function App() {
 
       {drill && (
         <Suspense fallback={null}>
-          <DrillChat widget={drill} clientId={activeId} onClose={() => setDrill(null)} />
+          <DrillChat
+            widget={drill}
+            clientId={activeId}
+            onClose={() => setDrill(null)}
+            onThreadUpdated={threads.refresh}
+          />
         </Suspense>
       )}
     </div>

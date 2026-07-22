@@ -8,11 +8,21 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import {
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  MessageSquareText,
+} from "lucide-react";
 import type { DataTableModel } from "../lib/api";
-import { formatCell } from "../lib/format";
+import type { DrillContext } from "./DrillChat";
+import { followUpsLabel, formatCell } from "../lib/format";
 import { CopyableBlock } from "./CopyButton";
 import { copyRich, toHTMLTable, toTSV } from "../lib/clipboard";
+import { ThreadBadge } from "./ThreadBadge";
 
 type Row = Record<string, unknown>;
 
@@ -51,7 +61,19 @@ function downloadCsv(filename: string, csv: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function DataTable({ table }: { table: DataTableModel }) {
+export function DataTable({
+  table,
+  dir,
+  anchor,
+  threadCount,
+  onDrill,
+}: {
+  table: DataTableModel;
+  dir?: "rtl" | "ltr";
+  anchor?: { conversationId: string; turnIndex: number };
+  threadCount?: (title: string) => number | undefined;
+  onDrill?: (ctx: DrillContext) => void;
+}) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const helper = createColumnHelper<Row>();
 
@@ -96,6 +118,21 @@ export function DataTable({ table }: { table: DataTableModel }) {
     downloadCsv(`${name}.csv`, toCsv(table.columns, rows));
   };
 
+  const tableTitle = table.title || "Table";
+  const badge = threadCount?.(tableTitle);
+  const drill = onDrill
+    ? () =>
+        onDrill({
+          kind: "table",
+          title: tableTitle,
+          detail:
+            `a table with columns ${table.columns.join(", ")}; ` +
+            `${total} row(s), showing (JSON): ${JSON.stringify(table.rows.slice(0, 20))}`,
+          dir,
+          ...anchor,
+        })
+    : undefined;
+
   // Copies the FULL sorted dataset, never just the visible page. TSV keeps
   // columns intact when pasted into Excel/Sheets; the HTML flavor gives rich
   // targets a real table.
@@ -112,14 +149,27 @@ export function DataTable({ table }: { table: DataTableModel }) {
     >
       <div className="flex items-end justify-between gap-3 mb-1.5">
         {table.title && <div className="text-sm font-semibold text-ink">{table.title}</div>}
-        {/* pe-9 keeps the CSV button clear of the floating copy control. */}
-        <button
-          onClick={exportCsv}
-          className="shrink-0 ms-auto me-9 flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-primary hover:border-primary transition"
-          title={`Download all ${total.toLocaleString()} rows as CSV`}
-        >
-          <Download size={13} /> Download CSV
-        </button>
+        {/* pe-9 keeps these clear of the floating copy control. */}
+        <div className="shrink-0 ms-auto me-9 flex items-center gap-2">
+          {typeof badge === "number" && <ThreadBadge count={badge} />}
+          {drill && (
+            <button
+              onClick={drill}
+              className="flex items-center gap-1 text-xs text-muted hover:text-primary transition"
+              aria-label={`Ask about this table${followUpsLabel(badge)}`}
+              title="Ask about this table"
+            >
+              <MessageSquareText size={14} /> Ask about this
+            </button>
+          )}
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-primary hover:border-primary transition"
+            title={`Download all ${total.toLocaleString()} rows as CSV`}
+          >
+            <Download size={13} /> Download CSV
+          </button>
+        </div>
       </div>
       <div className="overflow-auto sema-scroll rounded-xl border border-line max-h-80">
         <table className="w-full text-sm">

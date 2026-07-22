@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal, Pin, PinOff, Archive, Trash2, Pencil } from "lucide-react";
 import type { ConversationSummary } from "../lib/api";
+import { useDismiss } from "../hooks/useDismiss";
 
 export interface ConversationActions {
   onOpen: (id: string) => void;
@@ -12,27 +13,27 @@ export interface ConversationActions {
 
 /**
  * One conversation row in the sidebar: title (truncated, full title on hover),
- * active state, and a hover ⋯ menu (rename / pin / archive / delete). Every
- * menu control stops propagation, so acting on a chat never also selects it.
+ * active state, and a ⋯ menu (rename / pin / archive / delete) revealed on
+ * hover or keyboard focus. Every menu control stops propagation, so acting on
+ * a chat never also selects it.
+ *
+ * Deliberately flat: the row carries no background of its own, so the ONLY
+ * accent-coloured row in the sidebar is the active conversation.
  */
 export function ConversationItem({
   conversation,
   active,
   actions,
-  tint,
 }: {
   conversation: ConversationSummary;
   active: boolean;
   actions: ConversationActions;
-  /** Fixed category colour (background, text/border) applied when not active. */
-  tint?: readonly [string, string];
 }) {
   const { id, title, pinned } = conversation;
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(title);
-  const rowRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const closeMenu = () => {
@@ -40,20 +41,7 @@ export function ConversationItem({
     setConfirmingDelete(false);
   };
 
-  // Close the menu on outside click / Escape.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (rowRef.current && !rowRef.current.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeMenu();
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  const rowRef = useDismiss<HTMLDivElement>(menuOpen, closeMenu);
 
   // Focus + select the field when rename begins.
   useEffect(() => {
@@ -94,24 +82,14 @@ export function ConversationItem({
     );
   }
 
-  // Fixed category colour when not active; the active chat keeps the primary
-  // highlight so selection never relies on the category tint alone.
-  const tinted = tint && !active;
-  const [bg, fg] = tint ?? ["", ""];
-
   return (
-    <div ref={rowRef} className="relative group">
+    <div ref={rowRef} className="relative sema-copy-host">
       <button
         type="button"
         onClick={() => actions.onOpen(id)}
         title={title}
-        style={tinted ? { background: bg, color: fg, borderColor: `${fg}2e` } : undefined}
-        className={`w-full text-start rounded-lg border pl-3 pr-8 py-2 text-[0.82rem] leading-snug transition flex items-center ${
-          active
-            ? "bg-primary/12 text-primary-dark font-medium border-transparent"
-            : tinted
-              ? "hover:brightness-[0.97]"
-              : "text-ink border-transparent hover:bg-surfaceAlt"
+        className={`w-full text-start rounded-lg ps-3 pe-8 py-2 text-[0.82rem] leading-snug transition flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+          active ? "bg-primary/10 text-primary-dark font-medium" : "text-ink hover:bg-surfaceAlt"
         }`}
       >
         <span className="truncate" dir="auto">
@@ -119,17 +97,22 @@ export function ConversationItem({
         </span>
       </button>
 
-      {/* two-dot menu trigger -- visible on hover, or whenever its menu is open */}
+      {/* Kebab trigger. `sema-copy-affordance` is the shared hover/focus-reveal
+          rule (and stays visible on touch, where there is no hover). It is
+          dropped entirely while the menu is open so the trigger can't fade out
+          from under an open menu. */}
       <button
         type="button"
         aria-label="Conversation actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
         onClick={(e) => {
           e.stopPropagation();
           setMenuOpen((o) => !o);
           setConfirmingDelete(false);
         }}
-        className={`absolute end-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md flex items-center justify-center text-muted hover:bg-line hover:text-ink transition ${
-          menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        className={`absolute end-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md flex items-center justify-center text-muted hover:bg-line hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition ${
+          menuOpen ? "" : "sema-copy-affordance"
         }`}
       >
         <MoreHorizontal size={15} />
@@ -137,6 +120,7 @@ export function ConversationItem({
 
       {menuOpen && (
         <div
+          role="menu"
           className="absolute end-1 top-[calc(100%-2px)] z-30 w-44 rounded-xl border border-line bg-surface shadow-pop p-1"
           onClick={(e) => e.stopPropagation()}
         >
@@ -207,8 +191,9 @@ function MenuItem({
 }) {
   return (
     <button
+      role="menuitem"
       onClick={onClick}
-      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.82rem] transition hover:bg-surfaceAlt ${
+      className={`w-full text-start flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.82rem] transition hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
         danger ? "text-critical-fg" : "text-ink"
       }`}
     >

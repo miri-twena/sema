@@ -98,6 +98,11 @@ export interface Notice {
 
 export interface ChatResponse {
   answer: string;
+  /** 1-2 sentence executive takeaway rendered above the answer. A STRUCTURED
+   * field from the agent -- never derive it here by slicing, truncating or
+   * parsing `answer`. Optional so conversations persisted before this field
+   * still parse; absent/null means render no summary block. */
+  summary?: string | null;
   /** How SEMA responded. Render by this, never by sniffing the prose.
    * Optional so conversations persisted before this field still parse. */
   mode?: "answer" | "clarification" | "cannot_answer" | "off_topic";
@@ -122,6 +127,9 @@ export interface ChatResponse {
   status: "ok" | "error";
   error: string | null;
   conversation_id?: string | null;
+  /** Set only when this turn was persisted into a drill-down thread --
+   * `conversation_id` above still carries the PARENT conversation unchanged. */
+  thread_id?: string | null;
 }
 
 /** One row in the chat-history sidebar (mirrors api/models.py ConversationSummary). */
@@ -148,6 +156,31 @@ export interface ConversationDetail {
   title: string;
   pinned: boolean;
   archived: boolean;
+  messages: ConversationMessage[];
+}
+
+/** One drill-down thread's badge info (mirrors api/models.py ThreadSummary):
+ * its anchor (which turn, which widget) plus how many follow-up questions
+ * have been asked in it. Threads never appear in the sidebar -- this is the
+ * only place their existence is surfaced. */
+export interface ThreadSummary {
+  id: string;
+  turn_index: number;
+  widget_kind: "kpi" | "chart" | "table" | "action";
+  widget_title: string;
+  turn_count: number;
+  updated_at: string;
+}
+
+/** A thread plus its full transcript -- what reopening a widget's drill-down
+ * needs to resume it. Same `messages` shape as ConversationDetail, so
+ * turnsFromDetail() reads either one. */
+export interface ThreadDetail {
+  id: string;
+  conversation_id: string;
+  turn_index: number;
+  widget_kind: "kpi" | "chart" | "table" | "action";
+  widget_title: string;
   messages: ConversationMessage[];
 }
 
@@ -285,6 +318,11 @@ export const api = {
     signal?: AbortSignal,
     drillContext?: DrillContextPayload,
     conversationId?: string | null,
+    // Anchor for a drill-down THREAD: the turn (within conversationId, the
+    // PARENT conversation) this widget's answer belongs to. Only meaningful
+    // together with drillContext + conversationId; omit for the main chat and
+    // for anchor-less drills (the home dashboard).
+    turnIndex?: number,
   ) =>
     postJSON<ChatResponse>(
       "/api/chat",
@@ -296,6 +334,7 @@ export const api = {
         // When set, the server appends to this conversation instead of
         // minting a new one per turn -- what makes chats reopenable.
         conversation_id: conversationId ?? null,
+        turn_index: turnIndex ?? null,
       },
       signal,
     ),
@@ -313,6 +352,7 @@ export const api = {
     signal?: AbortSignal,
     drillContext?: DrillContextPayload,
     conversationId?: string | null,
+    turnIndex?: number,
   ): Promise<ChatResponse> => {
     const res = await fetch(`${BASE}/api/chat/stream`, {
       method: "POST",
@@ -323,6 +363,7 @@ export const api = {
         client_id: clientId,
         drill_context: drillContext ?? null,
         conversation_id: conversationId ?? null,
+        turn_index: turnIndex ?? null,
       }),
       signal,
     });
@@ -370,4 +411,14 @@ export const api = {
   ) => sendJSON<ConversationSummary>("PATCH", `/api/conversations/${id}?${clientQuery(clientId)}`, patch),
   deleteConversation: (id: string, clientId: string) =>
     sendJSON<null>("DELETE", `/api/conversations/${id}?${clientQuery(clientId)}`),
+
+  // --- drill-down threads (widget-anchored, never in the sidebar) ---
+  threads: (conversationId: string, clientId: string) =>
+    getJSON<ThreadSummary[]>(
+      `/api/conversations/${conversationId}/threads?${clientQuery(clientId)}`,
+    ),
+  thread: (conversationId: string, threadId: string, clientId: string) =>
+    getJSON<ThreadDetail>(
+      `/api/conversations/${conversationId}/threads/${threadId}?${clientQuery(clientId)}`,
+    ),
 };

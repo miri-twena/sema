@@ -2,24 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   type ChatResponse,
-  type ConversationDetail,
   type DrillContextPayload,
   type Message,
 } from "../lib/api";
-import { dirOf, isRtl } from "../lib/rtl";
+import { type ChatTurn, turnsFromDetail } from "../lib/conversations";
+import { pickFollowUp } from "../lib/questions";
+import { isRtl } from "../lib/rtl";
+// `type ProgressEvent` must stay imported: without it the name silently
+// resolves to the DOM's global ProgressEvent instead of ours.
 import { UNDERSTANDING, type ProgressEvent } from "../lib/progress";
 
-export interface ChatTurn {
-  question: string;
-  response: ChatResponse | null; // null while loading / stopped
-  dir: "rtl" | "ltr";
-  stopped?: boolean;
-  /** REAL backend progress stages, in the order the server emitted them.
-   * Every entry corresponds to an actual tool dispatch -- there are no
-   * timer-driven or invented stages. Drives the live ProgressPanel shown while
-   * the answer is streaming (cleared from view once the answer lands). */
-  progress?: ProgressEvent[];
-}
+// Re-exported so existing importers (TurnView) keep working -- the type's home
+// is lib/conversations.ts, next to the logic that builds it.
+export type { ChatTurn };
 
 interface UseChatOptions {
   clientId: string;
@@ -27,10 +22,19 @@ interface UseChatOptions {
    * panel. The SERVER builds the prompt framing from it -- the client never
    * concatenates context text into the question (prompt-injection surface). */
   drillContext?: DrillContextPayload;
+  /** For a drill-down THREAD: the parent conversation + turn this widget's
+   * answer belongs to. Sent on every request from this hook instance so the
+   * server resolves (creating on the first turn) the SAME thread every time --
+   * "one thread per anchor." Undefined for the main chat and for anchor-less
+   * drills (the home dashboard), both of which use the ordinary conversation
+   * flow unchanged. */
+  threadAnchor?: { conversationId: string; turnIndex: number };
   /** localStorage key to persist the transcript across refreshes; null disables. */
   persistKey?: string | null;
   /** Called when a turn establishes or continues a server conversation, so the
-   * sidebar can refresh its list (new title, new position). */
+   * sidebar can refresh its list (new title, new position). Also fires after a
+   * drill-thread turn (the parent conversation_id is echoed back unchanged),
+   * which DrillChat uses to tell its opener to refresh thread badges. */
   onConversationChanged?: (conversationId: string) => void;
 }
 
@@ -51,49 +55,6 @@ function load(key: string | null | undefined): Persisted {
   return { turns: [], history: [] };
 }
 
-/** An answer stored before payloads were persisted (or whose payload failed to
- * parse) -> a minimal renderable response. `response: null` means "still
- * loading" to TurnView, so returning null for a turn that HAS an answer leaves
- * it spinning forever; degrading to text-only is the correct fallback. */
-function textOnlyResponse(text: string): ChatResponse {
-  return {
-    answer: text,
-    kpis: [],
-    chart: null,
-    table: null,
-    actions: [],
-    follow_up_questions: [],
-    sql_used: null,
-    confidence: null,
-    evidence: null,
-    status: "ok",
-    error: null,
-  };
-}
-
-/** A stored conversation -> the in-memory shapes the chat view renders. Pairs
- * each user turn with the assistant turn that follows it; a user turn with no
- * answer yet still renders as pending. */
-function turnsFromDetail(detail: ConversationDetail): { turns: ChatTurn[]; history: Message[] } {
-  const turns: ChatTurn[] = [];
-  const history: Message[] = [];
-  const msgs = detail.messages;
-  for (let i = 0; i < msgs.length; i++) {
-    const m = msgs[i];
-    if (m.role !== "user") continue;
-    const next = msgs[i + 1];
-    const answer = next && next.role === "assistant" ? next : null;
-    turns.push({
-      question: m.content,
-      response: answer ? (answer.payload ?? textOnlyResponse(answer.content)) : null,
-      dir: dirOf(m.content),
-    });
-    history.push({ role: "user", content: m.content });
-    if (answer) history.push({ role: "assistant", content: answer.content });
-  }
-  return { turns, history };
-}
-
 function errorResponse(e: unknown): ChatResponse {
   return {
     answer: "",
@@ -110,37 +71,13 @@ function errorResponse(e: unknown): ChatResponse {
   };
 }
 
-// Backstop for the follow-up suggestion: SEMA can analyze data, but it cannot
-// send email, launch campaigns, spend money, or contact people. The agent is
-// already told to keep such actions out of follow_up_questions, but a stray one
-// must never reach the composer -- when accepted it would just get "I can't do
-// that". Any candidate mentioning real-world execution is dropped (safe: no
-// suggestion beats an un-answerable one). Covers English and Hebrew.
-const NOT_ANSWERABLE = [
-  "launch", "send", "email", "e-mail", "campaign", "contact", "call ", "phone",
-  "offer", "discount", "coupon", "promo", "invest", "budget", "spend", "hire",
-  "advertise", "retarget", "notify", "reach out", "outreach", "onboard",
-  "incentiv", "roll out", "deploy", "negotiate", "text ", "sms", "newsletter",
-  "שלח", "שיגור", "מייל", "אימייל", "קמפיין", "השק", "השיק", "צור קשר",
-  "התקשר", "הצע", "הנחה", "קופון", "השקע", "תקציב", "הוצא", "גייס",
-  "פרסם", "רימרקטינג", "פנה", "מבצע", "מסר",
-];
-
-function isAnswerable(q: string): boolean {
-  const s = q.toLowerCase();
-  return !NOT_ANSWERABLE.some((w) => s.includes(w));
-}
-
-/** The contextual follow-up to offer after an answer: the first of the agent's
- * dedicated follow-up QUESTIONS (things it can answer from the data), filtered
- * so nothing un-answerable slips through. Returns null when nothing qualifies,
- * so the composer shows no suggestion rather than one SEMA can't act on. */
-function pickFollowUp(resp: ChatResponse): string | null {
-  const q = resp.follow_up_questions?.find((x) => x.trim().length > 0 && isAnswerable(x));
-  return q ? q.trim() : null;
-}
-
-export function useChat({ clientId, drillContext, persistKey, onConversationChanged }: UseChatOptions) {
+export function useChat({
+  clientId,
+  drillContext,
+  threadAnchor,
+  persistKey,
+  onConversationChanged,
+}: UseChatOptions) {
   const initial = useRef(load(persistKey));
   const [turns, setTurns] = useState<ChatTurn[]>(initial.current.turns);
   const [history, setHistory] = useState<Message[]>(initial.current.history);
@@ -153,10 +90,13 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
   // The server conversation this chat is appending to. Held in a ref (not just
   // state) so a rapid second send within the same tick still sees the id the
   // first response established, instead of minting a duplicate conversation.
-  const conversationIdRef = useRef<string | null>(initial.current.conversationId ?? null);
-  const [conversationId, setConversationIdState] = useState<string | null>(
-    initial.current.conversationId ?? null,
-  );
+  // A thread-anchored chat seeds this with the PARENT conversation id up
+  // front (never null), so even its FIRST request already carries the anchor
+  // -- there is no "adopt the id from the response" step to wait for, unlike
+  // the main chat's first turn.
+  const initialConversationId = initial.current.conversationId ?? threadAnchor?.conversationId ?? null;
+  const conversationIdRef = useRef<string | null>(initialConversationId);
+  const [conversationId, setConversationIdState] = useState<string | null>(initialConversationId);
   const setConversationId = useCallback((id: string | null) => {
     conversationIdRef.current = id;
     setConversationIdState(id);
@@ -223,6 +163,7 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
           controller.signal,
           drillContext,
           conversationIdRef.current,
+          threadAnchor?.turnIndex,
         );
         replaceLast({ question, response: resp, dir, progress: seen });
         if (resp.status === "ok") {
@@ -250,7 +191,7 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
     },
     // history/clientId/drillContext captured per call; identity kept stable enough
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, clientId, drillContext],
+    [history, clientId, drillContext, threadAnchor?.conversationId, threadAnchor?.turnIndex],
   );
 
   const send = useCallback(
@@ -310,5 +251,38 @@ export function useChat({ clientId, drillContext, persistKey, onConversationChan
     [clientId, setConversationId],
   );
 
-  return { turns, loading, followUp, conversationId, send, stop, retry, reset, openConversation };
+  // Reopen an EXISTING thread: fetch its transcript and continue it. Only
+  // meaningful for a thread-anchored chat -- conversationId is already the
+  // anchor's parent id (seeded above), so unlike openConversation there is
+  // nothing to adopt, only turns to load.
+  const openThread = useCallback(
+    async (threadId: string) => {
+      if (!threadAnchor) return;
+      abortRef.current?.abort();
+      setLoading(true);
+      setFollowUp(null);
+      try {
+        const detail = await api.thread(threadAnchor.conversationId, threadId, clientId);
+        const { turns: loaded, history: loadedHistory } = turnsFromDetail(detail);
+        setTurns(loaded);
+        setHistory(loadedHistory);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clientId, threadAnchor],
+  );
+
+  return {
+    turns,
+    loading,
+    followUp,
+    conversationId,
+    send,
+    stop,
+    retry,
+    reset,
+    openConversation,
+    openThread,
+  };
 }

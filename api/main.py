@@ -30,7 +30,12 @@ from sema_core import client_registry
 from sema_core.agent import agent
 from sema_core.agent.prompts import build_drill_context, build_tenant_context
 from sema_core import alerts_engine
-from sema_core.conversation_store import ConversationNotFoundError, SqliteConversationStore, truncate_by_tokens
+from sema_core.conversation_store import (
+    ConversationNotFoundError,
+    SqliteConversationStore,
+    ThreadNotFoundError,
+    truncate_by_tokens,
+)
 from sema_core.db import check_connection, run_query
 from sema_core.obs import get_logger, log_event, new_request_id
 from sema_core.brief import build_brief
@@ -56,6 +61,8 @@ from api.models import (
     Overview,
     PopularQuestion,
     SchemaResponse,
+    ThreadDetail,
+    ThreadSummary,
 )
 from api.serialize import build_schema, to_chat_response
 
@@ -135,6 +142,61 @@ def _resolve_conversation(cid: str, req: ChatRequest) -> tuple[str, list[dict]]:
     return conv_id, truncate_by_tokens(history, settings.history_token_budget)
 
 
+def _resolve_persist_target(cid: str, req: ChatRequest) -> tuple[str, list[dict], bool]:
+    """Where this turn's history comes from and where it will be persisted:
+    either the MAIN conversation (existing behavior, unchanged) or a
+    drill-down THREAD anchored at (conversation_id, turn_index, drill_context).
+    Returns (target_id, token-budgeted history, is_thread).
+
+    A request only takes the thread path when conversation_id, turn_index AND
+    drill_context are ALL present. A drill-down with no turn_index -- the
+    home-dashboard's KPI cards, which have no parent conversation to anchor
+    to -- falls through to the ordinary conversation path unchanged, exactly
+    as every drill-down worked before threads existed.
+    """
+    if req.conversation_id is not None and req.turn_index is not None and req.drill_context is not None:
+        dc = req.drill_context
+        try:
+            thread_id = conversation_store.get_or_create_thread(
+                req.conversation_id, cid, req.turn_index, dc.kind, dc.title
+            )
+            history = conversation_store.get_thread_turns(thread_id, cid)
+        except ConversationNotFoundError:
+            raise HTTPException(status_code=404, detail="unknown conversation_id") from None
+        return thread_id, truncate_by_tokens(history, settings.history_token_budget), True
+
+    conv_id, history = _resolve_conversation(cid, req)
+    return conv_id, history, False
+
+
+def _persist_turn(
+    cid: str,
+    target_id: str,
+    is_thread: bool,
+    parent_conversation_id: str | None,
+    question: str,
+    resp: dict,
+    out: ChatResponse,
+) -> None:
+    """Persist one user+assistant turn and set the id(s) the client should
+    send on its NEXT request. A thread turn echoes the PARENT conversation_id
+    back UNCHANGED (so the client never mistakes a drill turn for having
+    switched its main chat) and additionally reports thread_id; a main-chat
+    turn sets conversation_id as it always has."""
+    payload = out.model_dump_json()
+    if is_thread:
+        conversation_store.append_thread_message(target_id, cid, "user", question)
+        conversation_store.append_thread_message(
+            target_id, cid, "assistant", resp.get("insight_text", ""), payload=payload
+        )
+        out.conversation_id = parent_conversation_id
+        out.thread_id = target_id
+    else:
+        conversation_store.append(target_id, cid, "user", question)
+        conversation_store.append(target_id, cid, "assistant", resp.get("insight_text", ""), payload=payload)
+        out.conversation_id = target_id
+
+
 def _internal_context(req: ChatRequest, client_id: str) -> str | None:
     """Server-side construction of the [SEMA-CONTEXT] block.
 
@@ -190,7 +252,9 @@ def set_client(req: ClientChangeRequest) -> Client:
 def chat(req: ChatRequest) -> ChatResponse:
     request_id = new_request_id()
     cid = _resolve_client(req.client_id)  # 404 before we touch any tenant's DB
-    conv_id, history = _resolve_conversation(cid, req)  # 404 on a bad conversation_id
+    # 404 on a bad conversation_id, whether resolving the main chat or a
+    # drill-down thread's parent.
+    target_id, history, is_thread = _resolve_persist_target(cid, req)
     # Point the whole agent run (db + semantic) at this request's client.
     client_registry.set_active_client_override(cid)
     started = time.perf_counter()
@@ -202,17 +266,14 @@ def chat(req: ChatRequest) -> ChatResponse:
             internal_context=_internal_context(req, cid),
         )
         out = to_chat_response(resp)
-        out.conversation_id = conv_id
         # Persist this turn only on success -- a failed run leaves the
-        # conversation as it was, rather than recording a broken exchange.
-        conversation_store.append(conv_id, cid, "user", req.question)
-        # Store the RENDERED answer alongside its text: reopening this chat
-        # from the sidebar then restores KPI cards/charts/tables, instead of
-        # degrading a rich answer to a paragraph. The agent still reads only
-        # the text (get_turns), so this costs the prompt nothing.
-        conversation_store.append(
-            conv_id, cid, "assistant", resp.get("insight_text", ""), payload=out.model_dump_json()
-        )
+        # conversation/thread as it was, rather than recording a broken
+        # exchange. Store the RENDERED answer alongside its text: reopening
+        # this chat (or widget drill-down) restores KPI cards/charts/tables,
+        # instead of degrading a rich answer to a paragraph. The agent still
+        # reads only the text (get_turns/get_thread_turns), so this costs the
+        # prompt nothing.
+        _persist_turn(cid, target_id, is_thread, req.conversation_id, req.question, resp, out)
         log_event(
             logger,
             "api_chat",
@@ -262,7 +323,9 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
     """
     request_id = new_request_id()
     cid = _resolve_client(req.client_id)  # 404 before we open the stream
-    conv_id, history = _resolve_conversation(cid, req)  # 404 on a bad conversation_id
+    # 404 on a bad conversation_id, whether resolving the main chat or a
+    # drill-down thread's parent.
+    target_id, history, is_thread = _resolve_persist_target(cid, req)
 
     def worker(q: "queue.Queue") -> None:
         # The ContextVar override is set INSIDE this worker thread -- a new
@@ -285,14 +348,10 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
                 internal_context=_internal_context(req, cid),
             )
             out = to_chat_response(resp)
-            out.conversation_id = conv_id
-            conversation_store.append(conv_id, cid, "user", req.question)
-            # Must pass payload= exactly like the non-streaming /api/chat above:
-            # without it the answer is stored as bare text, and reopening the
-            # chat has no rendered response to show.
-            conversation_store.append(
-                conv_id, cid, "assistant", resp.get("insight_text", ""), payload=out.model_dump_json()
-            )
+            # Must persist exactly like the non-streaming /api/chat above --
+            # without it the answer is stored as bare text (or not at all),
+            # and reopening the chat/thread has no rendered response to show.
+            _persist_turn(cid, target_id, is_thread, req.conversation_id, req.question, resp, out)
             log_event(
                 logger,
                 "api_chat_stream",
@@ -421,6 +480,58 @@ def delete_conversation(conversation_id: str, client_id: str | None = None) -> N
         conversation_store.delete(conversation_id, cid)
     except ConversationNotFoundError:
         raise HTTPException(status_code=404, detail="unknown conversation_id") from None
+
+
+@app.get("/api/conversations/{conversation_id}/threads", response_model=list[ThreadSummary])
+def list_threads(conversation_id: str, client_id: str | None = None) -> list[ThreadSummary]:
+    """Thread summaries for one conversation's widgets: anchor + how many
+    follow-up questions were asked in each, so the client can badge them.
+    Threads never appear in the sidebar's conversation list -- this is the
+    only place their existence is surfaced."""
+    cid = _resolve_client(client_id)
+    _conversation_or_404(conversation_id, cid)
+    return [ThreadSummary(**t) for t in conversation_store.list_threads(conversation_id, cid)]
+
+
+@app.get(
+    "/api/conversations/{conversation_id}/threads/{thread_id}", response_model=ThreadDetail
+)
+def get_thread(conversation_id: str, thread_id: str, client_id: str | None = None) -> ThreadDetail:
+    """One thread's full transcript -- what reopening a widget's drill-down
+    needs in order to resume it instead of starting over."""
+    cid = _resolve_client(client_id)
+    _conversation_or_404(conversation_id, cid)
+    meta = conversation_store.get_thread_meta(conversation_id, cid, thread_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="unknown thread_id")
+    try:
+        raw = conversation_store.get_thread_messages(thread_id, cid)
+    except ThreadNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown thread_id") from None
+
+    messages: list[ConversationMessage] = []
+    for m in raw:
+        payload = None
+        if m.get("payload"):
+            try:
+                payload = ChatResponse.model_validate_json(m["payload"])
+            except Exception:
+                # Same belt-and-braces as get_conversation: an unreadable
+                # payload degrades to text rather than making the whole
+                # thread unopenable.
+                logger.warning(
+                    "unreadable payload in thread %s; falling back to text", thread_id
+                )
+        messages.append(ConversationMessage(role=m["role"], content=m["content"], payload=payload))
+
+    return ThreadDetail(
+        id=thread_id,
+        conversation_id=conversation_id,
+        turn_index=meta["turn_index"],
+        widget_kind=meta["widget_kind"],
+        widget_title=meta["widget_title"],
+        messages=messages,
+    )
 
 
 @app.get("/api/overview", response_model=Overview)

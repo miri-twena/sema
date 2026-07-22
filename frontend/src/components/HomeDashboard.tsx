@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -8,11 +8,15 @@ import {
   Lightbulb,
   MessageSquareText,
   ShieldAlert,
+  TrendingUp,
 } from "lucide-react";
-import type { Alert, Overview } from "../lib/api";
+import type { Alert, Brief, Overview, PopularQuestion } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
+import { DailyBrief } from "./DailyBrief";
 import { KpiCards } from "./KpiCards";
+import { QuestionChip } from "./QuestionChip";
 import { Card } from "./ui/Card";
+import { useDismiss } from "../hooks/useDismiss";
 import { KPI_TINTS, SEVERITY } from "../lib/tokens";
 
 function greeting(): string {
@@ -38,24 +42,6 @@ function periodLabel(start: string, end: string): string {
 
 /** Close-on-outside-click + Escape for a popover. Returns the ref to put on
  * the popover's wrapper (trigger + panel together). */
-function useDismiss(active: boolean, onClose: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!active) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [active, onClose]);
-  return ref;
-}
-
 function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={`text-[0.7rem] font-semibold uppercase tracking-wide text-muted ${className ?? "mb-2"}`}>
@@ -293,6 +279,8 @@ export function HomeDashboard({
   suggested,
   alerts,
   overview,
+  brief,
+  popularQuestions,
   dbConnected,
   agentConfigured,
   onPick,
@@ -304,6 +292,9 @@ export function HomeDashboard({
   suggested: string[];
   alerts: Alert[];
   overview: Overview | null; // null while loading
+  brief: Brief | null; // null while loading; loads independently of `overview`
+  /** Most-asked questions across the company; drives the trending chips. */
+  popularQuestions: PopularQuestion[];
   dbConnected: boolean;
   agentConfigured: boolean;
   onPick: (q: string) => void;
@@ -382,7 +373,12 @@ export function HomeDashboard({
         </BriefChip>
       </div>
 
-      {/* 3 — business overview (period picker in the header, so it never
+      {/* 3 — daily brief: what moved this period, phrased, before any question.
+          Scoped to the period chosen below in Business overview -- deliberately
+          no picker of its own. */}
+      <DailyBrief brief={brief} onAsk={onPick} />
+
+      {/* 4 — business overview (period picker in the header, so it never
           collides with a KPI card's own drill-down click) */}
       {overview === null ? (
         <section className="mt-8" aria-busy="true">
@@ -407,12 +403,18 @@ export function HomeDashboard({
                 />
               )}
             </div>
+            {/* No `anchor`/`threadCount` here, deliberately: these KPIs come
+                from /api/overview, not from a turn in a server conversation --
+                there is no conversation_id or turn_index to anchor a thread
+                to. Their drill-downs stay ephemeral (no persistence, no
+                badge), same as every other widget before drill-down threads
+                existed. Do NOT invent a synthetic conversation for them. */}
             <KpiCards kpis={overview.kpis} onDrill={onDrill} />
           </section>
         )
       )}
 
-      {/* 4 — top recommendation (centerpiece) */}
+      {/* 5 — top recommendation (centerpiece) */}
       {top && (
         <section className="mt-8">
           <SectionLabel>Top recommendation</SectionLabel>
@@ -442,27 +444,54 @@ export function HomeDashboard({
         </section>
       )}
 
-      {/* 5 — start a conversation */}
-      {suggested.length > 0 && (
+      {/* 6 — discovery: curated starters, then what colleagues actually ask.
+          This is the sidebar's former question area, moved here so the sidebar
+          can be navigation only. */}
+      {(suggested.length > 0 || popularQuestions.length > 0) && (
         <section className="mt-8">
           <SectionLabel>Start a conversation</SectionLabel>
-          <p className="text-sm text-muted mb-3">Ask anything about your business — or start from one of these:</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {suggested.map((q) => (
-              <button
-                key={q}
-                onClick={() => onPick(q)}
-                className="group text-start flex items-start gap-3 rounded-xl border border-line bg-surface shadow-card px-4 py-3.5 hover:border-primary hover:-translate-y-px transition-all"
-              >
-                <span className="mt-0.5 shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
-                  <MessageSquareText size={13} />
-                </span>
-                <span className="text-sm text-ink leading-snug" dir="auto">
-                  {q}
-                </span>
-              </button>
-            ))}
-          </div>
+          {suggested.length > 0 && (
+            <>
+              <p className="text-sm text-muted mb-3">
+                Ask anything about your business — or start from one of these:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {suggested.map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => onPick(q)}
+                    className="group text-start flex items-start gap-3 rounded-xl border border-line bg-surface shadow-card px-4 py-3.5 hover:border-primary hover:-translate-y-px transition-all"
+                  >
+                    <span className="mt-0.5 shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
+                      <MessageSquareText size={13} />
+                    </span>
+                    <span className="text-sm text-ink leading-snug" dir="auto">
+                      {q}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {popularQuestions.length > 0 && (
+            <div className={suggested.length > 0 ? "mt-6" : ""}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingUp size={13} className="text-primary" aria-hidden />
+                <SectionLabel className="mb-0">Trending in your company</SectionLabel>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {popularQuestions.map((p) => (
+                  <QuestionChip
+                    key={p.question}
+                    question={p.question}
+                    count={p.times_asked}
+                    onPick={onPick}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

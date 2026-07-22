@@ -11,6 +11,7 @@ on screen. For each supported intent, it:
 
 Response dict shape (always all keys present):
 {
+    "summary": str | None,               # 1-2 sentence executive takeaway
     "insight_text": str,                 # narrative summary
     "kpis": list[dict],                  # KPI tiles, see components/kpi_cards.py
     "charts": list[dict],                # chart specs, see components/charts.py
@@ -40,6 +41,11 @@ def _pct_change(new: float, old: float) -> float:
 
 def _empty_response() -> dict:
     return {
+        # 1-2 sentence executive takeaway shown above the answer. Built here
+        # from the SAME computed figures as insight_text -- never by slicing or
+        # parsing the narrative text. None where a curated answer has no single
+        # headline conclusion; the UI then renders no summary block.
+        "summary": None,
         "insight_text": "",
         "kpis": [],
         "charts": [],
@@ -126,6 +132,13 @@ def _march_dip() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"March 2026 revenue fell {abs(revenue_vs_feb_pct):.1f}% versus February, "
+        f"with {worst_category['category']} down {abs(worst_category['pct_change']):.1f}% "
+        f"and {worst_traffic['traffic_source']} orders down "
+        f"{abs(worst_traffic['pct_change']):.1f}% -- a broad pullback rather than one "
+        f"weak category."
+    )
     resp["kpis"] = [
         {
             "label": "March 2026 Revenue",
@@ -217,6 +230,12 @@ def _top_customers() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"Your top 10 customers account for {top10['lifetime_revenue'].sum():,.0f} in "
+        f"lifetime revenue, and the top 5% of all customers drive "
+        f"{pareto['top5pct_share_pct']:.1f}% of total revenue -- a concentration worth "
+        f"protecting."
+    )
     resp["kpis"] = [
         {
             "label": "Top Customer Lifetime Revenue",
@@ -272,6 +291,12 @@ def _revenue_trend() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"{_month_label(latest['month'])} revenue was {latest['revenue']:,.0f}, "
+        f"{'up' if delta_pct >= 0 else 'down'} {abs(delta_pct):.1f}% from "
+        f"{_month_label(prior['month'])}, against {monthly['revenue'].sum():,.0f} total "
+        f"across {len(monthly)} months."
+    )
     resp["kpis"] = [
         {
             "label": f"{_month_label(latest['month'])} Revenue",
@@ -328,6 +353,11 @@ def _campaign_performance() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"{best['campaign_name']} is the strongest campaign at {best['roas']:.2f}x ROAS, "
+        f"against {total_spend:,.0f} total spend returning {total_revenue:,.0f} in "
+        f"attributed revenue."
+    )
     resp["kpis"] = [
         {
             "label": "Best Campaign",
@@ -385,6 +415,11 @@ def _at_risk() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"{count:,} customers have not ordered in 90 days, putting "
+        f"{total_revenue_at_risk:,.0f} of lifetime revenue at risk, and their site "
+        f"activity is falling too -- they are disengaging, not just between purchases."
+    )
     resp["kpis"] = [
         {
             "label": "At-Risk Customers",
@@ -439,6 +474,10 @@ def _revenue_by_category() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"{top['category']} leads all categories with {top['revenue']:,.0f} in revenue, "
+        f"{top_share:.1f}% of the {total_revenue:,.0f} total."
+    )
     resp["kpis"] = [
         {
             "label": "Total Revenue",
@@ -494,6 +533,11 @@ def _pareto() -> dict:
 
     resp = _empty_response()
     resp["insight_text"] = insight_text
+    resp["summary"] = (
+        f"The top 5% of customers generate {pareto['top5pct_share_pct']:.1f}% of revenue "
+        f"({pareto['top5pct_revenue']:,.0f} of {pareto['total_revenue']:,.0f}), so "
+        f"retention in this small group moves the overall number most."
+    )
     resp["kpis"] = [
         {
             "label": "Revenue from Top 5% of Customers",

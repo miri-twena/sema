@@ -6,6 +6,15 @@
  * counts never do because "1.2K customers" hides whether it's 1,200 or 1,249. */
 export type MetricType = "currency" | "count" | "id" | "percent" | "ratio" | "text";
 
+/** Suffix for a thread badge's trigger aria-label, e.g. `Ask about Revenue` ->
+ * `Ask about Revenue, 3 follow-ups`. Empty string (not "0 follow-ups") when
+ * there is nothing to announce -- the badge itself is aria-hidden, so this is
+ * the only place the count reaches a screen reader. */
+export function followUpsLabel(count: number | undefined): string {
+  if (!count) return "";
+  return `, ${count} follow-up${count === 1 ? "" : "s"}`;
+}
+
 /** "1.30" -> "1.3", "600.0" -> "600"; keeps "2.85" intact. */
 function trimZeros(s: string): string {
   return s.includes(".") ? s.replace(/\.?0+$/, "") : s;

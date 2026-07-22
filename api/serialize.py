@@ -109,6 +109,7 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
 
     return ChatResponse(
         answer=resp.get("insight_text", ""),
+        summary=resp.get("summary") or None,
         mode=mode,
         reason_code=resp.get("reason_code"),
         clarification_options=list(resp.get("clarification_options") or []),

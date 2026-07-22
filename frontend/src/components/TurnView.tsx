@@ -1,12 +1,13 @@
 import { memo } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import type { ChatTurn } from "../hooks/useChat";
+import type { PopularQuestion } from "../lib/api";
 import { ChatMessage } from "./ChatMessage";
 import { AssistantResponseCard } from "./AssistantResponseCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ProgressPanel } from "./ProgressPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
-import type { DrillContext } from "./DrillChat";
+import type { DrillContext, ThreadCountLookup } from "./DrillChat";
 
 // One question/answer turn. Memoized: completed turns keep referential identity
 // (useChat only replaces the last turn), so a new message never re-renders the
@@ -15,6 +16,10 @@ export const TurnView = memo(function TurnView({
   turn,
   index,
   isFirst,
+  popularQuestions,
+  answerRef,
+  conversationId,
+  getThreadCount,
   onDrill,
   onRetry,
   onAsk,
@@ -22,6 +27,18 @@ export const TurnView = memo(function TurnView({
   turn: ChatTurn;
   index: number;
   isFirst: boolean;
+  popularQuestions?: PopularQuestion[];
+  /** Set on the LAST turn only: the scroll hook aligns this element's top to
+   * the viewport when the answer arrives. */
+  answerRef?: React.Ref<HTMLDivElement>;
+  /** The conversation this turn belongs to -- forwarded to AssistantResponseCard
+   * so its widgets can anchor a drill-down thread. Undefined inside the drill
+   * panel itself (nested drills aren't supported) and wherever there is no
+   * server conversation yet. */
+  conversationId?: string;
+  /** Stable per-conversation lookup for a widget's existing thread follow-up
+   * count (badges). See DrillChat.ThreadCountLookup. */
+  getThreadCount?: ThreadCountLookup;
   onDrill?: (ctx: DrillContext) => void;
   onRetry?: (index: number) => void;
   onAsk?: (q: string) => void;
@@ -30,6 +47,9 @@ export const TurnView = memo(function TurnView({
   return (
     <div className={isFirst ? "" : "border-t border-line pt-4 mt-4"}>
       <ChatMessage text={turn.question} dir={turn.dir} />
+      {/* Wraps the ANSWER only, not the question: aligning this element's top
+          is what puts the reader at the start of the answer. */}
+      <div ref={answerRef}>
       {r ? (
         r.status === "error" ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-critical-fg/30 bg-critical-bg px-4 py-3 text-sm text-critical-fg">
@@ -51,6 +71,11 @@ export const TurnView = memo(function TurnView({
             <AssistantResponseCard
               response={r}
               dir={turn.dir}
+              question={turn.question}
+              popularQuestions={popularQuestions}
+              turnIndex={index}
+              conversationId={conversationId}
+              getThreadCount={getThreadCount}
               onDrill={onDrill}
               onRetry={onRetry ? () => onRetry(index) : undefined}
               onAsk={onAsk}
@@ -64,6 +89,7 @@ export const TurnView = memo(function TurnView({
       ) : (
         <ThinkingIndicator />
       )}
+      </div>
     </div>
   );
 });

@@ -1,17 +1,25 @@
 import type { Kpi } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
-import { formatValue } from "../lib/format";
+import { formatValue, followUpsLabel } from "../lib/format";
 import { KPI_TINTS } from "../lib/tokens";
 import { CopyButton } from "./CopyButton";
 import { copyText } from "../lib/clipboard";
+import { ThreadBadge } from "./ThreadBadge";
 
 export function KpiCards({
   kpis,
   dir,
+  anchor,
+  threadCount,
   onDrill,
 }: {
   kpis: Kpi[];
   dir?: "rtl" | "ltr";
+  /** Which conversation + turn these KPIs belong to, for persisting a drilled
+   * widget's thread. Undefined for anchor-less KPIs (the home dashboard),
+   * which stay ephemeral -- see the TODO where HomeDashboard renders this. */
+  anchor?: { conversationId: string; turnIndex: number };
+  threadCount?: (title: string) => number | undefined;
   onDrill?: (ctx: DrillContext) => void;
 }) {
   if (!kpis?.length) return null;
@@ -25,6 +33,7 @@ export function KpiCards({
         const deltaText = hasDelta
           ? `, ${up ? "up" : "down"} ${Math.abs(kpi.delta as number).toFixed(1)}% ${kpi.delta_label ?? ""}`.trimEnd()
           : "";
+        const badge = threadCount?.(kpi.label);
 
         const drill = onDrill
           ? () =>
@@ -33,6 +42,7 @@ export function KpiCards({
                 title: kpi.label,
                 detail: `current value ${valueText}${deltaText}`,
                 dir,
+                ...anchor,
               })
           : undefined;
 
@@ -52,7 +62,7 @@ export function KpiCards({
             }
             role={drill ? "button" : undefined}
             tabIndex={drill ? 0 : undefined}
-            aria-label={drill ? `Ask about ${kpi.label}` : undefined}
+            aria-label={drill ? `Ask about ${kpi.label}${followUpsLabel(badge)}` : undefined}
             className={`sema-copy-host rounded-xl p-4 flex flex-col justify-between transition ${
               drill
                 ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -72,9 +82,16 @@ export function KpiCards({
               {kpi.label}
             </div>
             <div className="mt-1 text-2xl font-semibold text-ink whitespace-nowrap">{valueText}</div>
-            {hasDelta && (
-              <div className={`mt-1 text-sm font-medium ${up ? "text-emerald-600" : "text-orange-700"}`}>
-                {up ? "▲" : "▼"} {Math.abs(kpi.delta as number).toFixed(1)}% {kpi.delta_label ?? ""}
+            {(hasDelta || typeof badge === "number") && (
+              <div className="mt-1 flex items-center justify-between gap-2">
+                {hasDelta ? (
+                  <div className={`text-sm font-medium ${up ? "text-emerald-600" : "text-orange-700"}`}>
+                    {up ? "▲" : "▼"} {Math.abs(kpi.delta as number).toFixed(1)}% {kpi.delta_label ?? ""}
+                  </div>
+                ) : (
+                  <span />
+                )}
+                {typeof badge === "number" && <ThreadBadge count={badge} />}
               </div>
             )}
           </div>

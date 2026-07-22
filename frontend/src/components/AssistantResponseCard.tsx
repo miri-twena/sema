@@ -1,15 +1,17 @@
 import { Suspense, lazy, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle, Code2 } from "lucide-react";
-import type { ChatResponse } from "../lib/api";
+import { AlertTriangle, Code2, Sparkles } from "lucide-react";
+import type { ChatResponse, PopularQuestion } from "../lib/api";
+import { pickOthers } from "../lib/questions";
+import { QuestionChip } from "./QuestionChip";
 import { Card } from "./ui/Card";
 import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
 import { RecommendedActions } from "./RecommendedActions";
 import { MessageActions } from "./MessageActions";
 import { SqlBlock } from "./SqlBlock";
-import type { DrillContext } from "./DrillChat";
+import type { DrillContext, ThreadCountLookup } from "./DrillChat";
 import { ConfidenceBadge, EvidencePanel, NoticeBadges, PeriodBanner } from "./EvidencePanel";
 import { CopyableBlock } from "./CopyButton";
 import { CodeBlock, InlineCode } from "./CodeBlock";
@@ -19,15 +21,66 @@ import { copyRich } from "../lib/clipboard";
 // Recharts is heavy (~half the bundle); load it only when an answer has a chart.
 const ChartRenderer = lazy(() => import("./ChartRenderer").then((m) => ({ default: m.ChartRenderer })));
 
+const SUMMARY_HEADING = { rtl: "סיכום בקצרה", ltr: "In short" } as const;
+
+/**
+ * The answer's headline takeaway, above everything else.
+ *
+ * Renders the STRUCTURED `summary` field and nothing else -- it is never
+ * derived from `answer` by slicing, truncation, markdown parsing or a second
+ * model call. No summary means no block, which is why this returns null rather
+ * than falling back to an extract.
+ *
+ * Plain text by design: a summary is one or two sentences, so markdown would
+ * only invite the model to smuggle headings and tables above the fold.
+ */
+function AnswerSummary({ text, dir }: { text: string; dir: "rtl" | "ltr" }) {
+  return (
+    <div className="mb-3 rounded-xl border border-lineSoft bg-primary/[0.06] px-4 py-3">
+      <div className="flex items-center gap-1.5 mb-1">
+        <Sparkles size={13} className="text-primary shrink-0" aria-hidden />
+        <span className="text-[0.68rem] font-semibold uppercase tracking-wide text-primary-dark">
+          {SUMMARY_HEADING[dir]}
+        </span>
+      </div>
+      {/* unicodeBidi: plaintext so a Hebrew summary inside an LTR card (or the
+          reverse) lays out by its OWN direction, matching the alert messages. */}
+      <p className="text-[0.95rem] font-medium leading-relaxed text-ink" style={{ unicodeBidi: "plaintext" }}>
+        {text}
+      </p>
+    </div>
+  );
+}
+
 export function AssistantResponseCard({
   response,
   dir,
+  question = "",
+  popularQuestions = [],
+  turnIndex = 0,
+  conversationId,
+  getThreadCount,
   onDrill,
   onRetry,
   onAsk,
 }: {
   response: ChatResponse;
   dir: "rtl" | "ltr";
+  /** The question this answer replies to -- excluded from "Others also asked". */
+  question?: string;
+  popularQuestions?: PopularQuestion[];
+  /** Position in the transcript; rotates which chips this answer offers, and
+   * anchors any widget the user drills into (see conversationId below). */
+  turnIndex?: number;
+  /** The conversation this answer belongs to. Present -> widgets in this
+   * answer anchor their drill-downs here (persisted threads); absent (e.g.
+   * the home dashboard's overview KPIs, which have no parent conversation) ->
+   * widgets drill ephemerally, exactly as before threads existed. */
+  conversationId?: string;
+  /** Stable lookup for an existing thread's follow-up count, keyed by turn +
+   * widget. Undefined wherever conversationId is (no anchor, nothing to look
+   * up). See DrillChat.ThreadCountLookup for the stability contract. */
+  getThreadCount?: ThreadCountLookup;
   onDrill?: (ctx: DrillContext) => void;
   onRetry?: () => void;
   /** Sends a follow-up in the SAME conversation -- drives clarification
@@ -35,6 +88,25 @@ export function AssistantResponseCard({
   onAsk?: (q: string) => void;
 }) {
   const proseRef = useRef<HTMLDivElement>(null);
+  const others = pickOthers(popularQuestions, question, turnIndex);
+
+  // Built once here rather than threaded as two separate props into every
+  // leaf: every widget in THIS answer shares the same anchor, so there is one
+  // {conversationId, turnIndex} object and one per-kind threadCount closure.
+  const anchor = conversationId !== undefined ? { conversationId, turnIndex } : undefined;
+  const kpiThreadCount = (title: string) => getThreadCount?.(turnIndex, "kpi", title);
+  const chartThreadCount = (title: string) => getThreadCount?.(turnIndex, "chart", title);
+  const tableThreadCount = (title: string) => getThreadCount?.(turnIndex, "table", title);
+  const actionThreadCount = (title: string) => getThreadCount?.(turnIndex, "action", title);
+
+  // Whitespace-only is treated as absent, so a blank field can never render an
+  // empty tinted block or add a stray heading to the clipboard.
+  const summary = response.summary?.trim() || null;
+  // "Copy answer" and "Copy text" both use this, so the summary is included
+  // exactly once whichever control the user reaches for.
+  const copyPlain = summary
+    ? `${SUMMARY_HEADING[dir]}\n${summary}\n\n${response.answer}`
+    : response.answer;
   if (response.status === "error") {
     return (
       <Card className="p-4 border-critical-fg/30">
@@ -78,14 +150,26 @@ export function AssistantResponseCard({
         <NoticeBadges notices={response.notices} dir={dir} />
         <PeriodBanner dateRange={response.evidence?.date_range} />
 
+        {summary && <AnswerSummary text={summary} dir={dir} />}
+
         {/* Plain text gets the raw markdown source; rich targets get the
-         * rendered HTML straight off the DOM node. */}
+         * rendered HTML straight off the DOM node. The summary is prepended to
+         * BOTH formats rather than living inside proseRef -- inside, it would
+         * reach the rich copy but not the plain one. */}
         <CopyableBlock
           title="Copy this text"
           actions={[
             {
               label: "Copy text",
-              run: () => copyRich(response.answer, proseRef.current?.innerHTML ?? response.answer),
+              run: () =>
+                copyRich(
+                  copyPlain,
+                  summary
+                    ? `<p><strong>${SUMMARY_HEADING[dir]}</strong><br>${summary}</p>${
+                        proseRef.current?.innerHTML ?? response.answer
+                      }`
+                    : (proseRef.current?.innerHTML ?? response.answer),
+                ),
             },
           ]}
         >
@@ -100,18 +184,61 @@ export function AssistantResponseCard({
 
         {response.kpis.length > 0 && (
           <div className="mt-3">
-            <KpiCards kpis={response.kpis} dir={dir} onDrill={onDrill} />
+            <KpiCards
+              kpis={response.kpis}
+              dir={dir}
+              anchor={anchor}
+              threadCount={kpiThreadCount}
+              onDrill={onDrill}
+            />
           </div>
         )}
 
         {response.chart && (
           <Suspense fallback={<div className="mt-3 h-[280px] rounded-xl bg-surfaceAlt animate-pulse" />}>
-            <ChartRenderer chart={response.chart} dir={dir} onDrill={onDrill} />
+            <ChartRenderer
+              chart={response.chart}
+              dir={dir}
+              anchor={anchor}
+              threadCount={chartThreadCount}
+              onDrill={onDrill}
+            />
           </Suspense>
         )}
 
-        {response.table && <DataTable table={response.table} />}
-        {response.actions.length > 0 && <RecommendedActions actions={response.actions} dir={dir} onDrill={onDrill} />}
+        {response.table && (
+          <DataTable
+            table={response.table}
+            dir={dir}
+            anchor={anchor}
+            threadCount={tableThreadCount}
+            onDrill={onDrill}
+          />
+        )}
+        {response.actions.length > 0 && (
+          <RecommendedActions
+            actions={response.actions}
+            dir={dir}
+            anchor={anchor}
+            threadCount={actionThreadCount}
+            onDrill={onDrill}
+          />
+        )}
+
+        {/* What colleagues asked next. Continues THIS conversation via onAsk,
+            so the follow-up keeps its context. */}
+        {onAsk && others.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted mb-2">
+              Others also asked
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {others.map((q) => (
+                <QuestionChip key={q} question={q} onPick={onAsk} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {response.sql_used && (
           <details className="mt-4">
@@ -124,7 +251,7 @@ export function AssistantResponseCard({
 
         <EvidencePanel evidence={response.evidence} dir={dir} />
 
-        <MessageActions text={response.answer} onRetry={onRetry} />
+        <MessageActions text={copyPlain} onRetry={onRetry} />
       </div>
     </Card>
   );

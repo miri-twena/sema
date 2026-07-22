@@ -44,6 +44,13 @@ class ConversationNotFoundError(Exception):
     leak that a conversation id exists under another tenant."""
 
 
+class ThreadNotFoundError(Exception):
+    """Raised for a missing drill-down thread OR one owned by a different
+    client_id -- same indistinguishable-404 rule as ConversationNotFoundError,
+    and for the same reason (a bad id must never reveal whether it exists
+    under another tenant)."""
+
+
 class ConversationStore(Protocol):
     def create(self, client_id: str) -> str: ...
     def append(
@@ -90,6 +97,35 @@ class SqliteConversationStore:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
+            )
+            # Drill-down threads: brand-new tables, so unlike conversations/
+            # messages above there is no pre-existing schema to migrate --
+            # CREATE TABLE IF NOT EXISTS alone covers a fresh store and an
+            # older one equally.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS threads ("
+                "id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, client_id TEXT NOT NULL, "
+                "turn_index INTEGER NOT NULL, widget_kind TEXT NOT NULL, widget_title TEXT NOT NULL, "
+                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            )
+            # Enforces "one thread per anchor" at the data layer, not just in
+            # application logic -- two concurrent first-turns on the same
+            # widget would otherwise both pass the "does it exist yet" check
+            # and race to create duplicate threads.
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_anchor ON threads("
+                "conversation_id, turn_index, widget_kind, widget_title)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_conversation ON threads(conversation_id)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS thread_messages ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, "
+                "role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_thread_messages_thread ON thread_messages(thread_id)"
             )
             self._migrate(conn)
 
@@ -278,9 +314,23 @@ class SqliteConversationStore:
         self._update(conversation_id, client_id, "archived", 1 if archived else 0)
 
     def delete(self, conversation_id: str, client_id: str) -> None:
+        """Deletes the conversation AND every drill-down thread anchored to
+        it. This is the ONLY thing that removes a thread -- set_archived()
+        deliberately does not touch them (archiving is a reversible visibility
+        flag elsewhere in this store, and unarchiving a conversation with its
+        threads silently gone would be a surprising, irreversible side effect
+        of what looks like a reversible action). Threads have no independent
+        lifecycle beyond that: no separate archive/pin of their own, nothing
+        that outlives a hard delete of the parent."""
         with closing(self._connect()) as conn, conn:
             if self._owner(conn, conversation_id) != client_id:
                 raise ConversationNotFoundError(conversation_id)
+            conn.execute(
+                "DELETE FROM thread_messages WHERE thread_id IN "
+                "(SELECT id FROM threads WHERE conversation_id = ?)",
+                (conversation_id,),
+            )
+            conn.execute("DELETE FROM threads WHERE conversation_id = ?", (conversation_id,))
             conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 
@@ -317,6 +367,146 @@ class SqliteConversationStore:
                 (client_id, limit),
             ).fetchall()
         return [{"question": q, "times_asked": n} for q, n in rows]
+
+
+    # --- drill-down threads (widget-anchored, never in the sidebar) --------
+
+    def get_or_create_thread(
+        self,
+        conversation_id: str,
+        client_id: str,
+        turn_index: int,
+        widget_kind: str,
+        widget_title: str,
+    ) -> str:
+        """One thread per (conversation, turn, widget) anchor: reopening the
+        same widget resumes the same thread instead of starting a new one.
+
+        Raises ConversationNotFoundError if the PARENT conversation is unknown
+        or owned by a different client -- the same 404 the main chat's own
+        conversation_id gets, so a thread can never be anchored to (or read
+        from) a conversation this client_id doesn't own.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with closing(self._connect()) as conn, conn:
+            if self._owner(conn, conversation_id) != client_id:
+                raise ConversationNotFoundError(conversation_id)
+            row = conn.execute(
+                "SELECT id FROM threads WHERE conversation_id = ? AND turn_index = ? "
+                "AND widget_kind = ? AND widget_title = ?",
+                (conversation_id, turn_index, widget_kind, widget_title),
+            ).fetchone()
+            if row:
+                return row[0]
+            thread_id = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO threads (id, conversation_id, client_id, turn_index, widget_kind, "
+                "widget_title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (thread_id, conversation_id, client_id, turn_index, widget_kind, widget_title, now, now),
+            )
+            return thread_id
+
+    def _thread_owner(self, conn: sqlite3.Connection, thread_id: str) -> str | None:
+        row = conn.execute("SELECT client_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        return row[0] if row else None
+
+    def append_thread_message(
+        self,
+        thread_id: str,
+        client_id: str,
+        role: str,
+        content: str,
+        payload: str | None = None,
+    ) -> None:
+        """Record one turn in a thread. Same payload convention as append():
+        the rendered answer as JSON on assistant turns, so reopening a widget's
+        drill-down restores its KPI cards/charts too, not just plain text."""
+        now = datetime.now(timezone.utc).isoformat()
+        with closing(self._connect()) as conn, conn:
+            if self._thread_owner(conn, thread_id) != client_id:
+                raise ThreadNotFoundError(thread_id)
+            conn.execute(
+                "INSERT INTO thread_messages (thread_id, role, content, created_at, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (thread_id, role, content, now, payload),
+            )
+            conn.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
+
+    def get_thread_turns(self, thread_id: str, client_id: str) -> list[dict]:
+        """The agent's view: {role, content} only -- same shape get_turns
+        returns for the main chat. A thread's history is its OWN turns, not
+        the parent conversation's -- it is a focused side-conversation about
+        one widget, not a continuation of the whole transcript."""
+        with closing(self._connect()) as conn:
+            if self._thread_owner(conn, thread_id) != client_id:
+                raise ThreadNotFoundError(thread_id)
+            rows = conn.execute(
+                "SELECT role, content FROM thread_messages WHERE thread_id = ? ORDER BY id ASC",
+                (thread_id,),
+            ).fetchall()
+        return [{"role": role, "content": content} for role, content in rows]
+
+    def get_thread_messages(self, thread_id: str, client_id: str) -> list[dict]:
+        """The UI's view: adds each assistant turn's rendered payload, mirror
+        of get_messages()."""
+        with closing(self._connect()) as conn:
+            if self._thread_owner(conn, thread_id) != client_id:
+                raise ThreadNotFoundError(thread_id)
+            rows = conn.execute(
+                "SELECT role, content, payload FROM thread_messages "
+                "WHERE thread_id = ? ORDER BY id ASC",
+                (thread_id,),
+            ).fetchall()
+        return [{"role": r, "content": c, "payload": p} for r, c, p in rows]
+
+    def get_thread_meta(self, conversation_id: str, client_id: str, thread_id: str) -> dict | None:
+        """Anchor metadata for one thread, scoped to its claimed parent
+        conversation AND client_id. None (not an exception) for a thread that
+        doesn't exist, belongs to a different conversation, or a different
+        tenant -- all three are indistinguishable to the caller, which 404s
+        uniformly on None, same policy as everywhere else in this store."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT id, conversation_id, client_id, turn_index, widget_kind, widget_title, updated_at "
+                "FROM threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+        if row is None or row[1] != conversation_id or row[2] != client_id:
+            return None
+        return {
+            "id": row[0],
+            "conversation_id": row[1],
+            "turn_index": row[3],
+            "widget_kind": row[4],
+            "widget_title": row[5],
+            "updated_at": row[6],
+        }
+
+    def list_threads(self, conversation_id: str, client_id: str) -> list[dict]:
+        """Thread summaries for one conversation's widgets: anchor + how many
+        follow-up questions were asked, so the client can badge them. Scoped by
+        BOTH conversation_id and client_id -- belt-and-braces alongside the
+        caller's own conversation-ownership check."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT t.id, t.turn_index, t.widget_kind, t.widget_title, t.updated_at, "
+                "  (SELECT COUNT(*) FROM thread_messages m "
+                "   WHERE m.thread_id = t.id AND m.role = 'user') AS turn_count "
+                "FROM threads t WHERE t.conversation_id = ? AND t.client_id = ? "
+                "ORDER BY t.updated_at DESC",
+                (conversation_id, client_id),
+            ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "turn_index": r[1],
+                "widget_kind": r[2],
+                "widget_title": r[3],
+                "updated_at": r[4],
+                "turn_count": r[5],
+            }
+            for r in rows
+        ]
 
 
 def truncate_by_tokens(

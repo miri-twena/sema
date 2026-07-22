@@ -44,6 +44,15 @@ class ChatRequest(BaseModel):
     client_id: str | None = None  # which client's DB + semantic layer to use
     # Set when the question comes from a widget drill-down panel.
     drill_context: DrillContextRequest | None = None
+    # Anchor for a persisted drill-down THREAD: the turn (within
+    # `conversation_id`, the PARENT conversation) whose answer this widget
+    # belongs to. Only meaningful together with drill_context and
+    # conversation_id -- when all three are present the turn is persisted into
+    # that widget's thread (creating it on the first turn) instead of into
+    # `conversation_id` itself. A drill request with no turn_index (e.g. a
+    # home-dashboard widget, which has no parent conversation) falls back to
+    # the ordinary conversation flow unchanged.
+    turn_index: int | None = None
 
 
 class Kpi(BaseModel):
@@ -131,6 +140,12 @@ class Notice(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    # 1-2 sentence executive takeaway rendered above the answer. Produced by the
+    # agent as a STRUCTURED field -- the client must never derive it by slicing
+    # or parsing `answer`. None for non-'answer' modes and for responses (or
+    # stored payloads) recorded before this field existed, which is also what
+    # keeps older persisted conversations valid.
+    summary: str | None = None
     # How SEMA responded. Explicit on the contract so the client renders by
     # mode rather than sniffing the prose. Defaults to "answer" so responses
     # from the rule-based insight_builder stay valid unchanged.
@@ -157,6 +172,11 @@ class ChatResponse(BaseModel):
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
     conversation_id: str | None = None
+    # Set only when this turn was persisted into a drill-down thread (see
+    # ChatRequest.turn_index) -- the thread this turn actually landed in.
+    # `conversation_id` above still carries the PARENT conversation unchanged,
+    # so a thread turn never looks like it switched the client's main chat.
+    thread_id: str | None = None
 
 
 # --- conversation management (the sidebar) ----------------------------------
@@ -190,6 +210,35 @@ class ConversationDetail(BaseModel):
     title: str
     pinned: bool = False
     archived: bool = False
+    messages: list[ConversationMessage] = []
+
+
+class ThreadSummary(BaseModel):
+    """One drill-down thread's badge info: its anchor (which turn, which
+    widget) plus how many follow-up questions have been asked in it. Threads
+    are never listed in the sidebar -- this is the only place a thread's
+    existence is surfaced, purely so the client can badge the widget it
+    belongs to."""
+
+    id: str
+    turn_index: int
+    widget_kind: Literal["kpi", "chart", "table", "action"]
+    widget_title: str
+    turn_count: int  # user-asked questions in this thread ("N follow-ups")
+    updated_at: str
+
+
+class ThreadDetail(BaseModel):
+    """A thread plus its full transcript -- what reopening a widget's
+    drill-down needs to resume instead of starting over. `messages` is the
+    same shape as ConversationDetail's, so the client's existing
+    turnsFromDetail() reads either one unchanged."""
+
+    id: str
+    conversation_id: str
+    turn_index: int
+    widget_kind: Literal["kpi", "chart", "table", "action"]
+    widget_title: str
     messages: list[ConversationMessage] = []
 
 
