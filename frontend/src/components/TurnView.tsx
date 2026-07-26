@@ -1,7 +1,6 @@
 import { memo } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import type { ChatTurn } from "../hooks/useChat";
-import type { PopularQuestion } from "../lib/api";
 import { ChatMessage } from "./ChatMessage";
 import { AssistantResponseCard } from "./AssistantResponseCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
@@ -16,7 +15,6 @@ export const TurnView = memo(function TurnView({
   turn,
   index,
   isFirst,
-  popularQuestions,
   answerRef,
   conversationId,
   getThreadCount,
@@ -27,7 +25,6 @@ export const TurnView = memo(function TurnView({
   turn: ChatTurn;
   index: number;
   isFirst: boolean;
-  popularQuestions?: PopularQuestion[];
   /** Set on the LAST turn only: the scroll hook aligns this element's top to
    * the viewport when the answer arrives. */
   answerRef?: React.Ref<HTMLDivElement>;
@@ -71,8 +68,6 @@ export const TurnView = memo(function TurnView({
             <AssistantResponseCard
               response={r}
               dir={turn.dir}
-              question={turn.question}
-              popularQuestions={popularQuestions}
               turnIndex={index}
               conversationId={conversationId}
               getThreadCount={getThreadCount}

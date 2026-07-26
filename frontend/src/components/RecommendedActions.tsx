@@ -48,7 +48,7 @@ export function RecommendedActions({
               <span className="mt-0.5 shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
                 <ArrowRight size={14} strokeWidth={2.5} />
               </span>
-              <span className="text-sm text-ink leading-snug flex-1">{action}</span>
+              <span className="text-sm text-ink leading-snug flex-1 max-w-3xl">{action}</span>
               {typeof badge === "number" && <ThreadBadge count={badge} className="mt-0.5" />}
             </button>
           );

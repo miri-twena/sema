@@ -71,7 +71,7 @@ export type GroupId = "pinned" | "today" | "week" | "older";
 export const GROUP_LABELS: Record<GroupId, string> = {
   pinned: "Pinned",
   today: "Today",
-  week: "Last 7 days",
+  week: "Previous 7 days",
   older: "Older",
 };
 
@@ -115,4 +115,32 @@ export function bucketConversations(
   };
   for (const c of conversations) buckets[groupOf(c, dayStart)].push(c);
   return buckets;
+}
+
+// --- sidebar row filtering / preview cap -------------------------------------
+
+/** Case-insensitive title match for the sidebar's client-side search box.
+ * Order is preserved, so a pinned match still sorts first. */
+export function filterByTitle(
+  conversations: ConversationSummary[],
+  query: string,
+): ConversationSummary[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return conversations;
+  return conversations.filter((c) => c.title.toLowerCase().includes(q));
+}
+
+/** Default row count shown before "Show all N" -- applied to the Previous 7
+ * days group only; Pinned and Today are always shown in full. */
+export const PREVIEW_LIMIT = 4;
+
+/** Which rows a capped group should render: `expanded` (user clicked "Show
+ * all") always returns everything, otherwise the first `limit` rows. */
+export function previewSplit<T>(
+  items: T[],
+  expanded: boolean,
+  limit: number = PREVIEW_LIMIT,
+): { shown: T[]; remaining: number } {
+  if (expanded || items.length <= limit) return { shown: items, remaining: 0 };
+  return { shown: items.slice(0, limit), remaining: items.length - limit };
 }

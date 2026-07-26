@@ -1,24 +1,45 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pin, PinOff, Archive, Trash2, Pencil } from "lucide-react";
+import {
+  MoreHorizontal,
+  MessageSquare,
+  Pin,
+  PinOff,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  Pencil,
+} from "lucide-react";
 import type { ConversationSummary } from "../lib/api";
 import { useDismiss } from "../hooks/useDismiss";
+import { dirOf } from "../lib/rtl";
 
 export interface ConversationActions {
   onOpen: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
   onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 /**
- * One conversation row in the sidebar: title (truncated, full title on hover),
- * active state, and a ⋯ menu (rename / pin / archive / delete) revealed on
- * hover or keyboard focus. Every menu control stops propagation, so acting on
- * a chat never also selects it.
+ * One conversation row in the sidebar: a leading icon (pin for pinned chats,
+ * chat bubble otherwise), title (truncated, full title on hover), active/
+ * pinned state, and an always-visible ⋯ menu. Every menu control stops
+ * propagation, so acting on a chat never also selects it.
  *
- * Deliberately flat: the row carries no background of its own, so the ONLY
- * accent-coloured row in the sidebar is the active conversation.
+ * A pinned row gets the same pale accent as the active row (so "this is
+ * pinned" reads at a glance without opening it); the active row additionally
+ * gets bold/darker text so the two are still distinguishable when they
+ * differ.
+ *
+ * Title alignment is intentionally PHYSICAL (`text-left`, not the logical
+ * `text-start` used elsewhere in the app): the redesign wants every title --
+ * Hebrew or English -- to read like ChatGPT's sidebar, always left-aligned,
+ * with the kebab and accent bar in the same physical spot regardless of the
+ * title's language. `dir` is still set from the title's own language (via
+ * `dirOf`, not `dir="auto"`) so Hebrew characters and punctuation still order
+ * correctly -- only the block's alignment is fixed.
  */
 export function ConversationItem({
   conversation,
@@ -29,7 +50,7 @@ export function ConversationItem({
   active: boolean;
   actions: ConversationActions;
 }) {
-  const { id, title, pinned } = conversation;
+  const { id, title, pinned, archived } = conversation;
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -82,25 +103,34 @@ export function ConversationItem({
     );
   }
 
+  const highlighted = active || pinned;
+
   return (
     <div ref={rowRef} className="relative sema-copy-host">
       <button
         type="button"
         onClick={() => actions.onOpen(id)}
         title={title}
-        className={`w-full text-start rounded-lg ps-3 pe-8 py-2 text-[0.82rem] leading-snug transition flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-          active ? "bg-primary/10 text-primary-dark font-medium" : "text-ink hover:bg-surfaceAlt"
-        }`}
+        className={`w-full h-10 text-left rounded-lg border-l-2 pl-2.5 pr-8 text-[0.82rem] transition flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+          highlighted
+            ? "border-primary bg-primary/10 hover:bg-primary/15"
+            : "border-transparent text-ink hover:bg-surfaceAlt"
+        } ${active ? "text-primary-dark font-medium" : highlighted ? "text-ink" : ""}`}
       >
-        <span className="truncate" dir="auto">
+        {pinned ? (
+          <Pin size={14} className="shrink-0 text-primary" aria-hidden />
+        ) : (
+          <MessageSquare size={14} className="shrink-0 text-faint" aria-hidden />
+        )}
+        <span className="truncate" dir={dirOf(title)}>
           {title}
         </span>
       </button>
 
-      {/* Kebab trigger. `sema-copy-affordance` is the shared hover/focus-reveal
-          rule (and stays visible on touch, where there is no hover). It is
-          dropped entirely while the menu is open so the trigger can't fade out
-          from under an open menu. */}
+      {/* Kebab trigger, always visible (not hover-reveal) so every row's
+          actions are equally reachable at a glance. Position is physical
+          (right-1, not end-1) so it stays in the same spot regardless of the
+          row's title language. */}
       <button
         type="button"
         aria-label="Conversation actions"
@@ -111,9 +141,7 @@ export function ConversationItem({
           setMenuOpen((o) => !o);
           setConfirmingDelete(false);
         }}
-        className={`absolute end-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md flex items-center justify-center text-muted hover:bg-line hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition ${
-          menuOpen ? "" : "sema-copy-affordance"
-        }`}
+        className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md flex items-center justify-center text-muted hover:bg-line hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
       >
         <MoreHorizontal size={15} />
       </button>
@@ -121,7 +149,7 @@ export function ConversationItem({
       {menuOpen && (
         <div
           role="menu"
-          className="absolute end-1 top-[calc(100%-2px)] z-30 w-44 rounded-xl border border-line bg-surface shadow-pop p-1"
+          className="absolute right-1 top-[calc(100%-2px)] z-30 w-44 rounded-xl border border-line bg-surface shadow-pop p-1"
           onClick={(e) => e.stopPropagation()}
         >
           {confirmingDelete ? (
@@ -145,6 +173,23 @@ export function ConversationItem({
                 </button>
               </div>
             </div>
+          ) : archived ? (
+            <>
+              <MenuItem
+                icon={<ArchiveRestore size={14} />}
+                label="Unarchive"
+                onClick={() => {
+                  actions.onUnarchive(id);
+                  closeMenu();
+                }}
+              />
+              <MenuItem
+                icon={<Trash2 size={14} />}
+                label="Delete"
+                danger
+                onClick={() => setConfirmingDelete(true)}
+              />
+            </>
           ) : (
             <>
               <MenuItem icon={<Pencil size={14} />} label="Rename" onClick={startRename} />

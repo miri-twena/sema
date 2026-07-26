@@ -6,6 +6,26 @@ import { CopyButton } from "./CopyButton";
 import { copyText } from "../lib/clipboard";
 import { ThreadBadge } from "./ThreadBadge";
 
+// Static class lookups so Tailwind's content scanner sees every literal
+// class name in this file, even though the count picked at runtime is
+// dynamic -- a template-built class string (`grid-cols-${n}`) would never be
+// generated. Base stays capped at 4 (today's behavior, incl. mobile);
+// 2xl gets the extra room to go up to 6.
+const GRID_COLS: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+};
+const GRID_COLS_2XL: Record<number, string> = {
+  1: "2xl:grid-cols-1",
+  2: "2xl:grid-cols-2",
+  3: "2xl:grid-cols-3",
+  4: "2xl:grid-cols-4",
+  5: "2xl:grid-cols-5",
+  6: "2xl:grid-cols-6",
+};
+
 export function KpiCards({
   kpis,
   dir,
@@ -23,8 +43,10 @@ export function KpiCards({
   onDrill?: (ctx: DrillContext) => void;
 }) {
   if (!kpis?.length) return null;
+  const cols = GRID_COLS[Math.min(kpis.length, 4)];
+  const cols2xl = GRID_COLS_2XL[Math.min(kpis.length, 6)];
   return (
-    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, minmax(0, 1fr))` }}>
+    <div className={`grid gap-3 ${cols} ${cols2xl}`}>
       {kpis.map((kpi, i) => {
         const [bg, labelColor] = KPI_TINTS[i % KPI_TINTS.length];
         const hasDelta = kpi.delta !== undefined && kpi.delta !== null;

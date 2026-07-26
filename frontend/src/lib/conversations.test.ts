@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ChatResponse, ConversationDetail, ConversationSummary } from "./api";
-import { bucketConversations, groupOf, startOfToday, turnsFromDetail } from "./conversations";
+import {
+  bucketConversations,
+  filterByTitle,
+  groupOf,
+  previewSplit,
+  startOfToday,
+  turnsFromDetail,
+} from "./conversations";
+import { dirOf } from "./rtl";
 
 function detail(messages: ConversationDetail["messages"]): ConversationDetail {
   return { id: "c1", title: "t", pinned: false, archived: false, messages };
@@ -155,5 +163,84 @@ describe("time grouping", () => {
       dayStart,
     );
     expect(buckets.today.map((c) => c.id)).toEqual(["first", "second"]);
+  });
+});
+
+describe("previewSplit (Previous 7 days row cap)", () => {
+  const items = ["a", "b", "c", "d", "e", "f"];
+
+  it("caps at the default limit of 4 by default", () => {
+    const { shown, remaining } = previewSplit(items, false);
+    expect(shown).toEqual(["a", "b", "c", "d"]);
+    expect(remaining).toBe(2);
+  });
+
+  it("shows everything once expanded", () => {
+    const { shown, remaining } = previewSplit(items, true);
+    expect(shown).toEqual(items);
+    expect(remaining).toBe(0);
+  });
+
+  it("reports no remainder when the group is already at or under the limit", () => {
+    expect(previewSplit(["a", "b"], false).remaining).toBe(0);
+    expect(previewSplit(["a", "b", "c", "d"], false).remaining).toBe(0);
+  });
+});
+
+describe("filterByTitle (sidebar search)", () => {
+  function conv(id: string, title: string): ConversationSummary {
+    return {
+      id,
+      title,
+      pinned: false,
+      archived: false,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+      message_count: 1,
+    };
+  }
+
+  it("matches case-insensitively, anywhere in the title", () => {
+    const all = [conv("a", "Why did Revenue drop?"), conv("b", "Channel mix")];
+    expect(filterByTitle(all, "revenue").map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("returns everything, in order, for an empty or blank query", () => {
+    const all = [conv("a", "first"), conv("b", "second")];
+    expect(filterByTitle(all, "")).toEqual(all);
+    expect(filterByTitle(all, "   ")).toEqual(all);
+  });
+
+  it("keeps the active conversation in the results when it matches", () => {
+    const active = conv("active-id", "Why did revenue drop in March?");
+    const all = [conv("a", "unrelated chat"), active];
+    const matches = filterByTitle(all, "revenue");
+    expect(matches.map((c) => c.id)).toContain("active-id");
+  });
+
+  it("matches a Hebrew title the same way", () => {
+    const all = [conv("a", "למה ההכנסות ירדו במרץ?"), conv("b", "משהו אחר")];
+    expect(filterByTitle(all, "הכנסות").map((c) => c.id)).toEqual(["a"]);
+  });
+});
+
+describe("sidebar title direction (Hebrew vs English)", () => {
+  // The sidebar row uses dirOf(title) -- not the browser's dir="auto" -- so
+  // direction is deterministic from the conversation's own stored title,
+  // matching how the title itself was derived (first message, no translation).
+  it("a conversation titled in Hebrew renders rtl", () => {
+    expect(dirOf("למה ההכנסות ירדו במרץ?")).toBe("rtl");
+  });
+
+  it("a conversation titled in English renders ltr", () => {
+    expect(dirOf("Why did revenue drop in March?")).toBe("ltr");
+  });
+
+  it("a manually renamed title still gets a direction from its own text", () => {
+    // Renaming doesn't re-run any language detection at write time -- the
+    // sidebar just reads whatever string is stored, in whatever language the
+    // user typed the rename in.
+    expect(dirOf("תקציב Q3")).toBe("rtl");
+    expect(dirOf("Q3 budget")).toBe("ltr");
   });
 });

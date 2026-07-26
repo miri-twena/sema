@@ -108,9 +108,9 @@ def _resolve_window(start: str | None, end: str | None, selectable: list[str]) -
 class ResolvedPeriod:
     """The selected month window plus its comparison baseline.
 
-    THE single definition of "the selected period" and "the prior window",
-    shared by the overview cards and the daily brief (brief.py) so the two can
-    never drift into disagreeing about which months they describe.
+    THE single definition of "the selected period" and "the prior window" for
+    the Business Overview's KPI cards (the Daily Brief, sema_core/daily_brief.py,
+    is day-grained and computes its own windows independently).
 
     `baseline` is None unless the FULL prior window exists -- a partial
     baseline would understate the comparison and produce a misleading delta.

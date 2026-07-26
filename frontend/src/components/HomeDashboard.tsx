@@ -10,8 +10,9 @@ import {
   ShieldAlert,
   TrendingUp,
 } from "lucide-react";
-import type { Alert, Brief, Overview, PopularQuestion } from "../lib/api";
+import type { Alert, DailyBrief as DailyBriefResponse, Overview, PopularQuestion } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
+import { AlertItem } from "./AlertItem";
 import { DailyBrief } from "./DailyBrief";
 import { KpiCards } from "./KpiCards";
 import { QuestionChip } from "./QuestionChip";
@@ -89,33 +90,6 @@ function BriefChip({
         </div>
       )}
     </span>
-  );
-}
-
-/** One alert inside a chip dropdown -- same visual language as the alerts
- * rail; clicking it asks SEMA about the alert (via onInvestigate). */
-function AlertItem({ alert, onInvestigate }: { alert: Alert; onInvestigate?: (a: Alert) => void }) {
-  const c = SEVERITY[alert.severity] ?? SEVERITY.warning;
-  return (
-    <button
-      onClick={onInvestigate ? () => onInvestigate(alert) : undefined}
-      disabled={!onInvestigate}
-      aria-label={onInvestigate ? `Ask about ${alert.alert_label}` : undefined}
-      className={`text-start rounded-xl px-3 py-2.5 transition ${
-        onInvestigate
-          ? "cursor-pointer hover:brightness-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          : "cursor-default"
-      }`}
-      style={{ background: c.bg, borderInlineStart: `3px solid ${c.fg}` }}
-    >
-      <div className="text-sm font-semibold" style={{ color: c.fg }}>
-        {alert.alert_label}
-      </div>
-      <div className="text-[0.82rem] text-ink mt-0.5 leading-snug" style={{ unicodeBidi: "plaintext" }}>
-        {alert.message}
-      </div>
-      <div className="text-[0.7rem] text-muted mt-1">{alert.metric_label}</div>
-    </button>
   );
 }
 
@@ -292,7 +266,7 @@ export function HomeDashboard({
   suggested: string[];
   alerts: Alert[];
   overview: Overview | null; // null while loading
-  brief: Brief | null; // null while loading; loads independently of `overview`
+  brief: DailyBriefResponse | null; // null while loading; loads independently of `overview`
   /** Most-asked questions across the company; drives the trending chips. */
   popularQuestions: PopularQuestion[];
   dbConnected: boolean;
@@ -373,9 +347,9 @@ export function HomeDashboard({
         </BriefChip>
       </div>
 
-      {/* 3 — daily brief: what moved this period, phrased, before any question.
-          Scoped to the period chosen below in Business overview -- deliberately
-          no picker of its own. */}
+      {/* 3 — daily brief: a pulse strip (always-fresh yesterday numbers) plus
+          up to 3 ranked attention cards -- independent of the Business
+          overview's period picker below, deliberately. */}
       <DailyBrief brief={brief} onAsk={onPick} />
 
       {/* 4 — business overview (period picker in the header, so it never
@@ -424,7 +398,7 @@ export function HomeDashboard({
               <span className="mt-0.5 shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-primary/10 text-primary">
                 <Lightbulb size={18} />
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 max-w-3xl">
                 <div className="text-sm font-semibold text-ink">{top.alert_label}</div>
                 <div className="text-sm text-ink mt-1 leading-relaxed" style={{ unicodeBidi: "plaintext" }}>
                   {top.message}

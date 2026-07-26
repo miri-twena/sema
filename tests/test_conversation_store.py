@@ -78,6 +78,33 @@ def test_derive_title_collapses_whitespace_and_truncates():
     assert derive_title("") == "New chat"
 
 
+# A Hebrew first message must produce a Hebrew title (and an English one an
+# English title): derive_title never translates, it only trims/truncates
+# whatever language the user actually typed.
+def test_derive_title_preserves_hebrew_without_translation():
+    assert derive_title("  למה ההכנסות ירדו   במרץ?  ") == "למה ההכנסות ירדו במרץ?"
+
+
+def test_hebrew_conversation_gets_a_hebrew_title(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "למה ההכנסות ירדו במרץ?")
+    store.append(conv_id, "ecommerce", "assistant", "כי המכירות באלקטרוניקה ירדו.")
+    store.append(conv_id, "ecommerce", "user", "ומה לגבי ערוצים?")  # must NOT retitle
+
+    (row,) = store.list_conversations("ecommerce")
+    assert row["title"] == "למה ההכנסות ירדו במרץ?"
+
+
+def test_manual_rename_is_preserved_regardless_of_language(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "Why did revenue drop in March?")
+
+    # A user can rename an English chat to a Hebrew title (or vice versa) --
+    # the store must store it verbatim, not re-derive or re-translate it.
+    store.rename(conv_id, "ecommerce", "תקציב Q3")
+    assert store.list_conversations("ecommerce")[0]["title"] == "תקציב Q3"
+
+
 def test_list_is_pinned_first_then_recent(store):
     a = store.create("ecommerce")
     store.append(a, "ecommerce", "user", "first chat")

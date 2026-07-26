@@ -20,7 +20,7 @@ import pandas as pd
 
 from sema_core.cache import ttl_cache
 from sema_core.client_registry import active_client_id
-from sema_core.db import run_query
+from sema_core.db import run_query, run_sql_readonly
 
 QUERIES_DIR = Path(__file__).resolve().parent.parent / "sql" / "queries"
 
@@ -29,17 +29,26 @@ def _load_sql(filename: str) -> str:
     return (QUERIES_DIR / filename).read_text(encoding="utf-8")
 
 
-def _run(filename: str) -> pd.DataFrame:
-    """Run a saved query and normalize any 'month' column to datetime64.
-
-    Postgres ::date columns come back from psycopg2 as Python date objects
+def _normalize_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """Postgres ::date columns come back from psycopg2 as Python date objects
     (pandas dtype "object"), which don't compare equal to pd.Timestamp. We
-    convert once here so every chart/insight can rely on datetime64 months.
-    """
-    df = run_query(_load_sql(filename))
-    if "month" in df.columns:
-        df["month"] = pd.to_datetime(df["month"])
+    convert once here so every chart/insight can rely on datetime64 dates."""
+    for col in ("month", "day"):
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col])
     return df
+
+
+def _run(filename: str) -> pd.DataFrame:
+    """Run a saved query through the app's own DB role (`run_query`)."""
+    return _normalize_dates(run_query(_load_sql(filename)))
+
+
+def _run_readonly(filename: str) -> pd.DataFrame:
+    """Same as `_run`, but through the read-only role -- for reports (like the
+    Daily Brief's daily-grain data) we'd rather be defensive about, the same
+    way alerts_engine.py runs its checks through the read-only connection."""
+    return _normalize_dates(run_sql_readonly(_load_sql(filename)))
 
 
 @ttl_cache(ttl=300, vary_on=active_client_id)
@@ -95,3 +104,28 @@ def get_at_risk_customers() -> pd.DataFrame:
 @ttl_cache(ttl=300, vary_on=active_client_id)
 def get_at_risk_session_trend() -> pd.DataFrame:
     return _run("at_risk_session_trend.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
+def get_daily_orders() -> pd.DataFrame:
+    return _run_readonly("daily_orders.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
+def get_daily_sessions() -> pd.DataFrame:
+    return _run_readonly("daily_sessions.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
+def get_product_revenue_by_month() -> pd.DataFrame:
+    return _run_readonly("product_revenue_by_month.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
+def get_campaign_roi_status() -> pd.DataFrame:
+    return _run_readonly("campaign_roi_status.sql")
+
+
+@ttl_cache(ttl=300, vary_on=active_client_id)
+def get_vip_inactive() -> pd.DataFrame:
+    return _run_readonly("vip_inactive.sql")

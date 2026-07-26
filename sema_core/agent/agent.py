@@ -31,6 +31,7 @@ from sema_core.agent.prompts import SYSTEM_PROMPT, build_user_message
 from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response, tables_in_sql as _tables_in
 from sema_core.agent.tools import TOOL_SCHEMAS, AgentTools
 from sema_core.client_registry import active_client_id
+from sema_core.conversation_store import derive_title
 from sema_core.obs import get_logger, log_event
 from sema_core.settings import settings
 
@@ -111,6 +112,54 @@ def not_configured_response() -> dict:
     resp = _empty_response()
     resp["insight_text"] = NOT_CONFIGURED_MESSAGE
     return resp
+
+
+# Titling doesn't need the primary model's reasoning depth -- the small/fast
+# fallback model (Haiku) is plenty, and keeps the extra call cheap and quick.
+TITLE_MODEL = FALLBACK_MODEL or MODEL
+TITLE_SYSTEM_PROMPT = (
+    "Generate a short chat title (2-5 words, no quotes, no trailing "
+    "punctuation) that names the TOPIC of the user's question -- e.g. "
+    "'High-risk customers' or 'Campaign performance', not a restated "
+    "question. Write the title in the SAME language as the question -- "
+    "never translate it into a different language. Reply with the title "
+    "only, nothing else."
+)
+
+
+def generate_title(question: str, client=None) -> str:
+    """A short (2-5 word) topic title for a NEW conversation's first message,
+    in whatever language the question is in -- never translated. Falls back
+    to derive_title's instant trim-based title if no API key is configured or
+    the call errors, so a slow or failing title generation never blocks a
+    conversation from being created; `client` is injectable for testing, same
+    convention as run()."""
+    if client is None and not api_key_configured():
+        return derive_title(question)
+    try:
+        if client is None:
+            from anthropic import Anthropic
+
+            client = Anthropic(
+                api_key=os.environ["ANTHROPIC_API_KEY"],
+                timeout=settings.anthropic_timeout_s,
+                max_retries=settings.anthropic_max_retries,
+            )
+        resp = client.messages.create(
+            model=TITLE_MODEL,
+            max_tokens=20,
+            system=TITLE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": question}],
+        )
+        text = "".join(
+            block.text for block in resp.content if getattr(block, "type", None) == "text"
+        ).strip()
+        # Reuse derive_title's whitespace-collapse + hard cap as a safety net
+        # in case the model ignores the length instruction.
+        return derive_title(text) if text else derive_title(question)
+    except Exception:
+        logger.warning("title generation failed, falling back to a trimmed title", exc_info=True)
+        return derive_title(question)
 
 
 def _build_notices(tools: AgentTools, used_fallback_model: bool) -> list[dict]:

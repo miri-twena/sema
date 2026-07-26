@@ -15,6 +15,12 @@ export function useConversations(clientId: string) {
   // client's list (switching clients fast).
   const reqIdRef = useRef(0);
 
+  // Archived chats live in their own on-demand list (the sidebar's "Archived"
+  // toggle view), separate from `conversations` above -- most sessions never
+  // open it, so it isn't fetched eagerly.
+  const [archived, setArchived] = useState<ConversationSummary[]>([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+
   const refresh = useCallback(async () => {
     if (!clientId) return;
     const reqId = ++reqIdRef.current;
@@ -34,6 +40,7 @@ export function useConversations(clientId: string) {
 
   useEffect(() => {
     setConversations([]);
+    setArchived([]); // a different client's archived list, fetch fresh on next open
     void refresh();
   }, [refresh]);
 
@@ -90,5 +97,52 @@ export function useConversations(clientId: string) {
     [clientId, mutate],
   );
 
-  return { conversations, loading, error, refresh, rename, togglePin, archive, remove };
+  const loadArchived = useCallback(async () => {
+    if (!clientId) return;
+    setArchivedLoading(true);
+    try {
+      const list = await api.conversations(clientId, true);
+      setArchived(list.filter((c) => c.archived));
+    } catch {
+      setArchived([]);
+    } finally {
+      setArchivedLoading(false);
+    }
+  }, [clientId]);
+
+  const unarchive = useCallback(
+    async (id: string) => {
+      setArchived((prev) => prev.filter((c) => c.id !== id));
+      try {
+        await api.updateConversation(id, clientId, { archived: false });
+      } finally {
+        void refresh(); // bring it back into the main (non-archived) list
+      }
+    },
+    [clientId, refresh],
+  );
+
+  const removeArchived = useCallback(
+    async (id: string) => {
+      setArchived((prev) => prev.filter((c) => c.id !== id));
+      await api.deleteConversation(id, clientId).catch(() => void loadArchived());
+    },
+    [clientId, loadArchived],
+  );
+
+  return {
+    conversations,
+    loading,
+    error,
+    refresh,
+    rename,
+    togglePin,
+    archive,
+    remove,
+    archived,
+    archivedLoading,
+    loadArchived,
+    unarchive,
+    removeArchived,
+  };
 }

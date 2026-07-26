@@ -11,8 +11,9 @@ import type { ReactNode } from "react";
  * measured-height + requestAnimationFrame approach stalls whenever the tab is
  * backgrounded (rAF pauses); minmax on a grid row has neither problem.
  * Presentational only: the PARENT owns the open state and its persistence, so
- * this one component keeps all three categories (Suggested, Popular, Recent
- * Chats) visually and behaviourally identical.
+ * this one component keeps every sidebar category's header visually
+ * consistent. `collapsible={false}` drops the button/chevron for groups that
+ * must stay fully visible (Pinned, Today) while reusing the same header markup.
  *
  * Accessibility: a real <button> header carries aria-expanded and gets Enter/
  * Space + a visible focus ring for free; the collapsed body is marked inert +
@@ -24,6 +25,7 @@ export function SidebarSection({
   count,
   open,
   onToggle,
+  collapsible = true,
   children,
 }: {
   title: string;
@@ -31,8 +33,31 @@ export function SidebarSection({
   count?: number;
   open: boolean;
   onToggle: () => void;
+  /** false renders a plain, non-interactive header with no chevron and the
+   * body always expanded -- used for Pinned/Today, which the redesign keeps
+   * fully visible rather than collapsible. */
+  collapsible?: boolean;
   children: ReactNode;
 }) {
+  const header = (
+    <span className="truncate text-left">{title}</span>
+  );
+  const countBadge = typeof count === "number" && (
+    <span className="ms-auto shrink-0 text-[0.68rem] font-medium text-faint tabular-nums">{count}</span>
+  );
+
+  if (!collapsible) {
+    return (
+      <div className="mb-3">
+        <div className="w-full flex items-center gap-2 px-1 py-1 text-[0.72rem] font-semibold uppercase tracking-wide text-muted">
+          {header}
+          {countBadge}
+        </div>
+        <div className="pt-1.5">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-3">
       <button
@@ -41,12 +66,8 @@ export function SidebarSection({
         aria-expanded={open}
         className="w-full flex items-center gap-2 px-1 py-1 rounded-lg text-[0.72rem] font-semibold uppercase tracking-wide text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
       >
-        <span className="truncate text-start">{title}</span>
-        {typeof count === "number" && (
-          <span className="ms-auto shrink-0 text-[0.68rem] font-medium text-faint tabular-nums">
-            {count}
-          </span>
-        )}
+        {header}
+        {countBadge}
         <ChevronDown
           size={14}
           aria-hidden

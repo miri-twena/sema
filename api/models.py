@@ -267,53 +267,60 @@ class Overview(BaseModel):
     available_months: list[str] = []
 
 
-class BriefInsight(BaseModel):
-    """One phrased movement in the Daily Brief.
-
-    Values are raw with a `value_format` tag rather than pre-formatted strings,
-    so the client renders them through the same format.ts helpers the KPI cards
-    use. `detail` therefore describes the movement without restating numbers.
+class PulseMetric(BaseModel):
+    """One tile in the Daily Brief's pulse strip -- ALWAYS renders (unlike
+    insights below), so the section changes every day even on a quiet one.
+    `spark` is the trailing 14 daily values ending at `value` (yesterday's) --
+    raw numbers, not a rendered path, so the client draws its own polyline
+    with no charting library. `status` is yesterday's deviation vs the same
+    weekday's average over the prior 4 weeks; `above`/`below` past ±20%,
+    `normal` otherwise (the common case, and the whole point of the pulse:
+    most days should read as unremarkable, not manufactured as interesting).
     """
 
-    id: str  # stable per client/metric/window
-    metric: Literal["revenue", "orders", "aov"]
-    metric_label: str
+    metric: Literal["revenue", "orders", "conversion"]
+    label: str
+    value: float
+    format: Literal["currency", "number", "percent"]
+    spark: list[float]
+    status: Literal["above", "below", "normal"]
+    status_label: str
+
+
+class BriefInsight(BaseModel):
+    """One attention card -- rendered only when its generator's threshold is
+    actually cleared (see daily_brief.py's 6 generators). `icon` is a stable
+    key the client maps to a lucide icon + colour, never a raw icon name from
+    the server. `severity` is the ranking key (top 3, most severe first) and
+    isn't shown to the user directly.
+    """
+
+    kind: Literal[
+        "yesterday_anomaly",
+        "campaign_negative_roi",
+        "vip_inactive",
+        "record_day",
+        "product_rank_shift",
+        "mtd_pace",
+    ]
+    id: str  # stable for the day this card describes -- a fine React key
+    icon: Literal["warning", "customers", "trending_up", "trending_down", "record", "product"]
     headline: str
     detail: str
-    current_value: float
-    previous_value: float
-    change_pct: float | None = None
-    direction: Literal["up", "down", "flat"]
-    # Derived from what the metric MEANS (a rise in revenue is good), not from
-    # any card colour. Kept separate from `direction` so the two can differ for
-    # a future metric where up is bad.
-    sentiment: Literal["positive", "negative"]
-    value_format: Literal["currency", "number"] = "number"
-    rank_score: float  # deterministic ordering key: |change_pct|
-    importance: Literal["high", "medium", "low"]
-    # An analytical question SEMA can answer from the data. Never a recommended
-    # action -- those often need systems SEMA doesn't control.
+    severity: float
     follow_up_question: str
-    period: DateRange
-    comparison_period: DateRange
 
 
-class Brief(BaseModel):
-    """The home dashboard's Daily Brief: what changed in the selected period.
-
-    Computed deterministically from the saved report library -- no model call
-    -- so it can run on page load. An empty `insights` list is a valid, normal
-    response (quiet period, or no baseline); `comparison_available` and
-    `unavailable_reason` say which case it is.
+class DailyBriefResponse(BaseModel):
+    """The home dashboard's Daily Brief: a pulse strip (always renders) plus
+    up to 3 ranked attention cards (event-driven -- an empty `insights` list
+    is a normal, quiet-day response, not an error). Computed deterministically
+    -- no model call -- so it can run on page load.
     """
 
     client_id: str
-    as_of: str | None = None  # ISO timestamp: when these numbers were computed
-    period: DateRange
-    comparison_period: DateRange | None = None
-    comparison_available: bool = False
-    # Stable key the client localizes ("insufficient_history" / "no_period_data").
-    unavailable_reason: str | None = None
+    as_of: str | None = None  # ISO date: the dataset's last complete day
+    pulse: list[PulseMetric] = []
     insights: list[BriefInsight] = []
 
 

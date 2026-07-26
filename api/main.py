@@ -28,6 +28,7 @@ from fastapi.responses import StreamingResponse
 # editable install (pip install -e ., see pyproject.toml) -- no sys.path hack.
 from sema_core import client_registry
 from sema_core.agent import agent
+from sema_core.agent.agent import generate_title
 from sema_core.agent.prompts import build_drill_context, build_tenant_context
 from sema_core import alerts_engine
 from sema_core.conversation_store import (
@@ -38,15 +39,16 @@ from sema_core.conversation_store import (
 )
 from sema_core.db import check_connection, run_query
 from sema_core.obs import get_logger, log_event, new_request_id
-from sema_core.brief import build_brief
+from sema_core.daily_brief import build_daily_brief
 from sema_core.overview import build_overview
 from sema_core.settings import settings
 from sema_core.wiring import get_response
 
 from api.models import (
     Alert,
-    Brief,
     BriefInsight,
+    DailyBriefResponse,
+    PulseMetric,
     ChatRequest,
     ChatResponse,
     Client,
@@ -55,7 +57,6 @@ from api.models import (
     ConversationMessage,
     ConversationSummary,
     ConversationUpdate,
-    DateRange,
     Health,
     Kpi,
     Overview,
@@ -252,6 +253,9 @@ def set_client(req: ClientChangeRequest) -> Client:
 def chat(req: ChatRequest) -> ChatResponse:
     request_id = new_request_id()
     cid = _resolve_client(req.client_id)  # 404 before we touch any tenant's DB
+    # Captured before persisting: a brand-new conversation (no conversation_id
+    # sent) gets an LLM-generated topic title once its first turn succeeds.
+    is_new_conversation = req.conversation_id is None
     # 404 on a bad conversation_id, whether resolving the main chat or a
     # drill-down thread's parent.
     target_id, history, is_thread = _resolve_persist_target(cid, req)
@@ -274,6 +278,10 @@ def chat(req: ChatRequest) -> ChatResponse:
         # reads only the text (get_turns/get_thread_turns), so this costs the
         # prompt nothing.
         _persist_turn(cid, target_id, is_thread, req.conversation_id, req.question, resp, out)
+        if is_new_conversation:
+            # Overwrites the instant trim-based title append() already set.
+            # generate_title has its own fallback, so this can't fail the request.
+            conversation_store.rename(target_id, cid, generate_title(req.question))
         log_event(
             logger,
             "api_chat",
@@ -323,6 +331,9 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
     """
     request_id = new_request_id()
     cid = _resolve_client(req.client_id)  # 404 before we open the stream
+    # Captured before persisting: a brand-new conversation (no conversation_id
+    # sent) gets an LLM-generated topic title once its first turn succeeds.
+    is_new_conversation = req.conversation_id is None
     # 404 on a bad conversation_id, whether resolving the main chat or a
     # drill-down thread's parent.
     target_id, history, is_thread = _resolve_persist_target(cid, req)
@@ -352,6 +363,11 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             # without it the answer is stored as bare text (or not at all),
             # and reopening the chat/thread has no rendered response to show.
             _persist_turn(cid, target_id, is_thread, req.conversation_id, req.question, resp, out)
+            if is_new_conversation:
+                # Overwrites the instant trim-based title append() already
+                # set. generate_title has its own fallback, so this can't
+                # fail the stream.
+                conversation_store.rename(target_id, cid, generate_title(req.question))
             log_event(
                 logger,
                 "api_chat_stream",
@@ -566,38 +582,28 @@ def overview(
     )
 
 
-@app.get("/api/brief", response_model=Brief)
-def brief(
-    client_id: str | None = None,
-    start: str | None = None,
-    end: str | None = None,
-) -> Brief:
-    """The home dashboard's Daily Brief: 2-3 phrased insights about what moved
-    in the selected period. Deterministic and agent-free, so it runs on page
-    load like /api/overview.
-
-    Takes the SAME `start`/`end` month keys as /api/overview and resolves them
-    through the same period logic, so the brief always describes exactly the
-    period the KPI cards are showing. An empty `insights` list is a normal
-    response (a quiet period, or no baseline window to compare against).
+@app.get("/api/brief", response_model=DailyBriefResponse)
+def brief(client_id: str | None = None) -> DailyBriefResponse:
+    """The home dashboard's Daily Brief: two layers. `pulse` (revenue/orders/
+    conversion for yesterday, with a 14-day spark) ALWAYS has content and is
+    what makes the brief change every day; `insights` is up to 3 ranked
+    attention cards, gated by their own thresholds -- an empty list is a
+    normal, quiet-day response, not an error. Deterministic and agent-free,
+    so it runs on page load. `as_of` is the dataset's own last complete day,
+    not a request timestamp.
     """
     cid = _resolve_client(client_id)
     # Same ContextVar override as /api/overview, so the saved reports resolve
     # this tenant and its caches stay keyed per client.
     client_registry.set_active_client_override(cid)
     try:
-        data = build_brief(start=start, end=end)
+        data = build_daily_brief()
     finally:
         client_registry.set_active_client_override(None)
-    return Brief(
+    return DailyBriefResponse(
         client_id=cid,
-        as_of=datetime.now(timezone.utc).isoformat(),
-        period=DateRange(**data["period"]),
-        comparison_period=(
-            DateRange(**data["comparison_period"]) if data["comparison_period"] else None
-        ),
-        comparison_available=data["comparison_available"],
-        unavailable_reason=data["unavailable_reason"],
+        as_of=data["as_of"],
+        pulse=[PulseMetric(**p) for p in data["pulse"]],
         insights=[BriefInsight(**i) for i in data["insights"]],
     )
 

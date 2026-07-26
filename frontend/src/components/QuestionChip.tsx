@@ -1,7 +1,6 @@
 /**
  * A question rendered as a pill: neutral surface, optional count badge in the
- * accent tint. Shared by the home screen's "Trending in your company" and the
- * "Others also asked" row under an answer, so the two read as the same object.
+ * accent tint. Used by the home screen's "Trending in your company".
  *
  * `dir="auto"` because a question may be Hebrew or English regardless of the
  * surrounding card's direction.

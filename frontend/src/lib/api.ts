@@ -224,39 +224,48 @@ export interface Overview {
   available_months: string[];
 }
 
-/** One phrased movement in the Daily Brief (mirrors api/models.py BriefInsight).
- * Values are raw with a `value_format` tag so they render through format.ts,
- * exactly like KPI values -- `detail` describes the move without the numbers. */
-export interface BriefInsight {
-  id: string;
-  metric: "revenue" | "orders" | "aov";
-  metric_label: string;
-  headline: string;
-  detail: string;
-  current_value: number;
-  previous_value: number;
-  change_pct: number | null;
-  direction: "up" | "down" | "flat";
-  /** From what the metric MEANS, not from any card colour. */
-  sentiment: "positive" | "negative";
-  value_format: "currency" | "number";
-  rank_score: number;
-  importance: "high" | "medium" | "low";
-  follow_up_question: string;
-  period: { start: string | null; end: string | null };
-  comparison_period: { start: string | null; end: string | null };
+/** One tile in the Daily Brief's pulse strip (mirrors api/models.py
+ * PulseMetric) -- ALWAYS present (unlike insights below), so the section
+ * changes every day even on a quiet one. `spark` is the trailing 14 daily
+ * values ending at `value` (yesterday's), raw numbers for a hand-drawn
+ * polyline -- no charting library. `status` is yesterday's deviation vs the
+ * same weekday's average over the prior 4 weeks. */
+export interface PulseMetric {
+  metric: "revenue" | "orders" | "conversion";
+  label: string;
+  value: number;
+  format: "currency" | "number" | "percent";
+  spark: number[];
+  status: "above" | "below" | "normal";
+  status_label: string;
 }
 
-/** The home dashboard's Daily Brief (mirrors api/models.py Brief). An empty
- * `insights` list is normal: `comparison_available` / `unavailable_reason`
- * distinguish "quiet period" from "no baseline to compare against". */
-export interface Brief {
+/** One attention card (mirrors api/models.py BriefInsight) -- rendered only
+ * when its generator's threshold is cleared. `icon` is a stable key the
+ * client maps to a lucide icon + colour. */
+export interface BriefInsight {
+  kind:
+    | "yesterday_anomaly"
+    | "campaign_negative_roi"
+    | "vip_inactive"
+    | "record_day"
+    | "product_rank_shift"
+    | "mtd_pace";
+  id: string;
+  icon: "warning" | "customers" | "trending_up" | "trending_down" | "record" | "product";
+  headline: string;
+  detail: string;
+  severity: number;
+  follow_up_question: string;
+}
+
+/** The home dashboard's Daily Brief (mirrors api/models.py DailyBriefResponse):
+ * a pulse strip (always renders) plus up to 3 ranked attention cards
+ * (event-driven -- an empty `insights` list is a normal, quiet-day response). */
+export interface DailyBrief {
   client_id: string;
   as_of: string | null;
-  period: { start: string | null; end: string | null };
-  comparison_period: { start: string | null; end: string | null } | null;
-  comparison_available: boolean;
-  unavailable_reason: string | null;
+  pulse: PulseMetric[];
   insights: BriefInsight[];
 }
 
@@ -303,14 +312,9 @@ export const api = {
     if (end) params.set("end", end);
     return getJSON<Overview>(`/api/overview?${params}`);
   },
-  /** Same start/end month keys as overview() -- the brief must describe
-   * exactly the period the KPI cards are showing. */
-  brief: (clientId: string, start?: string, end?: string) => {
-    const params = new URLSearchParams({ client_id: clientId });
-    if (start) params.set("start", start);
-    if (end) params.set("end", end);
-    return getJSON<Brief>(`/api/brief?${params}`);
-  },
+  /** Unlike overview(), NOT period-scoped: the brief always describes "since
+   * yesterday", independent of whatever month range the KPI cards show. */
+  brief: (clientId: string) => getJSON<DailyBrief>(`/api/brief?client_id=${encodeURIComponent(clientId)}`),
   chat: (
     question: string,
     history: Message[],
@@ -400,8 +404,10 @@ export const api = {
   },
 
   // --- conversation history (the sidebar) ---
-  conversations: (clientId: string) =>
-    getJSON<ConversationSummary[]>(`/api/conversations?${clientQuery(clientId)}`),
+  conversations: (clientId: string, includeArchived = false) =>
+    getJSON<ConversationSummary[]>(
+      `/api/conversations?${clientQuery(clientId, includeArchived ? { include_archived: "true" } : undefined)}`,
+    ),
   conversation: (id: string, clientId: string) =>
     getJSON<ConversationDetail>(`/api/conversations/${id}?${clientQuery(clientId)}`),
   updateConversation: (

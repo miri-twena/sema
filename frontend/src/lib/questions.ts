@@ -2,7 +2,7 @@
 // components so it can be tested directly -- both rules here are correctness
 // rules (see AGENTS.md), not styling preferences.
 
-import type { ChatResponse, PopularQuestion } from "./api";
+import type { ChatResponse } from "./api";
 
 // Backstop for the follow-up suggestion: SEMA can analyze data, but it cannot
 // send email, launch campaigns, spend money, or contact people. The agent is
@@ -36,36 +36,4 @@ export function isAnswerable(q: string): boolean {
 export function pickFollowUp(resp: ChatResponse): string | null {
   const q = resp.follow_up_questions?.find((x) => x.trim().length > 0 && isAnswerable(x));
   return q ? q.trim() : null;
-}
-
-export const MAX_OTHERS = 3;
-
-function normalize(q: string): string {
-  return q.trim().toLowerCase();
-}
-
-/** Up to MAX_OTHERS popular questions to offer under one answer, excluding the
- * one just asked.
- *
- * Consecutive answers get DIFFERENT chips by taking a window that advances with
- * the turn index, wrapping when the list runs out. Derived rather than tracked:
- * a module-level "already shown" set looks equivalent but silently fails, since
- * every card in a restored transcript mounts in the same render pass and would
- * all read the set while it is still empty.
- */
-export function pickOthers(
-  popular: PopularQuestion[],
-  asked: string,
-  turnIndex: number,
-): string[] {
-  const askedKey = normalize(asked);
-  const candidates = popular.map((p) => p.question).filter((q) => normalize(q) !== askedKey);
-  if (candidates.length === 0) return [];
-
-  const start = (turnIndex * MAX_OTHERS) % candidates.length;
-  const picked: string[] = [];
-  for (let i = 0; i < Math.min(MAX_OTHERS, candidates.length); i++) {
-    picked.push(candidates[(start + i) % candidates.length]);
-  }
-  return picked;
 }

@@ -2,9 +2,7 @@ import { Suspense, lazy, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, Code2, Sparkles } from "lucide-react";
-import type { ChatResponse, PopularQuestion } from "../lib/api";
-import { pickOthers } from "../lib/questions";
-import { QuestionChip } from "./QuestionChip";
+import type { ChatResponse } from "../lib/api";
 import { Card } from "./ui/Card";
 import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
@@ -55,8 +53,6 @@ function AnswerSummary({ text, dir }: { text: string; dir: "rtl" | "ltr" }) {
 export function AssistantResponseCard({
   response,
   dir,
-  question = "",
-  popularQuestions = [],
   turnIndex = 0,
   conversationId,
   getThreadCount,
@@ -66,11 +62,8 @@ export function AssistantResponseCard({
 }: {
   response: ChatResponse;
   dir: "rtl" | "ltr";
-  /** The question this answer replies to -- excluded from "Others also asked". */
-  question?: string;
-  popularQuestions?: PopularQuestion[];
-  /** Position in the transcript; rotates which chips this answer offers, and
-   * anchors any widget the user drills into (see conversationId below). */
+  /** Position in the transcript; anchors any widget the user drills into (see
+   * conversationId below). */
   turnIndex?: number;
   /** The conversation this answer belongs to. Present -> widgets in this
    * answer anchor their drill-downs here (persisted threads); absent (e.g.
@@ -88,7 +81,6 @@ export function AssistantResponseCard({
   onAsk?: (q: string) => void;
 }) {
   const proseRef = useRef<HTMLDivElement>(null);
-  const others = pickOthers(popularQuestions, question, turnIndex);
 
   // Built once here rather than threaded as two separate props into every
   // leaf: every widget in THIS answer shares the same anchor, so there is one
@@ -125,7 +117,7 @@ export function AssistantResponseCard({
   if (mode !== "answer") {
     return (
       <Card className="p-4">
-        <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
+        <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }} className="max-w-3xl">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
             <span className="text-xs font-semibold text-primary-dark">SEMA</span>
@@ -141,46 +133,51 @@ export function AssistantResponseCard({
   return (
     <Card className="p-4">
       <div dir={dir} style={{ textAlign: dir === "rtl" ? "right" : "left" }}>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
-          <span className="text-xs font-semibold text-primary-dark">SEMA</span>
-          <ConfidenceBadge confidence={response.confidence} />
-        </div>
-
-        <NoticeBadges notices={response.notices} dir={dir} />
-        <PeriodBanner dateRange={response.evidence?.date_range} />
-
-        {summary && <AnswerSummary text={summary} dir={dir} />}
-
-        {/* Plain text gets the raw markdown source; rich targets get the
-         * rendered HTML straight off the DOM node. The summary is prepended to
-         * BOTH formats rather than living inside proseRef -- inside, it would
-         * reach the rich copy but not the plain one. */}
-        <CopyableBlock
-          title="Copy this text"
-          actions={[
-            {
-              label: "Copy text",
-              run: () =>
-                copyRich(
-                  copyPlain,
-                  summary
-                    ? `<p><strong>${SUMMARY_HEADING[dir]}</strong><br>${summary}</p>${
-                        proseRef.current?.innerHTML ?? response.answer
-                      }`
-                    : (proseRef.current?.innerHTML ?? response.answer),
-                ),
-            },
-          ]}
-        >
-          <div ref={proseRef} className="sema-prose text-ink text-[0.94rem]">
-            {/* Code in an answer gets its own LTR-isolated block + copy button;
-             * `pre` covers fenced blocks, `code` the inline spans. */}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, code: InlineCode }}>
-              {response.answer}
-            </ReactMarkdown>
+        {/* Reading content stays a narrow column for line-length readability
+            even once the card itself spans the wide xl/2xl container -- only
+            the data widgets below (KPIs/chart/table) take the full width. */}
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-gradient-to-br from-primary to-mint" />
+            <span className="text-xs font-semibold text-primary-dark">SEMA</span>
+            <ConfidenceBadge confidence={response.confidence} />
           </div>
-        </CopyableBlock>
+
+          <NoticeBadges notices={response.notices} dir={dir} />
+          <PeriodBanner dateRange={response.evidence?.date_range} />
+
+          {summary && <AnswerSummary text={summary} dir={dir} />}
+
+          {/* Plain text gets the raw markdown source; rich targets get the
+           * rendered HTML straight off the DOM node. The summary is prepended to
+           * BOTH formats rather than living inside proseRef -- inside, it would
+           * reach the rich copy but not the plain one. */}
+          <CopyableBlock
+            title="Copy this text"
+            actions={[
+              {
+                label: "Copy text",
+                run: () =>
+                  copyRich(
+                    copyPlain,
+                    summary
+                      ? `<p><strong>${SUMMARY_HEADING[dir]}</strong><br>${summary}</p>${
+                          proseRef.current?.innerHTML ?? response.answer
+                        }`
+                      : (proseRef.current?.innerHTML ?? response.answer),
+                  ),
+              },
+            ]}
+          >
+            <div ref={proseRef} className="sema-prose text-ink text-[0.94rem]">
+              {/* Code in an answer gets its own LTR-isolated block + copy button;
+               * `pre` covers fenced blocks, `code` the inline spans. */}
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock, code: InlineCode }}>
+                {response.answer}
+              </ReactMarkdown>
+            </div>
+          </CopyableBlock>
+        </div>
 
         {response.kpis.length > 0 && (
           <div className="mt-3">
@@ -195,7 +192,7 @@ export function AssistantResponseCard({
         )}
 
         {response.chart && (
-          <Suspense fallback={<div className="mt-3 h-[280px] rounded-xl bg-surfaceAlt animate-pulse" />}>
+          <Suspense fallback={<div className="mt-3 h-[280px] xl:h-[330px] rounded-xl bg-surfaceAlt animate-pulse" />}>
             <ChartRenderer
               chart={response.chart}
               dir={dir}
@@ -225,33 +222,20 @@ export function AssistantResponseCard({
           />
         )}
 
-        {/* What colleagues asked next. Continues THIS conversation via onAsk,
-            so the follow-up keeps its context. */}
-        {onAsk && others.length > 0 && (
-          <div className="mt-4">
-            <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted mb-2">
-              Others also asked
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {others.map((q) => (
-                <QuestionChip key={q} question={q} onPick={onAsk} />
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="max-w-3xl">
+          {response.sql_used && (
+            <details className="mt-4">
+              <summary className="cursor-pointer list-none flex items-center gap-1.5 text-xs font-medium text-muted hover:text-primary transition w-fit">
+                <Code2 size={14} /> View SQL
+              </summary>
+              <SqlBlock sql={response.sql_used} />
+            </details>
+          )}
 
-        {response.sql_used && (
-          <details className="mt-4">
-            <summary className="cursor-pointer list-none flex items-center gap-1.5 text-xs font-medium text-muted hover:text-primary transition w-fit">
-              <Code2 size={14} /> View SQL
-            </summary>
-            <SqlBlock sql={response.sql_used} />
-          </details>
-        )}
+          <EvidencePanel evidence={response.evidence} dir={dir} />
 
-        <EvidencePanel evidence={response.evidence} dir={dir} />
-
-        <MessageActions text={copyPlain} onRetry={onRetry} />
+          <MessageActions text={copyPlain} onRetry={onRetry} />
+        </div>
       </div>
     </Card>
   );

@@ -1,6 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Menu, X } from "lucide-react";
-import { api, type Client, type Alert, type Brief, type Overview, type PopularQuestion } from "./lib/api";
+import {
+  api,
+  type Client,
+  type Alert,
+  type DailyBrief as DailyBriefResponse,
+  type Overview,
+  type PopularQuestion,
+} from "./lib/api";
 import { useChat } from "./hooks/useChat";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
@@ -22,7 +29,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [popularQuestions, setPopularQuestions] = useState<PopularQuestion[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [brief, setBrief] = useState<Brief | null>(null);
+  const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   // The user's chosen period, tagged with the client it belongs to -- so
   // switching clients falls back to that client's default (its latest
   // complete month) instead of carrying over a period it may not even have.
@@ -86,34 +93,26 @@ export default function App() {
     };
   }, [activeId, activePeriod]);
 
-  // The Daily Brief reads the SAME activePeriod the overview does, in its own
-  // effect: a slow or failing brief must never delay or blank the KPI cards.
-  // A brief that can't load degrades to "no comparison available" rather than
-  // an error, since it is supplementary to the rest of the home screen.
+  // The Daily Brief runs in its own effect: a slow or failing brief must
+  // never delay or blank the KPI cards. Unlike the overview, it is NOT
+  // period-scoped -- it always describes "since yesterday", so it only
+  // refetches when the client changes, never when the period picker does.
+  // A brief that can't load degrades to an empty one (the section hides
+  // itself) rather than an error, since it is supplementary to the home screen.
   useEffect(() => {
     if (!activeId) return;
     let cancelled = false;
-    setBrief(null); // skeleton while this client's / period's brief loads
+    setBrief(null); // skeleton while this client's brief loads
     api
-      .brief(activeId, activePeriod?.start, activePeriod?.end)
+      .brief(activeId)
       .then((b) => !cancelled && setBrief(b))
       .catch(
-        () =>
-          !cancelled &&
-          setBrief({
-            client_id: activeId,
-            as_of: null,
-            period: { start: null, end: null },
-            comparison_period: null,
-            comparison_available: false,
-            unavailable_reason: "unavailable",
-            insights: [],
-          }),
+        () => !cancelled && setBrief({ client_id: activeId, as_of: null, pulse: [], insights: [] }),
       );
     return () => {
       cancelled = true;
     };
-  }, [activeId, activePeriod]);
+  }, [activeId]);
 
   const onPeriodChange = useCallback(
     (start: string, end: string) => setPeriod({ clientId: activeId, start, end }),
@@ -166,8 +165,20 @@ export default function App() {
       conversations.archive(id);
       if (id === chat.conversationId) chat.reset();
     },
+    onUnarchive: conversations.unarchive,
     onDelete: (id) => {
       conversations.remove(id);
+      if (id === chat.conversationId) chat.reset();
+    },
+  };
+
+  // Same actions, but for rows in the sidebar's separate "Archived" view: a
+  // delete there must clear the ARCHIVED list's local state, not the main
+  // (non-archived) one -- otherwise the row lingers until the view is reopened.
+  const archivedConversationActions: ConversationActions = {
+    ...conversationActions,
+    onDelete: (id) => {
+      conversations.removeArchived(id);
       if (id === chat.conversationId) chat.reset();
     },
   };
@@ -219,7 +230,11 @@ export default function App() {
       activeConversationId={chat.conversationId}
       conversationsLoading={conversations.loading}
       conversationsError={conversations.error}
+      archivedConversations={conversations.archived}
+      archivedLoading={conversations.archivedLoading}
+      onLoadArchived={conversations.loadArchived}
       conversationActions={conversationActions}
+      archivedActions={archivedConversationActions}
       onSwitchClient={switchClient}
       onNewConversation={newChat}
       onGoHome={newChat}
@@ -252,8 +267,8 @@ export default function App() {
         {/* Title block only. The active client and its connection status now
             live in the sidebar's bottom workspace switcher, so identity sits
             with navigation instead of being split across two corners. */}
-        <header className="flex items-center px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
-          <div className="flex items-center gap-3">
+        <header className="px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
+          <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto flex items-center gap-3">
             <button
               onClick={() => setDrawerOpen((o) => !o)}
               aria-label="Toggle chat history"
@@ -274,7 +289,7 @@ export default function App() {
           onScroll={onScroll}
           className="relative flex-1 overflow-auto sema-scroll px-8 py-6"
         >
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
             {loadError && (
               <div className="mb-4 flex items-center gap-2 rounded-xl border border-critical-fg/30 bg-critical-bg px-4 py-3 text-sm text-critical-fg">
                 <AlertTriangle size={16} className="shrink-0" /> Couldn't reach the server. Is the API running?
@@ -304,7 +319,6 @@ export default function App() {
                 turn={turn}
                 index={i}
                 isFirst={i === 0}
-                popularQuestions={popularQuestions}
                 answerRef={i === chat.turns.length - 1 ? lastAnswerRef : undefined}
                 conversationId={chat.conversationId ?? undefined}
                 getThreadCount={threads.getThreadCount}
@@ -320,7 +334,7 @@ export default function App() {
         </div>
 
         <div className="px-8 py-4 border-t border-line bg-bg">
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
             <ChatInput
               onSend={sendQuestion}
               onStop={chat.stop}

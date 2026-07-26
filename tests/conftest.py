@@ -35,3 +35,14 @@ def _isolated_conversation_store(tmp_path, monkeypatch):
     monkeypatch.setattr(
         main, "conversation_store", SqliteConversationStore(tmp_path / "test_conversations.db")
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_anthropic_key(monkeypatch):
+    """Force every test onto the no-API-key code path (friendly fallback
+    responses, instant trim-based titles) even though the developer's local
+    .env carries a real ANTHROPIC_API_KEY for the Docker stack. Without this,
+    any test that hits /api/chat or /api/chat/stream without mocking
+    generate_title would make a REAL Anthropic call to title a new
+    conversation -- slow, costs money, and non-deterministic in CI."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

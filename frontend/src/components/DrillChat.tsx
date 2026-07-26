@@ -178,14 +178,17 @@ export function DrillChat({
 
   return (
     <>
+      {/* No backdrop at 2xl+: the panel docks beside the chat as a static
+          column there (see the aside below), so nothing needs dimming and
+          the main chat stays clickable. */}
       <div
-        className={`fixed inset-0 bg-ink/20 z-40 ${
+        className={`fixed inset-0 bg-ink/20 z-40 2xl:hidden ${
           closing ? "animate-[sema-fade-out_0.2s_ease-in_forwards]" : "animate-[sema-fade-in_0.2s_ease-out]"
         }`}
         onClick={requestClose}
       />
       <aside
-        className={`fixed top-0 end-0 h-full ${expanded ? "w-[75vw] xl:w-[960px]" : "w-[440px]"} max-w-[92vw] bg-bg border-s border-line shadow-pop z-50 flex flex-col ${
+        className={`fixed top-0 end-0 h-full 2xl:static 2xl:h-auto ${expanded ? "w-[75vw] xl:w-[960px]" : "w-[440px]"} max-w-[92vw] bg-bg border-s border-line shadow-pop 2xl:shadow-none z-50 flex flex-col ${
           hasMounted ? "transition-[width] duration-200" : ""
         } ${
           closing ? "animate-[sema-slide-out-end_0.2s_ease-in_forwards]" : "animate-[sema-slide-in-end_0.2s_ease-out]"
@@ -204,7 +207,7 @@ export function DrillChat({
               onClick={() => setExpanded((v) => !v)}
               aria-label={expanded ? "Collapse panel" : "Expand panel"}
               title={expanded ? "Collapse panel" : "Expand panel"}
-              className="hidden sm:flex shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink items-center justify-center transition"
+              className="hidden sm:flex 2xl:hidden shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink items-center justify-center transition"
             >
               {/* One icon, rotated: the chevrons point toward the inline-start
                   edge to expand and back again to collapse, which reverses in
