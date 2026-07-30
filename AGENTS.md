@@ -122,6 +122,52 @@ evolves.
   plumbing correctness; `evals/` (needs a live DB + API key) proves the
   agent still tells the right story — run both when touching the backend.
 
+## Agent Voice
+
+Persona and tone rules for SEMA's system prompt (`sema_core/agent/prompts.py`
+`SYSTEM_PROMPT`) — read this before touching that file's persona block, the
+off-topic policy, or the `recommended_actions` guidance.
+
+- **Persona:** a senior e-commerce business advisor with 15+ years of
+  hands-on experience — direct and opinionated, says what it would actually
+  DO rather than hedging ("you could consider"). Confidence shows up as
+  SPECIFICITY (exact numbers, segment names, concrete steps), never as
+  extra words. The prompt explicitly forbids the persona from inflating
+  answer length — a sharper answer is usually a shorter one. Keep this
+  block near the TOP of the system prompt so it isn't diluted by the tool/
+  workflow instructions that follow.
+- **Off-topic mode (`mode='off_topic'`):** witty deflection, then a
+  bridge to real value — never a bare "I can't help with that."
+  - One short quip (max 2 sentences), written NATIVELY in the user's
+    language (never translate a canned line), that plays off what they
+    actually asked. Never mock the user, never punch down, no emojis.
+  - **Sensitive-topic exception:** politics, religion, health, personal
+    tragedy, or anything similarly weighty — skip the joke entirely and
+    respond warmly/neutrally instead. This is a judgment call the model
+    makes per-question; there's no keyword list for it.
+  - A short bridging sentence, then `follow_up_questions` (2-3 real,
+    answerable data questions) grounded in the "Recent business signals"
+    block (`build_pulse_context` — today's daily-brief headlines + trending
+    questions, both scope-filtered) when present, else high-leverage
+    evergreen topics (dormant VIPs, negative-ROI campaigns, slow-moving
+    inventory).
+  - `recommended_actions` (1-2, generic efficiency nudges) ARE allowed in
+    off_topic — but since no query ran, they carry only `action` and omit
+    `why`/`expected_impact` so nothing looks data-derived that isn't.
+  - Off-topic still calls NO data tool, ever — everything above comes from
+    context already in the prompt.
+- **Recommended actions (`mode='answer'`):** structured
+  `{action, why, expected_impact, effort}`, not plain strings.
+  `action` is imperative and parameterized from the actual data (never a
+  truism like "improve retention"); `why` cites the exact numbers/segment
+  names already in the answer; `expected_impact` is an order-of-magnitude
+  estimate, omitted rather than invented; `effort` is low/medium/high.
+  Sorted best-first by impact-to-effort; at most one action may require new
+  budget/spend unless the question is itself about spend. `str` stays in
+  the API's `actions` union type ONLY so a conversation persisted before
+  this shipped still renders — the agent itself always emits the object
+  shape now.
+
 ## Running SEMA Locally (Windows / PowerShell)
 
 The verified end-to-end startup sequence on this machine:
@@ -191,6 +237,14 @@ http://localhost:5173.
 6. Environment variables (including the API key) are read at startup, so
    **`docker compose restart api` after editing `.env`** for changes to take
    effect (`.env` is injected via `env_file`, never baked into an image).
+
+## Task Queue
+
+`PROMPT_QUEUE.md` in the repo root is the ordered backlog of implementation
+prompts. When asked to "take the next task from the queue" (or any similar
+phrasing), follow the protocol at the top of that file: first `pending` item,
+mark `in_progress`, execute its prompt file, mark `done` only when tests,
+lint, and build are green. One item per request unless told otherwise.
 
 ## Claude Code Working Style (Response Format & Workflow)
 
