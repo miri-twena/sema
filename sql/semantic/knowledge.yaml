@@ -1,0 +1,68 @@
+- name: "Black Friday & Cyber Monday"
+  type: recurring_event
+  date_range:
+    start: "2025-11-24"
+    end: "2025-12-01"
+  recurrence: "Last week of November through the first Monday of December, annually"
+  description: >
+    Peak holiday shopping event spanning the last week of November through
+    Cyber Monday. Falls inside the dataset's broader November (+35%) and
+    December (+45%) seasonal peaks -- order volume and revenue are elevated
+    through this whole window, not only on Black Friday itself.
+  affects: [revenue, aov, conversion_rate]
+
+- name: "Post-holiday seasonal slowdown"
+  type: recurring_event
+  date_range:
+    start: "2026-01-01"
+    end: "2026-03-31"
+  recurrence: >
+    January through March, annually -- monthly order volume runs 10-20%
+    below the yearly baseline
+  description: >
+    The post-holiday trough: monthly order volume is deliberately scaled
+    down (-20% January, -10% February, -20% March vs. baseline) after the
+    Q4 peak. March 2026 additionally carries the dataset's separate
+    revenue-dip story (extra Electronics, Meta, and returning-customer
+    effects) on top of this baseline seasonal softness -- don't attribute
+    the whole March drop to seasonality alone.
+  affects: [revenue, conversion_rate]
+
+- name: "Checkout outage"
+  type: incident
+  date_range:
+    start: "2025-07-20"
+    end: "2025-07-20"
+  description: >
+    A plausible one-day checkout-outage: 2025-07-20 recorded only 33
+    completed orders (~$21.8K revenue), the lowest single day in an
+    otherwise stable, non-holiday stretch of the dataset -- well below the
+    ~45-50 orders/day norm for that period.
+  affects: [revenue, conversion_rate]
+
+- name: "Marketing pixel misfire"
+  type: incident
+  date_range:
+    start: "2025-08-11"
+    end: "2025-08-17"
+  description: >
+    A plausible one-week tracking-pixel misfire during Google Campaign 3's
+    run (Google channel, active 2025-08-01 to 2025-08-31). Orders placed in
+    this window that the campaign actually influenced may be missing their
+    campaign_id, undercounting that week's attributed_revenue and roi for
+    the campaign.
+  affects: [campaign_roi]
+
+- name: "Electronics price increase"
+  type: note
+  date_range:
+    start: "2026-06-01"
+    end: "2026-06-01"
+  description: >
+    Electronics list prices rose +7% on 2026-06-01 (historical order_items
+    keep the price sold at; products.unit_price reflects the new list
+    price, unit_cost unchanged). Verified effect: average Electronics unit
+    price +4.1% ($409.68 -> $426.34) with units sold -6.3%, leaving category
+    revenue essentially flat (-2.2%) even while every other category was
+    lifted by that same month's Summer Sale volume surge.
+  affects: [aov, gross_margin]

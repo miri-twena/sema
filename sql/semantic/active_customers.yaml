@@ -1,10 +1,8 @@
 name: active_customers
 label: Active Customers
-description: >
-  Customers who placed at least one completed order in the last 90 days.
-  "Now" is defined as the most recent completed order date in the dataset
-  (the synthetic "today"), NOT the real calendar date -- the data is
-  historical, so anchoring to MAX(order_date) keeps the window meaningful.
+domain: customers
+description: |
+  Customers who placed at least one completed order in the last 90 days. "Now" is defined as the most recent completed order date in the dataset (the synthetic "today"), NOT the real calendar date -- the data is historical, so anchoring to MAX(order_date) keeps the window meaningful.
 grain: one row per customer
 sql: |
   SELECT COUNT(DISTINCT customer_id) AS active_customers
@@ -14,30 +12,34 @@ sql: |
         SELECT MAX(order_date) FROM orders WHERE status = 'completed'
     ) - INTERVAL '90 days'
 dimensions:
-  - name: acquisition_channel
-    sql: "customers.acquisition_channel"
-    requires_join: [customers]
-  - name: segment
-    sql: "customers.segment"
-    requires_join: [customers]
+- name: acquisition_channel
+  sql: customers.acquisition_channel
+  requires_join:
+  - customers
+- name: segment
+  sql: customers.segment
+  requires_join:
+  - customers
 filters:
-  completed_only: "status = 'completed'"
-  recency_window: "order_date > (dataset max order_date) - INTERVAL '90 days'"
+  completed_only: status = 'completed'
+  recency_window: order_date > (dataset max order_date) - INTERVAL '90 days'
 examples:
-  - question: "How many active customers do we have?"
-    approach: "Count distinct customers with a completed order in the last 90 days."
-  - question: "Active customers by acquisition channel"
-    approach: "Same recency filter, grouped by acquisition_channel (join customers)."
+- question: How many active customers do we have?
+  approach: Count distinct customers with a completed order in the last 90 days.
+- question: Active customers by acquisition channel
+  approach: Same recency filter, grouped by acquisition_channel (join customers).
 alerts:
-  - id: active_customers_drop
-    label: "Active Customers Drop"
-    condition: active_count < 400
-    severity: warning
-    sql: |
-      SELECT COUNT(DISTINCT customer_id) AS active_count
-      FROM orders
-      WHERE status = 'completed'
-        AND order_date > (
-            SELECT MAX(order_date) FROM orders WHERE status = 'completed'
-        ) - INTERVAL '90 days'
-    message_template: "Only {value} active customers in the last 90 days"
+- id: active_customers_drop
+  label: Active Customers Drop
+  condition: active_count < 400
+  severity: warning
+  sql: |
+    SELECT COUNT(DISTINCT customer_id) AS active_count
+    FROM orders
+    WHERE status = 'completed'
+      AND order_date > (
+          SELECT MAX(order_date) FROM orders WHERE status = 'completed'
+      ) - INTERVAL '90 days'
+  message_template: Only {value} active customers in the last 90 days
+status: certified
+synonyms: ["לקוחות פעילים", "active users"]

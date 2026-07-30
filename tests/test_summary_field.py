@@ -74,7 +74,7 @@ def test_missing_summary_is_none_not_derived_from_the_answer():
 def test_non_answer_modes_never_carry_a_summary():
     """An 'In short' takeaway above a question we did NOT answer is exactly the
     false-confidence signal the mode gate exists to remove."""
-    for mode in ("clarification", "cannot_answer", "off_topic"):
+    for mode in ("clarification", "cannot_answer", "off_topic", "access_denied"):
         resp = build_response(
             {"mode": mode, "insight_text": "I need one detail.", "summary": SUMMARY},
             FakeTools([_df()]),

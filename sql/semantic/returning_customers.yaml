@@ -1,5 +1,6 @@
 name: returning_customers
 label: Returning Customers
+domain: customers
 description: >
   Customers who have made more than one completed purchase -- i.e. they came
   back at least once. The primary definition counts customers with 2+
@@ -33,3 +34,5 @@ examples:
     approach: "Count customers with 2 or more completed orders."
   - question: "What share of customers are repeat buyers?"
     approach: "Returning customers divided by all customers who have ordered."
+status: certified
+synonyms: ["לקוח חוזר", "רכישה חוזרת", "repeat customers"]

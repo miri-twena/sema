@@ -81,6 +81,57 @@ def test_kpi_format_ok():
     assert not run_evals._kpi_format_ok(_resp(), {"label_contains": "id", "format": "text"})
 
 
+# --- structured recommended_actions -----------------------------------------
+def test_expects_structured_actions_passes_for_well_formed_objects():
+    resp = _resp(
+        recommended_actions=[
+            {"action": "Win back 142 dormant VIPs", "why": "142 VIPs, no order in 60d", "effort": "low"},
+        ],
+    )
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_structured_actions": True}))
+    assert checks["expects_structured_actions"]
+
+
+def test_expects_structured_actions_fails_for_legacy_plain_strings():
+    resp = _resp(recommended_actions=["Improve retention"])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_structured_actions": True}))
+    assert not checks["expects_structured_actions"]
+
+
+def test_expects_structured_actions_fails_when_no_why_anywhere():
+    resp = _resp(recommended_actions=[{"action": "Do the thing"}])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_structured_actions": True}))
+    assert not checks["expects_structured_actions"]
+
+
+def test_no_truism_actions_catches_generic_filler():
+    resp = _resp(recommended_actions=[{"action": "Improve customer retention", "why": "it's important"}])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"no_truism_actions": True}))
+    assert not checks["no_truism_actions"]
+
+
+def test_no_truism_actions_passes_for_specific_recommendation():
+    resp = _resp(
+        recommended_actions=[
+            {"action": "Launch a win-back email to the 142 dormant VIP customers", "why": "142 VIPs, 60d+ inactive"},
+        ],
+    )
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"no_truism_actions": True}))
+    assert checks["no_truism_actions"]
+
+
+def test_expects_no_sql_passes_when_no_query_ran():
+    resp = _resp(sql_used=None)
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_no_sql": True}))
+    assert checks["expects_no_sql"]
+
+
+def test_expects_no_sql_fails_when_a_query_ran():
+    resp = _resp(sql_used="SELECT 1")
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_no_sql": True}))
+    assert not checks["expects_no_sql"]
+
+
 # --- run-to-run diff --------------------------------------------------------
 def test_diff_runs_classifies_changes():
     prev = {"a": True, "b": True, "c": False, "gone": True}

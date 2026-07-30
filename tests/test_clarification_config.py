@@ -34,6 +34,26 @@ def test_ecommerce_defaults_to_calendar_and_configures_only_timezone():
     assert cfg["business_days_configured"] is False
 
 
+def test_timezone_override_wins_over_the_static_yaml_value():
+    """org_settings.timezone (spec §2) feeds this same resolution -- 'ecommerce'
+    configures 'Asia/Jerusalem' in clients.yaml, so a different override value
+    proves it actually wins rather than coincidentally matching."""
+    cfg = client_registry.get_analytics_config("ecommerce", timezone_override="America/New_York")
+    assert cfg["timezone"] == "America/New_York"
+
+
+def test_no_override_falls_back_to_the_yaml_value():
+    cfg = client_registry.get_analytics_config("ecommerce", timezone_override=None)
+    assert cfg["timezone"] == "Asia/Jerusalem"
+
+
+def test_empty_string_override_falls_back_to_the_yaml_value():
+    """An empty string is falsy -- treated the same as no override, not as
+    'set the timezone to blank'."""
+    cfg = client_registry.get_analytics_config("ecommerce", timezone_override="")
+    assert cfg["timezone"] == "Asia/Jerusalem"
+
+
 def test_fiscal_only_counts_when_it_differs_from_calendar(monkeypatch):
     """A fiscal calendar starting in January is the calendar year spelled out --
     no ambiguity. Only a non-January start makes 'quarter' ambiguous."""
@@ -96,7 +116,9 @@ def test_configured_revenue_default_is_used_not_asked():
 def test_internal_context_always_includes_tenant_block():
     # Plain question (no drill): the tenant policy block is still present, so the
     # clarification flow is config-driven on the main chat too.
-    plain = main._internal_context(ChatRequest(question="Show revenue last quarter"), "ecommerce")
+    plain = main._internal_context(
+        ChatRequest(question="Show revenue last quarter"), "ecommerce", "full"
+    )
     assert plain is not None and "Governed analytics configuration" in plain
 
     # Drill-down: tenant policy AND the widget focus, both server-built.
@@ -106,6 +128,7 @@ def test_internal_context_always_includes_tenant_block():
             drill_context={"kind": "chart", "title": "Revenue by quarter", "detail": "..."},
         ),
         "ecommerce",
+        "full",
     )
     assert "Governed analytics configuration" in drilled
     assert "clicked a chart" in drilled  # drill focus appended after the policy

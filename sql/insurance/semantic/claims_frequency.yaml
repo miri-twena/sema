@@ -1,5 +1,6 @@
 name: claims_frequency
 label: Claims Frequency
+domain: finance
 description: >
   How often policies produce a claim, expressed as claims per 100 policies.
   Together with Claims Severity it decomposes the loss cost: Frequency x
@@ -50,3 +51,5 @@ examples:
     approach: >
       Bucket the primary driver's age (from drivers.date_of_birth) and compare
       claims frequency across age bands.
+status: certified
+synonyms: ["תדירות תביעות", "claims frequency"]

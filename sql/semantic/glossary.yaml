@@ -1,0 +1,76 @@
+- term: "מכירות"
+  maps_to: revenue
+  language: he
+  note: >
+    "Sales" in Hebrew retail conversation almost always means total
+    revenue, not a count of orders -- resolve to the revenue metric.
+
+- term: "sales"
+  maps_to: revenue
+  language: en
+  note: "Same resolution as the Hebrew מכירות -- means total revenue, not order count."
+
+- term: "מחזור"
+  maps_to: revenue
+  language: he
+  note: "Hebrew for 'turnover'. Maps to the revenue metric."
+
+- term: "turnover"
+  maps_to: revenue
+  language: en
+  note: "Business-English synonym for revenue."
+
+- term: "GMV"
+  maps_to: revenue
+  language: en
+  note: >
+    Gross Merchandise Value. This is a single-seller dataset with no
+    separate marketplace gross/net split, so GMV maps directly to revenue.
+
+- term: "רווח"
+  maps_to: gross_margin
+  language: he
+  note: >
+    Hebrew for "profit". Maps to gross_margin (revenue minus cost of goods
+    sold), NOT net profit -- there is no operating-expense data in this
+    schema, so a true net-profit figure isn't modeled.
+
+- term: "לקוח חוזר"
+  maps_to: returning_customers
+  language: he
+  note: >
+    Hebrew for "returning customer". Maps to returning_customers (2+
+    completed orders), not a loyalty-program or subscription concept.
+
+- term: "סל ממוצע"
+  maps_to: aov
+  language: he
+  note: "Hebrew for 'average basket'. Maps to aov (average order value)."
+
+- term: "basket"
+  maps_to: aov
+  language: en
+  note: >
+    "Basket size" / "average basket" -- maps to aov (average order value),
+    not a literal item count.
+
+- term: "המרה"
+  maps_to: conversion_rate
+  language: he
+  note: "Hebrew for 'conversion'. Maps to conversion_rate."
+
+- term: "נטישה"
+  maps_to: churn_risk
+  language: he
+  note: >
+    Hebrew for "churn"/"abandonment". In this business it means
+    customer-level churn risk (churn_risk: no completed order in the last
+    90 days), NOT cart or checkout abandonment -- this schema has no
+    cart-abandonment tracking.
+
+- term: "קטגוריות"
+  maps_to: revenue_by_category
+  language: he
+  note: >
+    Hebrew for "categories". A question about קטגוריות usually wants the
+    revenue_by_category metric.

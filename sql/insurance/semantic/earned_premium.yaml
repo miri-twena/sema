@@ -1,5 +1,6 @@
 name: earned_premium
 label: Earned Premium
+domain: finance
 description: >
   The portion of written premium that has actually been "earned" by providing
   coverage over elapsed time. A 12-month policy earns its premium gradually,
@@ -41,3 +42,5 @@ examples:
       Written premium (by start_date) grows with sales; earned premium lags
       it because premium is recognised over the policy term. Plot both by
       month to show the gap.
+status: certified
+synonyms: ["פרמיה מורווחת", "earned premium"]

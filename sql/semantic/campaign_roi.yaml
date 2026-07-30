@@ -1,5 +1,6 @@
 name: campaign_roi
 label: Campaign ROI (ROAS)
+domain: marketing
 description: >
   Return on marketing spend per campaign: attributed completed revenue
   divided by spend (also known as ROAS, return on ad spend). Revenue is
@@ -31,3 +32,5 @@ examples:
     approach: "Rank campaigns by roi (ROAS) descending."
   - question: "Which campaigns are losing money?"
     approach: "Filter to campaigns with roi < 1.0."
+status: certified
+synonyms: ["ROAS", "תשואה על פרסום", "return on ad spend"]

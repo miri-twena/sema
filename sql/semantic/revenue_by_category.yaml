@@ -1,5 +1,6 @@
 name: revenue_by_category
 label: Revenue by Category
+domain: sales
 description: >
   Revenue broken down by product category. Unlike the headline Revenue
   metric (which uses the stored order total_amount), category-level revenue
@@ -30,3 +31,5 @@ examples:
     approach: "Sum quantity * unit_price from order_items, grouped by category."
   - question: "Which category declined most in March 2026?"
     approach: "Category revenue by month, compare March 2026 to a baseline month."
+status: certified
+synonyms: ["קטגוריות", "מכירות לפי קטגוריה", "category revenue"]

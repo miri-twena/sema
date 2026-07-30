@@ -1,0 +1,47 @@
+- term: "פוליסה"
+  maps_to: policies_in_force
+  language: he
+  note: >
+    Hebrew for "policy". A general policy question usually means
+    policies_in_force (the book size) unless it's specifically about
+    premium or claims.
+
+- term: "policy"
+  maps_to: policies_in_force
+  language: en
+  note: "Same resolution as the Hebrew פוליסה -- defaults to policies_in_force."
+
+- term: "תביעה"
+  maps_to: incurred_claims
+  language: he
+  note: "Hebrew for 'insurance claim'. Maps to incurred_claims, the paid-out cost side."
+
+- term: "claim"
+  maps_to: incurred_claims
+  language: en
+  note: "Same resolution as the Hebrew תביעה."
+
+- term: "פרמיה"
+  maps_to: written_premium
+  language: he
+  note: >
+    Hebrew for "premium". Defaults to written_premium (the sales/bookings
+    view) unless the question is specifically about earned premium or the
+    loss ratio.
+
+- term: "premium"
+  maps_to: written_premium
+  language: en
+  note: "Same resolution as the Hebrew פרמיה."
+
+- term: "ביטול"
+  maps_to: retention_rate
+  language: he
+  note: >
+    Hebrew for "cancellation"/"lapse". A policy that lapses is the
+    opposite of renewing -- maps to retention_rate, its complement.
+
+- term: "יחס נזיקה"
+  maps_to: loss_ratio
+  language: he
+  note: "Hebrew for 'loss ratio'. Maps directly to the loss_ratio metric."

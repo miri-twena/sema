@@ -1,5 +1,6 @@
 name: average_premium
 label: Average Premium
+domain: sales
 description: >
   The average annual premium per policy -- the typical price point of the
   book. Rising average premium can mean rate increases or a shift toward
@@ -44,3 +45,5 @@ examples:
     approach: "Average annual_premium grouped by coverage_type."
   - question: "Is our average premium rising over time?"
     approach: "Average annual_premium by start_date month, as a trend."
+status: certified
+synonyms: ["פרמיה ממוצעת", "average premium"]

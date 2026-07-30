@@ -22,6 +22,24 @@ from sema_core.client_registry import PROJECT_ROOT, active_client_id, get_client
 # Every metric file must define these keys, or we consider it malformed.
 REQUIRED_KEYS = {"name", "label", "description", "grain", "sql", "dimensions", "examples"}
 
+# Data-access scopes (sema_core.data_scope) gate metrics by these domains --
+# every metric must declare exactly one. Keep in sync with
+# sema_core.data_scope.DOMAINS (that module is the enforcement side; this is
+# the loader-side validation that the YAML never drifts from it).
+VALID_DOMAINS = {"sales", "customers", "marketing", "finance"}
+# The only sensitivity tag defined so far -- profitability data (gross
+# margin, COGS, and similar) that's blocked even inside an otherwise-allowed
+# domain under the no_financials/sales_only scopes.
+VALID_SENSITIVE_TAGS = {"financials"}
+
+# Sibling YAML files that hold the OTHER semantic-layer sections (business
+# rules, calendar/knowledge, glossary) -- not metric files, so they're skipped
+# by load_semantic_layer's glob and read by their own loaders below. Each is a
+# bare top-level YAML list; a client with none of these files (every client
+# before this feature shipped) just gets an empty list back, unchanged
+# behavior for load_semantic_layer itself.
+RESERVED_FILENAMES = {"rules.yaml", "knowledge.yaml", "glossary.yaml"}
+
 
 def semantic_dir(client_id: str | None = None) -> Path:
     """Folder of *.yaml metric files for the active (or given) client.
@@ -48,6 +66,17 @@ def _load_one(path: Path) -> dict:
     if missing:
         raise SemanticLayerError(f"{path.name}: missing required keys {sorted(missing)}")
 
+    domain = data.get("domain")
+    if domain not in VALID_DOMAINS:
+        raise SemanticLayerError(
+            f"{path.name}: missing or unknown domain {domain!r} (must be one of {sorted(VALID_DOMAINS)})"
+        )
+    sensitive = data.get("sensitive")
+    if sensitive is not None and sensitive not in VALID_SENSITIVE_TAGS:
+        raise SemanticLayerError(
+            f"{path.name}: unknown sensitive tag {sensitive!r} (must be one of {sorted(VALID_SENSITIVE_TAGS)})"
+        )
+
     return data
 
 
@@ -60,7 +89,7 @@ def load_semantic_layer(client_id: str | None = None) -> list[dict]:
     if not folder.exists():
         raise SemanticLayerError(f"semantic layer folder not found: {folder}")
 
-    files = sorted(folder.glob("*.yaml"))
+    files = sorted(p for p in folder.glob("*.yaml") if p.name not in RESERVED_FILENAMES)
     if not files:
         raise SemanticLayerError(f"no .yaml metric files found in {folder}")
 
@@ -81,3 +110,41 @@ def get_metric(name: str, client_id: str | None = None) -> dict | None:
         if metric["name"] == name:
             return metric
     return None
+
+
+def _load_reserved_list(filename: str, client_id: str | None) -> list[dict]:
+    """Load one of the RESERVED_FILENAMES as a bare top-level YAML list.
+
+    Missing file -> [] (every client before this feature shipped has none of
+    these files; they must keep working unchanged). A non-list top level is
+    treated as malformed, same strictness as metric files.
+    """
+    path = semantic_dir(client_id) / filename
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return []
+    if not isinstance(data, list):
+        raise SemanticLayerError(f"{filename}: top level must be a list")
+    return data
+
+
+def load_rules(client_id: str | None = None) -> list[dict]:
+    """Business rules (rules.yaml): name, definition, optional logic (SQL),
+    applies_to (metric names), status. [] if the client has no rules.yaml."""
+    return _load_reserved_list("rules.yaml", client_id)
+
+
+def load_knowledge(client_id: str | None = None) -> list[dict]:
+    """Calendar & knowledge items (knowledge.yaml): type
+    (recurring_event/incident/note), name, date_range or recurrence,
+    description, affects. [] if the client has no knowledge.yaml."""
+    return _load_reserved_list("knowledge.yaml", client_id)
+
+
+def load_glossary(client_id: str | None = None) -> list[dict]:
+    """Glossary terms (glossary.yaml): term -> canonical metric/entity mapping
+    (Hebrew or English terms). [] if the client has no glossary.yaml."""
+    return _load_reserved_list("glossary.yaml", client_id)

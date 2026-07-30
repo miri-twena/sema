@@ -44,6 +44,29 @@ _DOWN_WORDS = (
     "lower", "dip", "slowdown", "softness",
 )
 
+# Generic filler a senior advisor would never actually say -- catches a
+# recommendation that's technically well-formed but says nothing a
+# first-year analyst didn't already know. Used by the `no_truism_actions`
+# assertion (see _score below).
+_TRUISM_PHRASES = (
+    "monitor your metrics", "keep an eye on", "improve customer retention",
+    "increase engagement", "optimize your marketing", "focus on growth",
+    "track your kpis", "stay competitive", "improve customer experience",
+    "continue monitoring", "review your strategy", "improve conversion",
+)
+
+
+def _action_text(a) -> str:
+    """Every string field of one recommended_actions entry, joined -- works
+    whether `a` is the new structured {action, why, expected_impact, effort}
+    dict or a legacy plain string, so scoring never has to care which shape
+    a given response used."""
+    if isinstance(a, str):
+        return a
+    if isinstance(a, dict):
+        return " ".join(str(a[k]) for k in ("action", "why", "expected_impact") if a.get(k))
+    return ""
+
 
 def _extract_numbers(text: str) -> list[float]:
     out = []
@@ -146,7 +169,8 @@ class _TokenCapture(logging.Handler):
 def _score(resp: dict, assertions: dict) -> list[tuple[str, bool, str]]:
     """Return (assertion_name, passed, detail) for every assertion on one question."""
     text = resp.get("insight_text", "") or ""
-    haystack = " ".join([text, " ".join(resp.get("recommended_actions", []))]).lower()
+    actions = resp.get("recommended_actions", [])
+    haystack = " ".join([text] + [_action_text(a) for a in actions]).lower()
     results: list[tuple[str, bool, str]] = []
 
     if "contains_any" in assertions:
@@ -173,6 +197,27 @@ def _score(resp: dict, assertions: dict) -> list[tuple[str, bool, str]]:
 
     if assertions.get("expects_sql"):
         results.append(("expects_sql", bool(resp.get("sql_used")), "expected run_sql to be called"))
+
+    if assertions.get("expects_no_sql"):
+        results.append(("expects_no_sql", not resp.get("sql_used"), "expected no run_sql call (off-topic)"))
+
+    if assertions.get("expects_structured_actions"):
+        structured = [a for a in actions if isinstance(a, dict) and str(a.get("action", "")).strip()]
+        has_why = any(isinstance(a, dict) and a.get("why") for a in actions)
+        ok = bool(actions) and len(structured) == len(actions) and has_why
+        results.append(
+            (
+                "expects_structured_actions",
+                ok,
+                f"expected 1+ recommended_actions as {{action, why, ...}} objects "
+                f"with at least one `why` filled in, got: {actions}",
+            )
+        )
+
+    if assertions.get("no_truism_actions"):
+        action_texts = [_action_text(a).lower() for a in actions]
+        hit = [p for p in _TRUISM_PHRASES if any(p in t for t in action_texts)]
+        results.append(("no_truism_actions", not hit, f"found generic filler phrase(s): {hit}"))
 
     # Component types the answer should render (table / chart / kpi card).
     for kind in assertions.get("expects_components", []):
@@ -330,6 +375,15 @@ def run(client_id: str) -> int:
 
 
 if __name__ == "__main__":
+    # Windows' default console codepage (cp1252) can't encode Hebrew text --
+    # and this file's own golden set has Hebrew questions/assertion details
+    # (see the "_he" cases) -- so printing a failure detail containing them
+    # would crash the whole run instead of just reporting FAIL. UTF-8 stdout
+    # fixes that; harmless on platforms that are already UTF-8.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     parser = argparse.ArgumentParser(description="Run SEMA's golden-question eval set.")
     parser.add_argument("client_id", nargs="?", default="ecommerce")
     sys.exit(run(parser.parse_args().client_id))

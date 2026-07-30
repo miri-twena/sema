@@ -32,6 +32,8 @@ checked against `wiring.get_response()`'s response dict:
   text or a KPI value is within `tolerance_pct` of `value`.
 - `expects_sql: true` -- `sql_used` is non-empty, i.e. the agent actually
   queried the database rather than answering from thin air.
+- `expects_no_sql: true` -- the inverse: no query ran. For off-topic cases,
+  which must ground their redirect only in context already in the prompt.
 - `expects_components: [table|chart|kpi]` -- the answer rendered each named
   component (catches "answered in prose without the expected widget").
 - `faithful: true` -- no *large* number in the prose (>= 10,000, so years and
@@ -40,8 +42,17 @@ checked against `wiring.get_response()`'s response dict:
 - `kpi_formats: [{label_contains, format}]` -- a KPI whose label contains the
   substring must carry that `format` (e.g. an ID metric must be `text`, so the
   UI never renders it with thousands separators).
-- `mode: answer|clarification|cannot_answer|off_topic` -- the response mode,
-  e.g. an ambiguous question should `clarification`, not guess.
+- `expects_structured_actions: true` -- every `recommended_actions` entry is
+  the structured `{action, why, expected_impact, effort}` shape (not a bare
+  legacy string) and at least one carries a `why`. Catches a prompt
+  regression that reverts the recommendation engine to generic strings.
+- `no_truism_actions: true` -- no recommended action matches the harness's
+  built-in filler-phrase blocklist (`_TRUISM_PHRASES` in run_evals.py) --
+  e.g. "improve customer retention" with nothing specific behind it.
+- `mode: answer|clarification|cannot_answer|off_topic|access_denied` -- the
+  response mode, e.g. an ambiguous question should `clarification`, not
+  guess; a question outside the requester's data-access scope should
+  `access_denied`, not a silent answer.
 
 > **Formatting note.** The eval harness grades the *response dict*, so it can
 > only check the data-level side of formatting (a KPI's `format`, a full result

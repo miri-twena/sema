@@ -20,14 +20,16 @@ No dependency on the Claude API key.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pandas as pd
 import sqlglot
 from sqlglot import expressions as exp
 
+from sema_core.agent.semantic import load_knowledge
 from sema_core.client_registry import active_client_id
+from sema_core.data_sources import stale_source_caveat
 from sema_core.obs import get_logger, log_event
 
 logger = get_logger("agent")
@@ -47,14 +49,22 @@ PRESENT_ANSWER_TOOL = {
         "properties": {
             "mode": {
                 "type": "string",
-                "enum": ["answer", "clarification", "cannot_answer", "off_topic"],
+                "enum": [
+                    "answer", "clarification", "cannot_answer", "off_topic", "access_denied",
+                ],
                 "description": (
                     "How you are responding. 'answer': the result is grounded in "
                     "executed queries. 'clarification': business question you COULD "
                     "answer, but one detail is materially ambiguous -- ask instead of "
                     "guessing. 'cannot_answer': the connected data cannot reliably "
                     "support an answer. 'off_topic': not about this business at all. "
-                    "Default to 'answer' only when genuinely grounded."
+                    "'access_denied': the question touches a domain or metric outside "
+                    "the requester's data-access scope (see the governed context) -- "
+                    "use this whenever a data tool returns a 'policy_blocked' result, "
+                    "or you can tell upfront from the scope summary that the question "
+                    "is out of bounds; never silently answer with just the allowed "
+                    "part of a multi-metric question instead. Default to 'answer' "
+                    "only when genuinely grounded."
                 ),
             },
             "reason_code": {
@@ -76,6 +86,7 @@ PRESENT_ANSWER_TOOL = {
                     "unsupported_prediction",
                     "off_topic",
                     "insufficient_grounding",
+                    "data_scope_blocked",
                 ],
                 "description": "Machine-readable reason for a non-'answer' mode. "
                 "For mode='clarification' it names the specific ambiguity axis.",
@@ -196,8 +207,41 @@ PRESENT_ANSWER_TOOL = {
             },
             "recommended_actions": {
                 "type": "array",
-                "items": {"type": "string"},
-                "description": "2-3 concrete next steps.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "description": "Imperative, specific, parameterized "
+                            "from the actual data in this answer -- never a "
+                            "generic truism.",
+                        },
+                        "why": {
+                            "type": "string",
+                            "description": "One sentence tying it to evidence "
+                            "from THIS answer (the same numbers/segment names "
+                            "already cited). Omit for mode='off_topic'.",
+                        },
+                        "expected_impact": {
+                            "type": "string",
+                            "description": "Order-of-magnitude estimate when "
+                            "derivable from the data, phrased as an estimate "
+                            "(e.g. 'Est. annual value ~$180K'). Omit rather "
+                            "than invent one.",
+                        },
+                        "effort": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high"],
+                            "description": "Rough proxy for what to tackle first.",
+                        },
+                    },
+                    "required": ["action"],
+                },
+                "description": "1-3 advisor-grade recommendations for "
+                "mode='answer' (see the system prompt's quality bar: sorted "
+                "by impact-to-effort, evidence-backed, root cause not "
+                "symptom); 1-2 generic efficiency nudges (action only) for "
+                "mode='off_topic'.",
             },
             "follow_up_questions": {
                 "type": "array",
@@ -284,11 +328,11 @@ PRESENT_ANSWER_TOOL = {
     },
 }
 
-VALID_MODES = ("answer", "clarification", "cannot_answer", "off_topic")
+VALID_MODES = ("answer", "clarification", "cannot_answer", "off_topic", "access_denied")
 # Modes that must never carry analytical furniture (KPI cards, charts, tables,
 # confidence badges, evidence). Enforced server-side in _apply_mode_policy so a
 # model slip can't render a confident-looking card on an unanswered question.
-NON_ANSWER_MODES = ("clarification", "cannot_answer", "off_topic")
+NON_ANSWER_MODES = ("clarification", "cannot_answer", "off_topic", "access_denied")
 
 
 def _empty_response() -> dict:
@@ -364,6 +408,56 @@ def _tables_in(sql: str) -> list[str]:
     return tables
 
 
+def _parse_date(s) -> date | None:
+    """Best-effort ISO-date parse. None (not an error) for anything that
+    isn't a clean YYYY-MM-DD -- the model is asked for that format but isn't
+    guaranteed to comply, and a caveat is worth skipping, not worth crashing
+    over."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    try:
+        return datetime.fromisoformat(s.strip()).date()
+    except ValueError:
+        return None
+
+
+def _knowledge_caveats(clean_date_range: dict | None) -> list[str]:
+    """Deterministic, server-computed caveats when the answer's date range
+    overlaps a known incident (knowledge.yaml, type="incident").
+
+    Unlike `assumptions` above, this is NEVER something the model reports --
+    it's computed here from data the model doesn't control, so an incident
+    can't be reasoned away by omission the way a self-reported assumption
+    could be. Silently adds nothing when there's no date range, it doesn't
+    parse, or no incident overlaps -- this is a bonus caveat, not a
+    correctness gate.
+    """
+    if not clean_date_range:
+        return []
+    start = _parse_date(clean_date_range.get("start"))
+    end = _parse_date(clean_date_range.get("end"))
+    if start is None and end is None:
+        return []
+    range_start, range_end = start or end, end or start
+
+    caveats: list[str] = []
+    for item in load_knowledge(active_client_id()):
+        if item.get("type") != "incident" or item.get("status") == "deprecated":
+            continue
+        dr = item.get("date_range") or {}
+        inc_start = _parse_date(dr.get("start"))
+        inc_end = _parse_date(dr.get("end"))
+        if inc_start is None and inc_end is None:
+            continue
+        inc_start, inc_end = inc_start or inc_end, inc_end or inc_start
+        if inc_start <= range_end and range_start <= inc_end:
+            caveats.append(
+                f"{item.get('name', 'Incident')} ({dr.get('start', '?')} to "
+                f"{dr.get('end', '?')}) overlaps this period -- {item.get('description', '')}".strip()
+            )
+    return caveats
+
+
 def _clean_evidence(raw: dict | None, tools) -> dict | None:
     """Build the trust-layer evidence dict for one answer.
 
@@ -397,13 +491,15 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
     else:
         status = "none"
 
+    clean_date_range = (
+        {"start": date_range.get("start"), "end": date_range.get("end")}
+        if isinstance(date_range, dict)
+        else None
+    )
+
     return {
         "semantic_definitions": list(raw.get("semantic_definitions", [])),
-        "date_range": (
-            {"start": date_range.get("start"), "end": date_range.get("end")}
-            if isinstance(date_range, dict)
-            else None
-        ),
+        "date_range": clean_date_range,
         "filters_applied": list(raw.get("filters_applied", [])),
         "data_sources": sorted(data_sources),
         # The connection the tables actually came from. Resolved from the real
@@ -419,11 +515,13 @@ def _clean_evidence(raw: dict | None, tools) -> dict | None:
         "query_status": status,
         "queries_run": len(results),
         "queries_failed": len(failures),
-        # Model self-report, same trust level as filters_applied. Shown verbatim
-        # so a required assumption is visible instead of silently baked in.
+        # Model self-report, same trust level as filters_applied, PLUS any
+        # deterministic incident-overlap caveats appended after it (see
+        # _knowledge_caveats) -- those are server-computed from knowledge.yaml,
+        # never something the model could hallucinate away by omitting it.
         "assumptions": [
             a.strip() for a in (raw.get("assumptions") or []) if isinstance(a, str) and a.strip()
-        ],
+        ] + _knowledge_caveats(clean_date_range) + stale_source_caveat(data_sources, active_client_id()),
         # How an ambiguous part of the question was read (governed default or
         # resolved clarification). Model self-report, kept only as clean
         # {label, value} string pairs so a malformed entry can't reach the UI.
@@ -571,6 +669,36 @@ def _clean_kpi(raw: dict, tools) -> dict:
     return kpi
 
 
+_VALID_EFFORT = ("low", "medium", "high")
+
+
+def _clean_action(raw) -> dict | None:
+    """Validate one recommended_actions entry into the structured
+    {action, why, expected_impact, effort} shape. `raw` is normally the
+    object the model returned, but a model that ignores the schema and sends
+    a bare string is still accepted (as `action` with no why/impact/effort)
+    rather than dropped -- a slightly under-filled recommendation beats
+    silently losing it. Returns None for an entry with no usable `action`
+    text, so a truly empty/malformed item never reaches the API as a blank
+    card."""
+    if isinstance(raw, str):
+        raw = {"action": raw}
+    if not isinstance(raw, dict):
+        return None
+    action = raw.get("action")
+    if not isinstance(action, str) or not action.strip():
+        return None
+    why = raw.get("why")
+    impact = raw.get("expected_impact")
+    effort = raw.get("effort")
+    return {
+        "action": action.strip(),
+        "why": why.strip() if isinstance(why, str) and why.strip() else None,
+        "expected_impact": impact.strip() if isinstance(impact, str) and impact.strip() else None,
+        "effort": effort if effort in _VALID_EFFORT else None,
+    }
+
+
 def _executed_results(tools) -> list:
     """The run_sql results this answer could be grounded in."""
     return list(getattr(tools, "results", None) or [])
@@ -590,7 +718,37 @@ def _apply_mode_policy(resp: dict, tools) -> dict:
     user wearing a confidence badge. Non-answer modes get their analytical
     furniture stripped, since a KPI card or chart next to "I can't answer this"
     is exactly the false-confidence signal this flow exists to remove.
+
+    Data-access-scope gate: if ANY run_sql call this turn was policy_blocked
+    (tools.access_denied is set -- see sema_core.agent.tools), the mode is
+    forced to 'access_denied' NO MATTER what the model claims. This is the
+    "never trust the LLM" backstop for the whole feature -- a model that
+    mislabels a blocked query, ignores the policy_blocked result, or answers
+    from only the allowed part of a multi-metric question (silently dropping
+    the blocked part) can never produce anything but this refusal. Deliberately
+    blunt: a partial "answer" next to a blocked metric is exactly the silent-
+    trim outcome this gate exists to prevent, so there's no partial-answer
+    carve-out here. Fallback copy fills in whatever the model itself didn't
+    already provide, so a cooperative model's own (better) phrasing still wins.
     """
+    denied = getattr(tools, "access_denied", None)
+    if denied:
+        resp["mode"] = "access_denied"
+        resp["reason_code"] = "data_scope_blocked"
+        # Fallback copy for when the model didn't cooperate (didn't call
+        # present_answer with mode='access_denied' itself, or left insight_text
+        # empty) -- combines the blocked-topic reason and the "what you CAN
+        # ask about" summary into one message. follow_up_questions is left
+        # alone: it holds concrete, tappable QUESTIONS, and a category summary
+        # like "You can ask about Sales topics" isn't one -- only a
+        # cooperating model (guided by the scope context) can offer real
+        # alternative questions there.
+        if not resp.get("insight_text"):
+            reason = denied.get("reason", "That's outside your data access.")
+            can_ask = denied.get("can_ask_about")
+            resp["insight_text"] = f"{reason} {can_ask}".strip() if can_ask else reason
+        resp["missing"] = None
+
     results = _executed_results(tools)
     ran_sql = len(results) > 0
     any_rows = any(
@@ -629,7 +787,10 @@ def _apply_mode_policy(resp: dict, tools) -> dict:
             resp["sql_used"] = None
         if resp["mode"] == "off_topic":
             resp["reason_code"] = "off_topic"
-            resp["recommended_actions"] = []
+            # recommended_actions and follow_up_questions DO pass through for
+            # off_topic (the witty-redirect-plus-value flow) -- only the
+            # analytical furniture above (KPIs/charts/table/confidence/
+            # evidence) is nonsensical for a non-answer and stays stripped.
     else:
         resp["clarification_options"] = []
 
@@ -671,7 +832,9 @@ def build_response(tool_input: dict, tools) -> dict:
     summary = tool_input.get("summary")
     resp["summary"] = summary.strip() if isinstance(summary, str) and summary.strip() else None
     resp["insight_text"] = tool_input.get("insight_text", "")
-    resp["recommended_actions"] = list(tool_input.get("recommended_actions", []))
+    resp["recommended_actions"] = [
+        a for a in (_clean_action(raw) for raw in tool_input.get("recommended_actions", [])) if a
+    ]
     # Answerable follow-up questions -- kept only if they're non-empty strings;
     # the agent is instructed to omit execution actions here (see the tool
     # schema), and the frontend applies a final safety filter.

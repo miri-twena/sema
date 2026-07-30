@@ -1,5 +1,7 @@
 name: loss_ratio
 label: Loss Ratio
+domain: finance
+sensitive: financials
 description: >
   Incurred claims divided by earned premium, as a percentage -- the single
   most important profitability metric in insurance. It answers: of every
@@ -56,3 +58,5 @@ alternative_definition: >
   Some carriers report loss ratio on WRITTEN premium (simpler, but mismatches
   claims and premium in time) instead of EARNED premium. Earned is the
   actuarially correct denominator and the default here.
+status: certified
+synonyms: ["יחס נזיקה", "loss ratio"]

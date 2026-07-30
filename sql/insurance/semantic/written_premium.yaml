@@ -1,5 +1,6 @@
 name: written_premium
 label: Written Premium
+domain: sales
 description: >
   Total annual premium of policies written (incepted) in the period, keyed by
   policy start_date. This is the insurance equivalent of "bookings": the full
@@ -34,3 +35,5 @@ examples:
     approach: >
       Written premium filtered to business_type = 'New Business' over the
       quarter, optionally split by coverage_type or agent_channel.
+status: certified
+synonyms: ["פרמיה", "premium", "bookings"]

@@ -154,7 +154,8 @@ def test_off_topic_is_bare_and_brief(text):
         _payload(
             mode="off_topic",
             insight_text=text,
-            recommended_actions=["should be dropped"],
+            recommended_actions=[{"action": "Review negative-ROI campaigns"}],
+            follow_up_questions=["What was AOV last week?"],
             confidence="high",
         ),
         FakeTools([]),
@@ -162,10 +163,16 @@ def test_off_topic_is_bare_and_brief(text):
     assert resp["mode"] == "off_topic"
     assert resp["reason_code"] == "off_topic"
     assert resp["insight_text"] == text
-    # No business chrome at all.
+    # No analytical chrome (KPIs/charts/table/confidence/evidence/SQL) -- but
+    # the witty-redirect-plus-value flow keeps its recommendations and
+    # follow-ups, unlike clarification/cannot_answer.
     assert resp["kpis"] == [] and resp["charts"] == [] and resp["table"] is None
     assert resp["confidence"] is None and resp["evidence"] is None
-    assert resp["sql_used"] is None and resp["recommended_actions"] == []
+    assert resp["sql_used"] is None
+    assert resp["recommended_actions"] == [
+        {"action": "Review negative-ROI campaigns", "why": None, "expected_impact": None, "effort": None}
+    ]
+    assert resp["follow_up_questions"] == ["What was AOV last week?"]
 
 
 # --- the gate is not model-controlled ----------------------------------------

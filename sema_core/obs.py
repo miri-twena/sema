@@ -55,3 +55,47 @@ def log_event(logger: logging.Logger, event: str, **fields) -> None:
 def new_request_id() -> str:
     """A short unique id to correlate one request across log lines."""
     return uuid.uuid4().hex[:12]
+
+
+def log_admin_event(
+    logger: logging.Logger,
+    event: str,
+    *,
+    audit_store,
+    client_id: str,
+    actor: dict,
+    action: str,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    target_label: str | None = None,
+    before: dict | None = None,
+    after: dict | None = None,
+    **fields,
+) -> dict:
+    """The ONE call site an admin-panel mutation uses instead of log_event:
+    emits the usual structured stderr line AND appends a row to the durable,
+    append-only audit_events table (sema_core.audit_store), so callers never
+    have to remember to do both separately ("no double logging").
+
+    `audit_store` is passed in rather than imported here, so this
+    dependency-free module (see the module docstring) never needs a DB
+    import -- the caller already has its own store instance. `actor` is the
+    admin-panel identity dict (require_client_admin's return value: id,
+    name/email, role). `action` is a canonical dotted id (e.g.
+    "user.role_changed", "semantic.published") the frontend keys its
+    human-readable sentence off; `target_*`/`before`/`after` describe what
+    changed for the audit drawer's diff view.
+    """
+    log_event(logger, event, client_id=client_id, action=action, actor_id=actor.get("id"), **fields)
+    return audit_store.record(
+        client_id,
+        actor_id=actor.get("id"),
+        actor_name=actor.get("name") or actor.get("email"),
+        actor_role=actor.get("role"),
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        target_label=target_label,
+        before=before,
+        after=after,
+    )

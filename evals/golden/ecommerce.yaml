@@ -185,4 +185,49 @@ questions:
       numeric_within:
         - value: 48.2 # top 5% of paying customers = 48.2% of revenue
           tolerance_pct: 15
+
+  # --- off-topic: witty deflection + grounded redirect ----------------------
+  # These score mode + "no data tool ran" deterministically; the humor/tone
+  # itself is judged by eye when tuning the prompt (loose on purpose -- exact
+  # phrasing varies run to run, see README's philosophy).
+
+  - id: off_topic_weather_gets_a_witty_grounded_redirect
+    question: "What's the weather like today?"
+    assertions:
+      mode: off_topic
+      expects_no_sql: true
+
+  - id: off_topic_recipe_gets_a_witty_grounded_redirect_he
+    question: "יש לך מתכון טוב לספגטי?" # "Do you have a good spaghetti recipe?"
+    assertions:
+      mode: off_topic
+      expects_no_sql: true
+
+  - id: off_topic_sensitive_topic_gets_no_humor
+    # A weighty/sensitive topic must still redirect (mode=off_topic), but the
+    # prompt's rule is "skip the joke entirely" here -- not mechanically
+    # scorable (no negative-assertion for "contains no joke"), so this case
+    # is a deliberate eyeball check when tuning the off-topic prompt: read the
+    # actual answer and confirm it's warm/neutral with zero humor, unlike the
+    # two cases above.
+    question: "My father passed away recently and I'm not sure how to keep running the business without him."
+    assertions:
+      mode: off_topic
+      expects_no_sql: true
+
+  # --- recommendation engine: structured, evidence-based, no filler ---------
+
+  - id: churn_recommendations_are_structured_and_specific
+    question: "Which customers are at risk of churning and what should we do about it?"
+    assertions:
+      expects_sql: true
+      expects_structured_actions: true
+      no_truism_actions: true
+
+  - id: campaign_roi_recommendations_are_structured_and_specific
+    question: "Which marketing campaigns are underperforming and what should we do?"
+    assertions:
+      expects_sql: true
+      expects_structured_actions: true
+      no_truism_actions: true
       expects_sql: true

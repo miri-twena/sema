@@ -106,7 +106,7 @@ def get_active_client() -> dict:
     return get_client_by_id(active_client_id())
 
 
-def get_analytics_config(client_id: str) -> dict:
+def get_analytics_config(client_id: str, timezone_override: str | None = None) -> dict:
     """Normalized governed defaults that drive the clarification flow.
 
     Reads the optional `analytics_config` block for a client and resolves it to
@@ -118,6 +118,13 @@ def get_analytics_config(client_id: str) -> dict:
     (a real fiscal calendar, a business-day calendar). This makes the decision
     to clarify a deterministic function of config, not of model self-confidence.
 
+    `timezone_override`, when given (a non-empty string), wins over the
+    client's static YAML timezone -- this is how the admin-editable
+    org_settings.timezone (spec §2, "affects day boundaries in every query
+    going forward, no retroactive recompute") feeds this same resolution
+    without this module taking a dependency on the settings store; the API
+    layer (which already has both) passes it in.
+
     An unknown client_id raises (via get_client_by_id) rather than silently
     returning another tenant's defaults -- same multi-tenant safety rule as the
     rest of the registry.
@@ -126,7 +133,7 @@ def get_analytics_config(client_id: str) -> dict:
 
     fiscal = raw.get("fiscal_calendar") or {}
     business = raw.get("business_days") or {}
-    tz = raw.get("timezone")
+    tz = timezone_override or raw.get("timezone")
     revenue = raw.get("revenue_definition")
 
     start_month = fiscal.get("start_month")

@@ -1,0 +1,36 @@
+- name: "North region weather storm — January 2026"
+  type: incident
+  date_range:
+    start: "2026-01-01"
+    end: "2026-01-31"
+  description: >
+    A weather event concentrated in the North region in January 2026 drove
+    a spike of roughly 440 extra Weather claims (~$1.5M incurred) -- the
+    loss-ratio spike of the book, the insurance analogue of the ecommerce
+    March revenue dip. Concentrated in incident_region = 'North'.
+  affects: [incurred_claims, loss_ratio, claims_frequency, claims_severity]
+
+- name: "South region heatwave — June 2026"
+  type: incident
+  date_range:
+    start: "2026-06-01"
+    end: "2026-06-30"
+  description: >
+    A second, smaller catastrophe: a June 2026 heatwave in the South
+    region produced roughly 57 extra Weather/Fire claims (~$0.5M
+    incurred, about a third of January's event), landing only on policies
+    that actually cover own-vehicle damage (Comprehensive and TPFT --
+    Liability-only policies see no claims from this event).
+  affects: [incurred_claims, loss_ratio, claims_frequency]
+
+- name: "June 2026 rate action"
+  type: note
+  date_range:
+    start: "2026-06-01"
+    end: "2026-06-01"
+  description: >
+    A ~5% premium rate increase applies to policies renewing from
+    2026-06-01 onward. The renewing cohort whose term expires on/after
+    that date retains noticeably worse than the baseline (~77-78% vs
+    ~81-82%) -- the price/retention trade-off of the rate action.
+  affects: [average_premium, written_premium, retention_rate]

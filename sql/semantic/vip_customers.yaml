@@ -1,5 +1,6 @@
 name: vip_customers
 label: VIP Customers
+domain: customers
 description: >
   The company's highest-value customers. The primary definition uses the
   stored customers.segment = 'VIP' label (computed from order history at
@@ -43,3 +44,5 @@ examples:
     approach: "List VIP customers ordered by lifetime_revenue."
   - question: "What share of revenue comes from the top 5% of customers?"
     approach: "Use the alternative top-5% definition and compare to total revenue."
+status: certified
+synonyms: ["VIP", "לקוחות פרימיום", "top customers", "לקוחות מובילים"]

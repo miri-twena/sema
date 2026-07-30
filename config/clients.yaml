@@ -28,6 +28,22 @@
 #                          working_week    weekday numbers worked (0=Mon .. 6=Sun).
 #                        revenue_definition Default revenue meaning ("gross"/"net")
 #                                          when the semantic layer alone is ambiguous.
+#   data_sources        OPTIONAL list of the client's connected data sources
+#                       (client panel §4). Each client has exactly one live
+#                       connector today -- the schema is source-PLURAL so a
+#                       future ETL connector (Priority/Salesforce) is a config
+#                       change, not a rewrite (see sema_core.data_sources).
+#                       Omitted entirely -> the loader assumes one implicit
+#                       "postgres_main" postgres source (backward-compatible
+#                       default for a client that never configured this block).
+#                         id                  stable id (referenced by audit
+#                                             events / report-problem calls)
+#                         type                postgres (live) | priority |
+#                                             salesforce (catalog-only, no
+#                                             connector implemented yet)
+#                         display_name        shown on the source's status card
+#                         primary_table       the entity read for "data age"
+#                         primary_date_field  its date column (MAX() = data age)
 
 clients:
   - id: ecommerce
@@ -46,6 +62,12 @@ clients:
     # applied interpretation instead of prompting a question.
     analytics_config:
       timezone: "Asia/Jerusalem"
+    data_sources:
+      - id: postgres_main
+        type: postgres
+        display_name: "PostgreSQL"
+        primary_table: orders
+        primary_date_field: order_date
 
   - id: insurance
     label: "Auto Insurance"
@@ -56,3 +78,9 @@ clients:
       - "Which coverage type is least profitable?"
       - "Show policies in force by region."
       - "Which channel retains customers best?"
+    data_sources:
+      - id: postgres_main
+        type: postgres
+        display_name: "PostgreSQL"
+        primary_table: policies
+        primary_date_field: start_date

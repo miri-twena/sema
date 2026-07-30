@@ -1,5 +1,7 @@
 name: incurred_claims
 label: Incurred Claims (Losses)
+domain: finance
+sensitive: financials
 description: >
   Total amount actually paid out on claims -- the carrier's cost of risk. We
   use claims.paid_amount and count only claims that reached a settled state
@@ -32,3 +34,5 @@ examples:
     approach: "Sum paid_amount for settled claims with claim_date in the month."
   - question: "Which claim type costs us the most?"
     approach: "Incurred claims grouped by claim_type, ordered descending."
+status: certified
+synonyms: ["תביעה", "claims paid", "losses"]

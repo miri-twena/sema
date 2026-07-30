@@ -1,5 +1,6 @@
 name: churn_risk
 label: Churn Risk (At-Risk Customers)
+domain: customers
 description: >
   Customers who have purchased before but have placed NO completed order in
   the last 90 days -- they are disengaging and at risk of churning. As with
@@ -79,3 +80,5 @@ alerts:
       ) - INTERVAL '90 days'
         AND ltv > 500
     message_template: "{value} VIP customers at churn risk (LTV > $500)"
+status: draft
+synonyms: ["נטישה", "לקוחות בסיכון", "at risk customers"]

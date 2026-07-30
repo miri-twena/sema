@@ -1,5 +1,6 @@
 name: policies_in_force
 label: Policies In Force
+domain: sales
 description: >
   The number of active policies as of a reference date (default: today) -- the
   size of the book of business. This is the insurance analogue of "active
@@ -32,3 +33,5 @@ examples:
 alternative_definition: >
   For an as-of-month-end view, replace CURRENT_DATE with the chosen date so
   the count reflects the book at that historical point.
+status: certified
+synonyms: ["פוליסה", "policy", "book of business"]

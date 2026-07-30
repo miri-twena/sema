@@ -1,0 +1,51 @@
+- name: "Completed orders only"
+  definition: >
+    An order counts toward revenue, AOV, and category revenue only when its
+    status is 'completed'. Cancelled and refunded orders are excluded
+    entirely -- not counted at a reduced value, simply left out of the base.
+  logic: "status = 'completed'"
+  applies_to: [revenue, aov, revenue_by_category]
+  status: certified
+
+- name: "Revenue is net of refunds"
+  definition: >
+    A refunded order (status = 'refunded') drops out of revenue entirely,
+    the same as a cancelled one. The dataset has no separate refund-event
+    date, so the exclusion lands in the order's original order_date period
+    -- there is no partial-refund or "refund happened later" modeling.
+  logic: "status != 'refunded'"
+  applies_to: [revenue, gross_margin]
+  status: certified
+
+- name: "VIP customer"
+  definition: >
+    customers.segment = 'VIP' marks the top ~10% of customers by lifetime
+    completed-order spend, assigned once from full order history at
+    data-generation time. Don't confuse this with vip_customers'
+    alternative_definition, a separate "live" Pareto view of the top 5% of
+    paying customers by revenue concentration (currently 48.2% of total
+    revenue) -- the two thresholds answer different questions.
+  applies_to: [vip_customers]
+  status: certified
+
+- name: "Returning customer window"
+  definition: >
+    A customer counts as "returning" once they have 2 or more completed
+    orders -- any prior completed order at any point in the past qualifies,
+    with no recency window. This differs from active_customers/churn_risk,
+    which use a 90-day recency window instead. customers.segment =
+    'Returning' is a stored alternative computed the same way at
+    generation time.
+  applies_to: [returning_customers, churn_risk]
+  status: certified
+
+- name: "Campaign ROI attribution"
+  definition: >
+    Revenue is attributed to a campaign only via the order's stored
+    campaign_id -- a single, last-touch link between an order and whichever
+    campaign was active for that traffic source at the time. There is no
+    multi-touch or view-through attribution; organic, direct, and referral
+    orders are never attributed to any campaign.
+  logic: "orders.campaign_id = marketing_campaigns.campaign_id"
+  applies_to: [campaign_roi]
+  status: certified

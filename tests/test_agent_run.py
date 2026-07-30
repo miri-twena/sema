@@ -63,7 +63,12 @@ def test_happy_path_present_answer():
     )
     resp = agent.run("How is revenue?", client=fake)
     assert resp["insight_text"] == "Revenue is up 12%."
-    assert resp["recommended_actions"] == ["Keep going"]
+    # build_response cleans every entry into the structured shape (even a
+    # bare string the model sent, accepted rather than dropped) -- see
+    # response._clean_action.
+    assert resp["recommended_actions"] == [
+        {"action": "Keep going", "why": None, "expected_impact": None, "effort": None}
+    ]
     assert fake.calls == 1
 
 

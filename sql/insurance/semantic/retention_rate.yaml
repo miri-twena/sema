@@ -1,5 +1,6 @@
 name: retention_rate
 label: Retention / Renewal Rate
+domain: customers
 description: >
   The share of policies due for renewal that were actually renewed -- the
   insurance version of retention (and its inverse, churn). When an annual auto
@@ -47,3 +48,5 @@ examples:
 alternative_definition: >
   A premium-weighted retention rate (renewed premium / expiring premium)
   rewards keeping high-value policies, vs this simple policy-count version.
+status: draft
+synonyms: ["ביטול", "renewal rate", "churn"]

@@ -1,5 +1,6 @@
 name: revenue
 label: Revenue
+domain: sales
 description: >
   Total monetary value of completed orders, using the stored order
   total_amount (which already includes discounts and shipping). Refunded
@@ -54,3 +55,5 @@ alerts:
       FROM ranked
       WHERE rn <= 2
     message_template: "Revenue dropped {value}% MoM — beyond the 8% threshold"
+status: certified
+synonyms: ["מכירות", "מחזור", "sales", "turnover"]

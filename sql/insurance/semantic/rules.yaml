@@ -1,0 +1,33 @@
+- name: "Active policy"
+  definition: >
+    A policy is "in force" only when status = 'Active' AND the reference
+    date (default: today) falls between start_date and end_date. Expired,
+    Cancelled, Lapsed, and Renewed (superseded) policies are excluded even
+    if their term technically overlaps the date -- stored status is
+    authoritative, not date math alone.
+  logic: "status = 'Active' AND CURRENT_DATE BETWEEN start_date AND end_date"
+  applies_to: [policies_in_force]
+  status: certified
+
+- name: "Claim counts once settled"
+  definition: >
+    A claim only counts toward incurred_claims, claims_severity, and
+    loss_ratio once it reaches a settled status (Approved, Paid, or
+    Closed). Open, In Review, and Rejected claims are excluded -- rejected
+    claims never pay out, and open/in-review claims haven't had their
+    paid_amount finalized yet, so including them would misstate losses.
+  logic: "status IN ('Approved', 'Paid', 'Closed')"
+  applies_to: [incurred_claims, claims_severity, loss_ratio]
+  status: certified
+
+- name: "Earned vs written premium"
+  definition: >
+    Written premium (the full annual_premium at the moment a policy is
+    sold or renewed) and earned premium (that same amount recognised
+    straight-line, 1/12 per active month of coverage) are different
+    numbers for the same policy and should never be compared directly
+    without knowing which one a question means. Loss Ratio always uses
+    EARNED premium as its denominator -- matching claims to the same
+    period they cover -- never written premium.
+  applies_to: [written_premium, earned_premium, loss_ratio]
+  status: certified

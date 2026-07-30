@@ -26,6 +26,21 @@ def _resp_dict(**overrides) -> dict:
     return base
 
 
+def test_every_valid_mode_passes_through_unchanged():
+    """Regression: to_chat_response has its OWN mode allow-list, separate from
+    response.py's VALID_MODES and api/models.py's Literal -- adding a mode in
+    those two places but not here silently downgrades it back to 'answer'
+    (exactly what happened when access_denied was first added)."""
+    for mode in ("answer", "clarification", "cannot_answer", "off_topic", "access_denied"):
+        out = to_chat_response(_resp_dict(mode=mode))
+        assert out.mode == mode
+
+
+def test_unknown_mode_falls_back_to_answer():
+    out = to_chat_response(_resp_dict(mode="not-a-real-mode"))
+    assert out.mode == "answer"
+
+
 def test_table_dates_and_decimals_are_json_safe():
     df = pd.DataFrame(
         {

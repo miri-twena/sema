@@ -218,6 +218,7 @@ def run(
     request_id: str | None = None,
     on_progress=None,
     internal_context: str | None = None,
+    scope_id: str = "full",
 ) -> dict:
     """Answer a business question via the agent loop.
 
@@ -236,6 +237,13 @@ def run(
     prompts.build_user_message), which strips forged delimiters from the
     question, so users can't fake a context block. Returns the response dict
     the UI renders.
+
+    `scope_id` is the requester's data-access scope (sema_core.data_scope) --
+    resolved server-side from the mock identity (see current_user.py), never
+    from anything client-supplied. Threaded straight into AgentTools, which
+    filters get_semantic_layer and gates run_sql by it; 'full' (the default)
+    never blocks anything, so every caller that doesn't resolve a real
+    identity (tests, the router fallback) is unaffected.
     """
     if on_progress is None:
         on_progress = lambda _event: None  # no-op: identical code path either way
@@ -255,7 +263,7 @@ def run(
             max_retries=settings.anthropic_max_retries,
         )
 
-    tools = AgentTools()
+    tools = AgentTools(scope_id=scope_id)
 
     # Observability counters -- logged once when the run finishes (any exit).
     started = time.perf_counter()

@@ -1,5 +1,6 @@
 name: aov
 label: Average Order Value (AOV)
+domain: sales
 description: >
   The average value of a completed order -- total revenue divided by the
   number of completed orders. A core efficiency metric: it tells you how
@@ -48,3 +49,5 @@ alerts:
       FROM ranked
       WHERE rn <= 2
     message_template: "AOV dropped {value}% MoM"
+status: certified
+synonyms: ["סל ממוצע", "basket size", "average basket"]
