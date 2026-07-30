@@ -97,7 +97,7 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
         )
 
     mode = resp.get("mode") or "answer"
-    if mode not in ("answer", "clarification", "cannot_answer", "off_topic"):
+    if mode not in ("answer", "clarification", "cannot_answer", "off_topic", "access_denied"):
         mode = "answer"
 
     # Only keep well-formed notices -- an unknown-shaped entry is dropped rather
@@ -152,7 +152,13 @@ def build_schema(client_id: str, run_query) -> SchemaResponse:
     """Introspect a client's public schema into the SchemaResponse contract.
 
     `run_query` is injected (db.run_query) to keep this module DB-agnostic.
+    Each table's `source` (spec §4.4: "every entity in the model gets a
+    source field") is resolved from the data-source registry, not
+    introspected -- the database has no notion of which upstream system an
+    entity's data ultimately came from.
     """
+    from sema_core.data_sources import source_type_for_entity
+
     cols = run_query(_COLS_SQL, client_id=client_id)
     fks = run_query(_FKS_SQL, client_id=client_id)
 
@@ -162,6 +168,7 @@ def build_schema(client_id: str, run_query) -> SchemaResponse:
             SchemaTable(
                 name=str(table_name),
                 columns=[SchemaColumn(name=r.column_name, type=r.data_type) for r in group.itertuples()],
+                source=source_type_for_entity(str(table_name), client_id),
             )
         )
     relationships = [

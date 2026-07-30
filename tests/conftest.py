@@ -38,6 +38,82 @@ def _isolated_conversation_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_org_user_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway org-users store (admin panel), same
+    isolation as the conversation store above -- tests never touch the real
+    var/sema_state.db."""
+    import api.main as main
+    from sema_core.org_user_store import OrgUserStore
+
+    monkeypatch.setattr(main, "org_user_store", OrgUserStore(tmp_path / "test_org_users.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_org_settings_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway org-settings store (admin panel),
+    same isolation as the org-users store above."""
+    import api.main as main
+    from sema_core.org_settings_store import OrgSettingsStore
+
+    monkeypatch.setattr(main, "org_settings_store", OrgSettingsStore(tmp_path / "test_org_settings.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_semantic_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway semantic-model store (drafts +
+    version history), same isolation as the org-users store above. Note this
+    does NOT isolate the semantic YAML files themselves (sql/semantic/*.yaml)
+    -- tests that Publish/Restore must additionally redirect semantic_dir
+    (see test_semantic_model.py's own autouse fixture), or they'd write to
+    the real files."""
+    import api.main as main
+    from sema_core.semantic_store import SemanticStore
+
+    monkeypatch.setattr(main, "semantic_store", SemanticStore(tmp_path / "test_semantic.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_audit_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway audit-log store (admin panel), same
+    isolation as the other admin-panel stores above."""
+    import api.main as main
+    from sema_core.audit_store import AuditStore
+
+    monkeypatch.setattr(main, "audit_store", AuditStore(tmp_path / "test_audit.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home_config_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway home-config store (admin panel),
+    same isolation as the other admin-panel stores above."""
+    import api.main as main
+    from sema_core.home_config_store import HomeConfigStore
+
+    monkeypatch.setattr(main, "home_config_store", HomeConfigStore(tmp_path / "test_home_config.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_source_health(monkeypatch):
+    """Every test gets a deterministic, always-reachable data-source health
+    check instead of a real Postgres round-trip -- same isolation rationale
+    as the stores above (see the module docstring: no test may depend on a
+    live database). sema_core.agent.response._clean_evidence calls into
+    sema_core.data_sources on every evidence-panel build whenever a query
+    ran, so without this a plain `pytest` run would silently open a real DB
+    connection. Tests that specifically exercise a source failure
+    (tests/test_data_sources.py) re-patch these within the test body, which
+    simply layers on top of this default."""
+    import pandas as pd
+
+    from sema_core import data_sources
+
+    monkeypatch.setattr(data_sources.db, "check_connection", lambda **kw: True)
+    monkeypatch.setattr(
+        data_sources.db, "run_query", lambda sql, client_id=None: pd.DataFrame({"max_date": [None]})
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_real_anthropic_key(monkeypatch):
     """Force every test onto the no-API-key code path (friendly fallback
     responses, instant trim-based titles) even though the developer's local

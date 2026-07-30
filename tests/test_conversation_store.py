@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from sema_core.conversation_store import (
     ConversationNotFoundError,
@@ -295,3 +296,69 @@ def test_truncate_always_keeps_most_recent_turn_even_if_over_budget():
 
 def test_truncate_empty_input():
     assert truncate_by_tokens([], budget_tokens=100) == []
+
+
+# --- retention-policy soft-delete (sema_core.retention) ----------------------
+
+def _backdate(store: SqliteConversationStore, conv_id: str, days_ago: int) -> None:
+    """Test-only: force a conversation's created_at into the past, so
+    retention-cutoff logic has something to actually catch."""
+    past = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    with store._connect() as conn:  # noqa: SLF001 -- test reaches into the store
+        conn.execute("UPDATE conversations SET created_at = ? WHERE id = ?", (past, conv_id))
+
+
+def _cutoff(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def test_count_active_older_than_only_counts_old_ones(store):
+    old = store.create("ecommerce")
+    store.append(old, "ecommerce", "user", "hi")
+    _backdate(store, old, days_ago=100)
+
+    new = store.create("ecommerce")
+    store.append(new, "ecommerce", "user", "hi")
+
+    assert store.count_active_older_than("ecommerce", _cutoff(90)) == 1
+
+
+def test_count_active_older_than_is_scoped_to_client(store):
+    old = store.create("other-client")
+    store.append(old, "other-client", "user", "hi")
+    _backdate(store, old, days_ago=100)
+
+    assert store.count_active_older_than("ecommerce", _cutoff(90)) == 0
+
+
+def test_soft_delete_older_than_hides_from_list_but_keeps_the_row(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "hi")
+    _backdate(store, conv_id, days_ago=100)
+
+    deleted = store.soft_delete_older_than("ecommerce", _cutoff(90))
+    assert deleted == 1
+    assert conv_id not in {c["id"] for c in store.list_conversations("ecommerce")}
+    # The row itself still exists (soft, not hard, delete) -- get_turns still
+    # resolves it rather than raising NotFound.
+    assert store.get_turns(conv_id, "ecommerce") == [{"role": "user", "content": "hi"}]
+
+
+def test_soft_delete_older_than_leaves_recent_conversations_alone(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "hi")  # created just now
+
+    deleted = store.soft_delete_older_than("ecommerce", _cutoff(90))
+    assert deleted == 0
+    assert conv_id in {c["id"] for c in store.list_conversations("ecommerce")}
+
+
+def test_soft_delete_is_idempotent(store):
+    conv_id = store.create("ecommerce")
+    store.append(conv_id, "ecommerce", "user", "hi")
+    _backdate(store, conv_id, days_ago=100)
+
+    first = store.soft_delete_older_than("ecommerce", _cutoff(90))
+    second = store.soft_delete_older_than("ecommerce", _cutoff(90))
+    assert first == 1
+    assert second == 0  # already deleted -- not counted again

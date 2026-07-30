@@ -188,6 +188,16 @@ class SqliteConversationStore:
             # plain text. NULL for user turns and for pre-existing rows.
             conn.execute("ALTER TABLE messages ADD COLUMN payload TEXT")
 
+        if "deleted_at" not in conv_cols:
+            # Retention-policy soft-delete (org_settings.retention_policy,
+            # see sema_core.retention) -- distinct from the hard delete()
+            # below (an explicit user action) and from `archived` (a
+            # reversible visibility flag, not a lifecycle state). NULL means
+            # "alive"; every visibility-facing read (list_conversations)
+            # excludes a set row, same as a hard delete would look to the
+            # user, but the data itself survives for audit/debugging.
+            conn.execute("ALTER TABLE conversations ADD COLUMN deleted_at TEXT")
+
     def _owner(self, conn: sqlite3.Connection, conversation_id: str) -> str | None:
         row = conn.execute(
             "SELECT client_id FROM conversations WHERE id = ?", (conversation_id,)
@@ -273,7 +283,7 @@ class SqliteConversationStore:
             "SELECT c.id, c.title, c.pinned, c.archived, c.created_at, c.updated_at, "
             "  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count "
             "FROM conversations c "
-            "WHERE c.client_id = ? "
+            "WHERE c.client_id = ? AND c.deleted_at IS NULL "
             "  AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id) "
         )
         if not include_archived:
@@ -333,6 +343,34 @@ class SqliteConversationStore:
             conn.execute("DELETE FROM threads WHERE conversation_id = ?", (conversation_id,))
             conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+
+    # --- retention-policy soft-delete (sema_core.retention) -----------------
+
+    def count_active_older_than(self, client_id: str, cutoff_iso: str) -> int:
+        """How many not-yet-deleted conversations were CREATED before
+        `cutoff_iso` -- the retention screen's preview count ("N conversations
+        will be deleted on next run"). Read-only; never mutates."""
+        with closing(self._connect()) as conn:
+            (n,) = conn.execute(
+                "SELECT COUNT(*) FROM conversations "
+                "WHERE client_id = ? AND deleted_at IS NULL AND created_at < ?",
+                (client_id, cutoff_iso),
+            ).fetchone()
+        return n
+
+    def soft_delete_older_than(self, client_id: str, cutoff_iso: str) -> int:
+        """The retention sweep's actual mutation: stamp `deleted_at` on every
+        not-yet-deleted conversation created before `cutoff_iso`. Returns the
+        count affected. Once set, list_conversations excludes the row (same
+        as a hard delete looks to the user), but nothing is actually erased."""
+        now = datetime.now(timezone.utc).isoformat()
+        with closing(self._connect()) as conn, conn:
+            cur = conn.execute(
+                "UPDATE conversations SET deleted_at = ? "
+                "WHERE client_id = ? AND deleted_at IS NULL AND created_at < ?",
+                (now, client_id, cutoff_iso),
+            )
+            return cur.rowcount
 
     def top_questions(self, client_id: str, limit: int = 6) -> list[dict]:
         """Most frequently asked questions for a client, across every

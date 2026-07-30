@@ -138,6 +138,18 @@ class Notice(BaseModel):
     attempts: int | None = None  # sql_retried: how many run_sql calls failed first
 
 
+class RecommendedAction(BaseModel):
+    """One advisor-grade recommendation (sema_core.agent.response._clean_action
+    already validated/defaulted these fields server-side). `why`/
+    `expected_impact`/`effort` are optional -- an off_topic nudge carries only
+    `action` since it isn't data-derived."""
+
+    action: str
+    why: str | None = None
+    expected_impact: str | None = None
+    effort: Literal["low", "medium", "high"] | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     # 1-2 sentence executive takeaway rendered above the answer. Produced by the
@@ -148,8 +160,12 @@ class ChatResponse(BaseModel):
     summary: str | None = None
     # How SEMA responded. Explicit on the contract so the client renders by
     # mode rather than sniffing the prose. Defaults to "answer" so responses
-    # from the rule-based insight_builder stay valid unchanged.
-    mode: Literal["answer", "clarification", "cannot_answer", "off_topic"] = "answer"
+    # from the rule-based insight_builder stay valid unchanged. 'access_denied'
+    # is a data-access-scope refusal (sema_core.data_scope): the question
+    # touched a domain/metric outside the requester's scope, so no SQL ran.
+    mode: Literal[
+        "answer", "clarification", "cannot_answer", "off_topic", "access_denied"
+    ] = "answer"
     reason_code: str | None = None
     # mode="clarification": 2-4 tappable choices that resolve the ambiguity.
     clarification_options: list[str] = []
@@ -158,7 +174,12 @@ class ChatResponse(BaseModel):
     kpis: list[Kpi] = []
     chart: Chart | None = None
     table: Table | None = None
-    actions: list[str] = []
+    # Structured advisor recommendations going forward (action/why/
+    # expected_impact/effort). `str` stays in the union ONLY so a conversation
+    # persisted before this field existed (a plain string array) still
+    # validates when reopened -- the agent itself always emits the object
+    # shape now (see sema_core.agent.response._clean_action).
+    actions: list[str | RecommendedAction] = []
     # Short follow-up QUESTIONS the agent can answer from the data (distinct
     # from `actions`, which are business advice). Drive the composer's
     # one-tap suggestion, so they must never contain un-answerable actions.
@@ -334,6 +355,17 @@ class Alert(BaseModel):
     value: Any
 
 
+class AlertCatalogItem(BaseModel):
+    """One POSSIBLE alert this client's semantic layer defines -- unlike
+    Alert (only today's triggered breaches), this backs the admin Home-config
+    editor's per-alert toggle/threshold picker (spec item 11)."""
+
+    id: str
+    label: str
+    metric_label: str
+    severity: Literal["critical", "warning"]
+
+
 class Client(BaseModel):
     id: str
     label: str
@@ -353,12 +385,54 @@ class SchemaColumn(BaseModel):
 class SchemaTable(BaseModel):
     name: str
     columns: list[SchemaColumn] = []
+    # Which upstream connector TYPE this entity's rows come from (spec §4.4).
+    # Defaults to "postgres" -- every client before this feature shipped has
+    # exactly one connector, so this never breaks an existing caller.
+    source: Literal["postgres", "priority", "salesforce"] = "postgres"
 
 
 class SchemaResponse(BaseModel):
     client_id: str
     tables: list[SchemaTable] = []
     relationships: list[dict[str, Any]] = []
+
+
+class DataSourceEntity(BaseModel):
+    """One entity (real table) mapped to a data source, plus the certified
+    metrics that depend on it -- the "revenue, aov ← PostgreSQL" trust-chain
+    expander (spec §4.3)."""
+
+    name: str
+    dependent_metrics: list[str] = []
+
+
+class DataSource(BaseModel):
+    """A status card in the client panel's Data sources screen (spec §4.3),
+    view-only: no credentials, no connection editing, no manual sync
+    trigger -- all platform-level. `status` mirrors the spec's enum; only
+    "postgres" is a live, implemented connector today, so "syncing"/"paused"
+    are schema-ready for a future ETL connector rather than reachable states
+    for the demo tenants."""
+
+    id: str
+    type: Literal["postgres", "priority", "salesforce"]
+    display_name: str
+    status: Literal["healthy", "error", "syncing", "paused"]
+    last_sync_at: str | None = None
+    sync_duration_ms: int | None = None
+    data_age_days: float | None = None
+    primary_table: str | None = None
+    primary_date_field: str | None = None
+    entities: list[DataSourceEntity] = []
+
+
+class ReportProblemResponse(BaseModel):
+    """Ack for POST /api/admin/data-sources/{id}/report-problem -- the audit
+    event this call created is the durable record; nothing else to return."""
+
+    reported: bool
+    source_id: str
+    audit_event_id: str
 
 
 class PopularQuestion(BaseModel):
@@ -371,3 +445,399 @@ class Health(BaseModel):
     db_connected: bool
     agent_configured: bool
     active_client: str
+
+
+# --- admin: users and permissions (spec §6.1) ------------------------------
+AdminRole = Literal["client_admin", "analyst", "viewer"]
+AdminStatus = Literal["active", "suspended", "invited"]
+# Data-access scope (sema_core.data_scope): WHICH semantic-layer domains and
+# metrics a user's questions may touch -- a second axis alongside role.
+AdminDataScope = Literal["full", "no_financials", "sales_only", "custom"]
+
+
+class AdminUser(BaseModel):
+    """One organization user in the admin panel. `role`/`status` carry their
+    allowed values as Literals here -- the DB stores them as plain TEXT, so
+    this boundary is where they're actually validated. DERIVED, non-stored
+    fields: `is_self` (this row is the current viewer -- the client protects
+    it: no role select, no kebab), `invite_expired` (an invited user past its
+    expiry -- computed from the timestamp, never stale), and `invited_by_name`
+    (resolved via a join in the store, so a renamed/removed inviter is never
+    stale). `invited_by` is null for founding members; `joined_at` is null
+    until an invite is accepted -- there's no accept-invite flow yet (no real
+    auth), so today it's only ever set by seed data."""
+
+    id: str
+    client_id: str
+    name: str | None = None
+    email: str
+    title: str | None = None
+    role: AdminRole
+    status: AdminStatus
+    invited_at: str | None = None
+    invite_expires_at: str | None = None
+    invited_by: str | None = None
+    invited_by_name: str | None = None
+    joined_at: str | None = None
+    last_active_at: str | None = None
+    created_at: str
+    is_self: bool = False
+    invite_expired: bool = False
+    # Which semantic-layer domains/metrics this user may ask about
+    # (sema_core.data_scope) -- always 'full' for a client_admin.
+    data_scope: AdminDataScope = "full"
+
+
+class AdminUserList(BaseModel):
+    """The users screen's payload: the rows plus the two counts the subtitle
+    shows ("N members · N pending invites"). Counts are of the WHOLE org, not
+    the filtered view, so they don't jump around as the admin searches."""
+
+    users: list[AdminUser] = []
+    member_count: int  # active + suspended (people who have accounts)
+    pending_count: int  # invited (not yet accepted)
+
+
+class AdminInviteRequest(BaseModel):
+    """POST body for inviting a user. Email format is validated server-side in
+    the endpoint (specific 422) on top of this length guard. `data_scope` is
+    optional -- omit it to get the safer DEFAULT_INVITE_SCOPE
+    ('no_financials'); a client_admin invite is always 'full' regardless of
+    what's sent here (enforced in the store)."""
+
+    email: str = Field(min_length=3, max_length=254)
+    role: AdminRole
+    data_scope: AdminDataScope | None = None
+
+
+class AdminUserUpdate(BaseModel):
+    """PATCH body. Every field is optional: send only what changed (mirrors
+    ConversationUpdate)."""
+
+    role: AdminRole | None = None
+    status: AdminStatus | None = None
+    data_scope: AdminDataScope | None = None
+
+
+class RoleInfo(BaseModel):
+    """One entry in the role catalog (GET /api/admin/roles) -- the single
+    source of truth for the role legend/tooltip copy in the UI. `id` matches
+    AdminRole so the client can key off it directly."""
+
+    id: AdminRole
+    label: str
+    description: str
+
+
+class DataScopeInfo(BaseModel):
+    """One entry in the data-scope catalog (GET /api/admin/data-scopes) --
+    the single source of truth for the "Data access" column's legend and the
+    scope editor's copy. `id` matches AdminDataScope. `selectable` is False
+    only for `custom` (V2: the UI disables it, the server rejects a PATCH
+    that tries to set it)."""
+
+    id: AdminDataScope
+    label: str
+    description: str
+    included_domains: list[str]
+    excluded_domains: list[str]
+    selectable: bool
+
+
+# --- admin: semantic model (Draft -> Validate -> Publish) ------------------
+SemanticStatus = Literal["certified", "draft", "deprecated"]
+SemanticSection = Literal["metric", "rule", "knowledge", "glossary"]
+SemanticFormat = Literal["currency", "number", "percent", "text"]
+
+
+class SemanticMetricItem(BaseModel):
+    """One metric as the admin screen shows it -- published fields, possibly
+    overlaid with the caller's own in-progress draft (`is_draft`)."""
+
+    name: str
+    label: str
+    description: str
+    sql: str
+    status: SemanticStatus = "certified"
+    synonyms: list[str] = []
+    format: SemanticFormat | None = None
+    is_draft: bool = False
+    is_new: bool = False
+    validated: bool = False
+
+
+class SemanticRuleItem(BaseModel):
+    name: str
+    definition: str
+    logic: str | None = None
+    applies_to: list[str] = []
+    status: SemanticStatus = "certified"
+    is_draft: bool = False
+    is_new: bool = False
+    validated: bool = False
+
+
+class SemanticDateRange(BaseModel):
+    start: str | None = None
+    end: str | None = None
+
+
+class SemanticKnowledgeItem(BaseModel):
+    name: str
+    type: Literal["recurring_event", "incident", "note"]
+    date_range: SemanticDateRange | None = None
+    recurrence: str | None = None
+    description: str
+    affects: list[str] = []
+    is_draft: bool = False
+    is_new: bool = False
+    validated: bool = False
+
+
+class SemanticGlossaryItem(BaseModel):
+    term: str
+    maps_to: str
+    language: str | None = None
+    is_draft: bool = False
+    is_new: bool = False
+    validated: bool = False
+
+
+class SemanticModelResponse(BaseModel):
+    """GET /api/admin/semantic's payload: the merged (published + this
+    admin's drafts) view of every section, plus the header chip's numbers."""
+
+    published_version: int
+    draft_count: int
+    metrics: list[SemanticMetricItem] = []
+    rules: list[SemanticRuleItem] = []
+    knowledge: list[SemanticKnowledgeItem] = []
+    glossary: list[SemanticGlossaryItem] = []
+
+
+class SemanticDraftSave(BaseModel):
+    """PUT body: a full draft item. `action` distinguishes editing an existing
+    published item from proposing a brand-new one (rules/knowledge/glossary
+    only) from archiving one (data may be {} in that case)."""
+
+    data: dict[str, Any] = {}
+    action: Literal["edit", "create", "deprecate"] = "edit"
+
+
+class SemanticValidateRequest(BaseModel):
+    section: SemanticSection
+    item_key: str
+
+
+class SemanticValidateResult(BaseModel):
+    """Never an error response itself -- a failed dry run is `ok: False` with
+    `error` set, not an HTTP error, same philosophy as the agent's run_sql
+    tool. `value`/`row_count`/`duration_ms`/`period_label` are set only for a
+    SQL dry run that ran; `message` is set for a schema-only check."""
+
+    ok: bool
+    value: Any = None
+    row_count: int | None = None
+    duration_ms: float | None = None
+    period_label: str | None = None
+    message: str | None = None
+    error: str | None = None
+
+
+class SemanticPublishItemRef(BaseModel):
+    section: SemanticSection
+    item_key: str
+
+
+class SemanticPublishRequest(BaseModel):
+    items: list[SemanticPublishItemRef] = Field(min_length=1)
+
+
+class SemanticVersion(BaseModel):
+    """One entry in the History slide-over. `snapshot` (the full raw YAML
+    text) deliberately isn't part of this model -- the list view only needs
+    the metadata; restore reads the snapshot server-side."""
+
+    id: str
+    version: int
+    changed_items: list[str]
+    author: str | None = None
+    created_at: str
+
+
+# --- admin: organization settings (spec §2) --------------------------------
+RetentionPolicy = Literal["forever", "90d", "30d"]
+
+
+class OrgSettings(BaseModel):
+    """One organization's settings row (sema_core.org_settings_store).
+    `logo_path` is a served URL (or null), never a filesystem path."""
+
+    client_id: str
+    name: str
+    logo_path: str | None = None
+    timezone: str
+    currency: str
+    number_format: str
+    default_language: Literal["en", "he"]
+    retention_policy: RetentionPolicy
+    updated_at: str
+    # True when this response reflects a write that CLOBBERED a change the
+    # caller hadn't seen yet (their `expected_updated_at` didn't match) --
+    # the write still applied (last-write-wins); the UI shows a toast.
+    conflict: bool = False
+
+
+class OrgSettingsUpdate(BaseModel):
+    """PATCH body. Every field optional: send only what changed. Sending a
+    non-null `expected_updated_at` from the value you last fetched lets the
+    server tell you if someone else changed a setting since (see
+    OrgSettings.conflict) -- omit it to skip that check."""
+
+    name: str | None = None
+    timezone: str | None = None
+    currency: str | None = None
+    number_format: str | None = None
+    default_language: Literal["en", "he"] | None = None
+    retention_policy: RetentionPolicy | None = None
+    expected_updated_at: str | None = None
+
+
+class RetentionPreview(BaseModel):
+    """"N conversations will be deleted on next run" -- shown before a
+    retention_policy change is confirmed."""
+
+    policy: RetentionPolicy
+    conversations_to_delete: int
+
+
+class PublicOrgSettings(BaseModel):
+    """The subset of org settings every user (not just admins) needs: the
+    sidebar's name/logo and the shared display-formatting config (currency/
+    number_format) that drives KPI/table/chart rendering app-wide. Never
+    includes timezone/retention_policy -- those are admin-only concerns."""
+
+    name: str
+    logo_path: str | None = None
+    currency: str
+    currency_symbol: str
+    currency_position: Literal["prefix", "suffix"]
+    number_format: str
+
+
+# --- admin: audit log (spec §3) ---------------------------------------------
+class AuditEvent(BaseModel):
+    """One append-only row (sema_core.audit_store). `action` is a canonical
+    dotted id ("user.role_changed", "semantic.published", ...) the frontend
+    keys its human-readable sentence + category tag off of; `before`/`after`
+    back the drawer's field-by-field diff. `actor_id` is null for a system-
+    driven event (none exist yet, but the shape allows for one)."""
+
+    id: str
+    client_id: str
+    actor_id: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    action: str
+    target_type: str | None = None
+    target_id: str | None = None
+    target_label: str | None = None
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+    created_at: str
+
+
+class AuditEventList(BaseModel):
+    """One page of the audit log plus enough to drive pagination controls."""
+
+    events: list[AuditEvent] = []
+    total: int
+    page: int
+    page_size: int
+
+
+# --- admin: home screen customization (spec §1) -----------------------------
+class HomeConfigKpis(BaseModel):
+    """Which of home_config.KPI_CATALOG's ids to show, in order, and whether
+    each shows a period-over-period delta (only meaningful for revenue/
+    orders/aov -- see sema_core.home_config's module docstring for why this
+    isn't a general "any certified metric" picker)."""
+
+    order: list[str] = Field(default_factory=list)
+    deltas: dict[str, bool] = Field(default_factory=dict)
+
+
+class HomeConfigDailyBrief(BaseModel):
+    pulse_enabled: bool = True
+    insights_enabled: bool = True
+    sensitivity: Literal["conservative", "balanced", "sensitive"] = "balanced"
+
+
+class HomeConfigSuggestedQuestions(BaseModel):
+    """`questions` empty means "use this client's static suggested_questions
+    from config/clients.yaml" -- so publishing an empty list is a deliberate
+    no-op, not a way to hide the section."""
+
+    questions: list[str] = Field(default_factory=list)
+    trending_enabled: bool = True
+
+
+class HomeConfigAlertSetting(BaseModel):
+    enabled: bool = True
+    threshold: float | None = None
+
+
+class HomeConfig(BaseModel):
+    """The whole home-screen config, draft or published -- one JSON blob
+    (sema_core.home_config_store), not many independently-versioned items
+    like the semantic model. Every field defaults to the same values as
+    sema_core.home_config.DEFAULT_CONFIG, so a bare `{}` round-trips to
+    today's unconfigured behavior."""
+
+    kpis: HomeConfigKpis = Field(default_factory=HomeConfigKpis)
+    default_period_months: Literal[1, 3, 6, 12] = 1
+    daily_brief: HomeConfigDailyBrief = Field(default_factory=HomeConfigDailyBrief)
+    suggested_questions: HomeConfigSuggestedQuestions = Field(default_factory=HomeConfigSuggestedQuestions)
+    alerts: dict[str, HomeConfigAlertSetting] = Field(default_factory=dict)
+
+
+class HomeConfigResponse(BaseModel):
+    """GET/PUT/publish/revert's shared response shape."""
+
+    draft: HomeConfig | None = None
+    published: HomeConfig | None = None
+    version: int
+    published_by: str | None = None
+    published_at: str | None = None
+    updated_at: str
+    # Deprecated-metric warnings against the PUBLISHED config (spec item 13)
+    # -- drives the editor's warning badge. Empty when nothing was dropped.
+    warnings: list[str] = []
+
+
+class HomeConfigPublishError(BaseModel):
+    message: str
+    errors: list[str]
+
+
+class HomeConfigPreview(BaseModel):
+    """The live preview pane's payload (spec item 11): the SAME shapes the
+    real home dashboard consumes, computed from the DRAFT config (or
+    published, if there's no draft) and the admin's own data scope."""
+
+    overview: Overview
+    brief: DailyBriefResponse
+    alerts: list[Alert]
+    suggested_questions: list[str]
+    popular_questions: list[PopularQuestion]
+    warnings: list[str] = []
+
+
+class CurrencyInfo(BaseModel):
+    """One entry in the currency catalog (GET /api/admin/org-settings/currencies)
+    -- the single source of truth for the settings form's picker, mirroring
+    the role/data-scope catalog pattern."""
+
+    code: str
+    symbol: str
+    position: Literal["prefix", "suffix"]

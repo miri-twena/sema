@@ -2,6 +2,8 @@
 #
 # Database + data generation (this step):
 pandas==2.2.3          # data manipulation; builds the synthetic tables
+pytz                    # already a transitive dep of pandas; used directly now for
+                        # the org-settings IANA timezone list (sema_core.org_settings_store)
 numpy==1.26.4           # random number generation (with a fixed seed for reproducibility)
 faker==24.4.0            # realistic-looking fake names, emails, etc.
 psycopg2-binary==2.9.9   # PostgreSQL driver, used for bulk-loading via COPY

@@ -6,6 +6,13 @@ import type { AnalysisStep } from "./evidence";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+/** A server-relative path (e.g. PublicOrgSettings.logo_path, "/api/admin/
+ * org-settings/logo/ecommerce") -> a fully-qualified URL an <img> tag can
+ * load directly. Null in, null out. */
+export function resolveApiUrl(path: string | null): string | null {
+  return path ? `${BASE}${path}` : null;
+}
+
 export interface Message {
   role: "user" | "assistant";
   content: string;
@@ -96,6 +103,17 @@ export interface Notice {
   attempts?: number | null;
 }
 
+/** One advisor-grade recommendation (mirrors api/models.py RecommendedAction).
+ * `why`/`expected_impact`/`effort` are optional -- an off_topic nudge carries
+ * only `action` since it isn't data-derived. Server-cleaned/defaulted, so
+ * every field the server sends is already trustworthy. */
+export interface RecommendedAction {
+  action: string;
+  why?: string | null;
+  expected_impact?: string | null;
+  effort?: "low" | "medium" | "high" | null;
+}
+
 export interface ChatResponse {
   answer: string;
   /** 1-2 sentence executive takeaway rendered above the answer. A STRUCTURED
@@ -104,8 +122,11 @@ export interface ChatResponse {
    * still parse; absent/null means render no summary block. */
   summary?: string | null;
   /** How SEMA responded. Render by this, never by sniffing the prose.
-   * Optional so conversations persisted before this field still parse. */
-  mode?: "answer" | "clarification" | "cannot_answer" | "off_topic";
+   * Optional so conversations persisted before this field still parse.
+   * 'access_denied': the question touched a domain/metric outside the
+   * requester's data-access scope (sema_core.data_scope) -- policy, not an
+   * error, so it renders with the same quiet, non-alarming treatment. */
+  mode?: "answer" | "clarification" | "cannot_answer" | "off_topic" | "access_denied";
   reason_code?: string | null;
   /** mode="clarification": tappable choices that resolve the ambiguity. */
   clarification_options?: string[];
@@ -114,7 +135,10 @@ export interface ChatResponse {
   kpis: Kpi[];
   chart: Chart | null;
   table: DataTableModel | null;
-  actions: string[];
+  /** Structured advisor recommendations going forward. `string` stays in the
+   * union ONLY so a conversation persisted before this field existed (a
+   * plain string array) still renders when reopened. */
+  actions: (string | RecommendedAction)[];
   /** Short follow-up questions the agent can answer from the data (distinct
    * from `actions`). Source for the composer's one-tap suggestion. */
   follow_up_questions: string[];
@@ -200,6 +224,18 @@ export interface Client {
   suggested_questions: string[];
 }
 
+/** The subset of org settings every user needs (mirrors api/models.py
+ * PublicOrgSettings) -- sidebar name/logo + the shared display-formatting
+ * config. Never timezone/retention_policy, which are admin-only. */
+export interface PublicOrgSettings {
+  name: string;
+  logo_path: string | null;
+  currency: string;
+  currency_symbol: string;
+  currency_position: "prefix" | "suffix";
+  number_format: string;
+}
+
 export interface Health {
   status: string;
   db_connected: boolean;
@@ -269,6 +305,82 @@ export interface DailyBrief {
   insights: BriefInsight[];
 }
 
+// --- admin: home screen customization (spec §1) -----------------------------
+// Mirrors api/models.py's HomeConfig section. The KPI id catalog is the
+// small, fixed set this app already knows how to compute (see
+// sema_core.home_config's module docstring) -- not an arbitrary metric name.
+export type HomeConfigKpiId = "revenue" | "orders" | "aov" | "churn_risk";
+export type HomeSensitivity = "conservative" | "balanced" | "sensitive";
+
+export interface HomeConfigKpis {
+  order: HomeConfigKpiId[];
+  deltas: Partial<Record<HomeConfigKpiId, boolean>>;
+}
+
+export interface HomeConfigDailyBrief {
+  pulse_enabled: boolean;
+  insights_enabled: boolean;
+  sensitivity: HomeSensitivity;
+}
+
+export interface HomeConfigSuggestedQuestions {
+  /** Empty means "use this client's static suggested_questions from
+   * config/clients.yaml" -- publishing an empty list is a deliberate no-op. */
+  questions: string[];
+  trending_enabled: boolean;
+}
+
+export interface HomeConfigAlertSetting {
+  enabled: boolean;
+  threshold: number | null;
+}
+
+export interface HomeConfig {
+  kpis: HomeConfigKpis;
+  default_period_months: 1 | 3 | 6 | 12;
+  daily_brief: HomeConfigDailyBrief;
+  suggested_questions: HomeConfigSuggestedQuestions;
+  alerts: Record<string, HomeConfigAlertSetting>;
+}
+
+export interface HomeConfigResponse {
+  draft: HomeConfig | null;
+  published: HomeConfig | null;
+  version: number;
+  published_by: string | null;
+  published_at: string | null;
+  updated_at: string;
+  /** Deprecated-metric warnings against the PUBLISHED config (spec item 13) --
+   * drives the editor's warning badge. */
+  warnings: string[];
+}
+
+/** One POSSIBLE alert (mirrors api/models.py AlertCatalogItem) -- unlike
+ * Alert (today's triggered breaches), backs the editor's alert picker. */
+export interface AlertCatalogItem {
+  id: string;
+  label: string;
+  metric_label: string;
+  severity: "critical" | "warning";
+}
+
+export interface HomeConfigPreview {
+  overview: Overview;
+  brief: DailyBrief;
+  alerts: Alert[];
+  suggested_questions: string[];
+  popular_questions: PopularQuestion[];
+  warnings: string[];
+}
+
+export const DEFAULT_HOME_CONFIG: HomeConfig = {
+  kpis: { order: ["revenue", "orders", "aov", "churn_risk"], deltas: { revenue: true, orders: true, aov: true } },
+  default_period_months: 1,
+  daily_brief: { pulse_enabled: true, insights_enabled: true, sensitivity: "balanced" },
+  suggested_questions: { questions: [], trending_enabled: true },
+  alerts: {},
+};
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -300,9 +412,353 @@ function clientQuery(clientId: string, extra?: Record<string, string>): string {
   return new URLSearchParams({ client_id: clientId, ...extra }).toString();
 }
 
+// --- admin: users and permissions (spec §6.1) ------------------------------
+// The admin panel surfaces server-side error messages inline (duplicate email,
+// last-admin, bad email), which the generic helpers above discard. ApiError
+// carries the HTTP status plus the server's `detail` string so the UI can show
+// the specific message rather than a generic failure.
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function adminRequest<T>(
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T | null> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    // FastAPI puts the message under `detail` -- usually a string, but the
+    // semantic-model publish endpoint sends a structured
+    // {message, failures} object on a 409; fall back to the status text for
+    // anything else.
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+      else if (typeof data?.detail?.message === "string") detail = data.detail.message;
+    } catch {
+      // non-JSON error body -- keep the status-text fallback
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.status === 204 ? null : ((await res.json()) as T);
+}
+
+export type AdminRole = "client_admin" | "analyst" | "viewer";
+export type AdminStatus = "active" | "suspended" | "invited";
+/** Data-access scope (mirrors api/models.py AdminDataScope /
+ * sema_core.data_scope): WHICH semantic-layer domains/metrics a user's
+ * questions may touch -- a second axis alongside role. 'custom' is reserved
+ * for V2: the type allows it so the UI can render it disabled, but nothing
+ * may actually select it. */
+export type AdminDataScope = "full" | "no_financials" | "sales_only" | "custom";
+
+/** One org user in the admin panel (mirrors api/models.py AdminUser). `is_self`
+ * and `invite_expired` are server-derived flags, never stored. */
+export interface AdminUser {
+  id: string;
+  client_id: string;
+  name: string | null;
+  email: string;
+  title: string | null;
+  role: AdminRole;
+  status: AdminStatus;
+  invited_at: string | null;
+  invite_expires_at: string | null;
+  /** Null for founding members (never invited). */
+  invited_by: string | null;
+  /** Resolved inviter name -- null when `invited_by` is null (founding
+   * member) OR when it's set but the inviter no longer resolves (removed). */
+  invited_by_name: string | null;
+  /** Null until an invite is accepted -- there's no accept-invite flow yet
+   * (no real auth), so today this is only set by seed data. */
+  joined_at: string | null;
+  last_active_at: string | null;
+  created_at: string;
+  is_self: boolean;
+  invite_expired: boolean;
+  /** Always 'full' for a client_admin (enforced server-side). */
+  data_scope: AdminDataScope;
+}
+
+export interface AdminUserList {
+  users: AdminUser[];
+  member_count: number;
+  pending_count: number;
+}
+
+/** One entry in the role catalog (mirrors api/models.py RoleInfo) -- the
+ * single copy source for the role legend/tooltip; never hardcode this text
+ * in a component. */
+export interface RoleInfo {
+  id: AdminRole;
+  label: string;
+  description: string;
+}
+
+/** One entry in the data-scope catalog (mirrors api/models.py DataScopeInfo)
+ * -- the single copy source for the "Data access" column's legend and the
+ * scope editor; never hardcode this text in a component. `selectable` is
+ * false only for `custom` (V2). */
+export interface DataScopeInfo {
+  id: AdminDataScope;
+  label: string;
+  description: string;
+  included_domains: string[];
+  excluded_domains: string[];
+  selectable: boolean;
+}
+
+// --- admin: organization settings (spec §2) --------------------------------
+export type RetentionPolicy = "forever" | "90d" | "30d";
+
+/** The full editable settings row (mirrors api/models.py OrgSettings) --
+ * admin-only view; regular users get PublicOrgSettings instead. `conflict`
+ * is true when this response's write clobbered a change the caller hadn't
+ * seen yet (last-write-wins still applies the write; the UI toasts). */
+export interface OrgSettings {
+  client_id: string;
+  name: string;
+  logo_path: string | null;
+  timezone: string;
+  currency: string;
+  number_format: string;
+  default_language: "en" | "he";
+  retention_policy: RetentionPolicy;
+  updated_at: string;
+  conflict: boolean;
+}
+
+export interface OrgSettingsUpdatePatch {
+  name?: string;
+  timezone?: string;
+  currency?: string;
+  number_format?: string;
+  default_language?: "en" | "he";
+  retention_policy?: RetentionPolicy;
+  expected_updated_at?: string;
+}
+
+/** One entry in the currency catalog (mirrors api/models.py CurrencyInfo). */
+export interface CurrencyInfo {
+  code: string;
+  symbol: string;
+  position: "prefix" | "suffix";
+}
+
+export interface RetentionPreview {
+  policy: RetentionPolicy;
+  conversations_to_delete: number;
+}
+
+// --- admin: semantic model (Draft -> Validate -> Publish) ------------------
+// Mirrors api/models.py's semantic-model section. `is_draft`/`is_new` are
+// server-derived: an item overlaid with the caller's own in-progress draft.
+export type SemanticStatus = "certified" | "draft" | "deprecated";
+export type SemanticSection = "metric" | "rule" | "knowledge" | "glossary";
+export type SemanticFormat = "currency" | "number" | "percent" | "text";
+
+export interface SemanticMetricItem {
+  name: string;
+  label: string;
+  description: string;
+  sql: string;
+  status: SemanticStatus;
+  synonyms: string[];
+  format: SemanticFormat | null;
+  is_draft: boolean;
+  is_new: boolean;
+  validated: boolean;
+}
+
+export interface SemanticRuleItem {
+  name: string;
+  definition: string;
+  logic: string | null;
+  applies_to: string[];
+  status: SemanticStatus;
+  is_draft: boolean;
+  is_new: boolean;
+  validated: boolean;
+}
+
+export interface SemanticDateRange {
+  start: string | null;
+  end: string | null;
+}
+
+export interface SemanticKnowledgeItem {
+  name: string;
+  type: "recurring_event" | "incident" | "note";
+  date_range: SemanticDateRange | null;
+  recurrence: string | null;
+  description: string;
+  affects: string[];
+  is_draft: boolean;
+  is_new: boolean;
+  validated: boolean;
+}
+
+export interface SemanticGlossaryItem {
+  term: string;
+  maps_to: string;
+  language: string | null;
+  is_draft: boolean;
+  is_new: boolean;
+  validated: boolean;
+}
+
+export interface SemanticModelResponse {
+  published_version: number;
+  draft_count: number;
+  metrics: SemanticMetricItem[];
+  rules: SemanticRuleItem[];
+  knowledge: SemanticKnowledgeItem[];
+  glossary: SemanticGlossaryItem[];
+}
+
+export interface SemanticValidateResult {
+  ok: boolean;
+  value: unknown;
+  row_count: number | null;
+  duration_ms: number | null;
+  period_label: string | null;
+  message: string | null;
+  error: string | null;
+}
+
+export interface SemanticVersion {
+  id: string;
+  version: number;
+  changed_items: string[];
+  author: string | null;
+  created_at: string;
+}
+
+/** Loose payload shape for a draft's edited fields -- deliberately not typed
+ * per-section (metric vs rule vs knowledge vs glossary all differ); the
+ * server validates required fields per section. */
+export type SemanticDraftData = Record<string, unknown>;
+
+// --- schema (mirrors api/models.py SchemaResponse) -- backs the admin
+// panel's read-only Entities tab, which is derived entirely from this rather
+// than a hand-authored entities.yaml.
+export interface SchemaColumn {
+  name: string;
+  type: string;
+}
+
+export type DataSourceType = "postgres" | "priority" | "salesforce";
+
+export interface SchemaTable {
+  name: string;
+  columns: SchemaColumn[];
+  /** Which connector type this entity's rows come from (spec §4.4) -- shown
+   * as a badge in the Entities tab. */
+  source: DataSourceType;
+}
+
+export interface SchemaResponse {
+  client_id: string;
+  tables: SchemaTable[];
+  relationships: Record<string, unknown>[];
+}
+
+// --- admin: data sources (spec §4, view-only slice) -------------------------
+export interface DataSourceEntity {
+  name: string;
+  dependent_metrics: string[];
+}
+
+export type DataSourceStatus = "healthy" | "error" | "syncing" | "paused";
+
+/** One status card (mirrors api/models.py DataSource). Read-only: no
+ * credentials, no connection editing, no manual sync trigger. */
+export interface DataSource {
+  id: string;
+  type: DataSourceType;
+  display_name: string;
+  status: DataSourceStatus;
+  last_sync_at: string | null;
+  sync_duration_ms: number | null;
+  data_age_days: number | null;
+  primary_table: string | null;
+  primary_date_field: string | null;
+  entities: DataSourceEntity[];
+}
+
+export interface ReportProblemResponse {
+  reported: boolean;
+  source_id: string;
+  audit_event_id: string;
+}
+
+// --- admin: audit log (spec §3) ---------------------------------------------
+/** One append-only row (mirrors api/models.py AuditEvent). `action` is a
+ * canonical dotted id ("user.role_changed", "semantic.published", ...) --
+ * see lib/auditSentences.ts for how it becomes the table's human-readable
+ * sentence + category tag. `before`/`after` back the drawer's diff. */
+export interface AuditEvent {
+  id: string;
+  client_id: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  target_label: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AuditEventList {
+  events: AuditEvent[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AuditFilters {
+  actor?: string;
+  category?: string;
+  date_from?: string;
+  date_to?: string;
+  q?: string;
+  page?: number;
+}
+
+function auditQuery(filters: AuditFilters): string {
+  const params = new URLSearchParams();
+  if (filters.actor) params.set("actor", filters.actor);
+  if (filters.category) params.set("category", filters.category);
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page) params.set("page", String(filters.page));
+  return params.toString();
+}
+
 export const api = {
   health: () => getJSON<Health>("/api/health"),
   clients: () => getJSON<Client[]>("/api/clients"),
+  /** Public (non-admin) org settings: sidebar name/logo + shared display
+   * formatting -- every user fetches this, not just admins. */
+  orgSettings: (clientId: string) =>
+    getJSON<PublicOrgSettings>(`/api/org-settings?client_id=${encodeURIComponent(clientId)}`),
   alerts: (clientId: string) => getJSON<Alert[]>(`/api/alerts?client_id=${encodeURIComponent(clientId)}`),
   popularQuestions: (clientId: string) =>
     getJSON<PopularQuestion[]>(`/api/popular-questions?client_id=${encodeURIComponent(clientId)}`),
@@ -427,4 +883,148 @@ export const api = {
     getJSON<ThreadDetail>(
       `/api/conversations/${conversationId}/threads/${threadId}?${clientQuery(clientId)}`,
     ),
+
+  // Raw tables/columns/relationships. Backs the admin panel's Entities tab
+  // (read-only, derived from the schema rather than a hand-authored file).
+  // No client_id: the admin panel always acts on the mocked identity's own
+  // client, which is also the server's default.
+  schema: () => getJSON<SchemaResponse>("/api/schema"),
+
+  // --- admin: users and permissions ---
+  // No client_id param: the server derives the org from the current identity,
+  // so a client admin can only ever act on their own organization. Mutations
+  // throw ApiError (with status + detail) so the UI can show inline messages.
+  admin: {
+    me: () => getJSON<AdminUser>("/api/admin/me"),
+    users: (q?: string, role?: string) => {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (role) params.set("role", role);
+      const qs = params.toString();
+      return getJSON<AdminUserList>(`/api/admin/users${qs ? `?${qs}` : ""}`);
+    },
+    invite: (email: string, role: AdminRole, dataScope?: AdminDataScope) =>
+      adminRequest<AdminUser>("POST", "/api/admin/users/invite", {
+        email,
+        role,
+        data_scope: dataScope ?? null,
+      }) as Promise<AdminUser>,
+    updateUser: (
+      id: string,
+      patch: { role?: AdminRole; status?: AdminStatus; data_scope?: AdminDataScope },
+    ) => adminRequest<AdminUser>("PATCH", `/api/admin/users/${id}`, patch) as Promise<AdminUser>,
+    deleteUser: (id: string) => adminRequest<null>("DELETE", `/api/admin/users/${id}`),
+    resendInvite: (id: string) =>
+      adminRequest<AdminUser>("POST", `/api/admin/users/${id}/resend-invite`) as Promise<AdminUser>,
+    roles: () => getJSON<RoleInfo[]>("/api/admin/roles"),
+    dataScopes: () => getJSON<DataScopeInfo[]>("/api/admin/data-scopes"),
+
+    // --- admin: organization settings (spec §2) ---
+    orgSettings: {
+      get: () => getJSON<OrgSettings>("/api/admin/org-settings"),
+      update: (patch: OrgSettingsUpdatePatch) =>
+        adminRequest<OrgSettings>("PATCH", "/api/admin/org-settings", patch) as Promise<OrgSettings>,
+      currencies: () => getJSON<CurrencyInfo[]>("/api/admin/org-settings/currencies"),
+      timezones: () => getJSON<string[]>("/api/admin/org-settings/timezones"),
+      retentionPreview: (policy: RetentionPolicy) =>
+        getJSON<RetentionPreview>(`/api/admin/org-settings/retention-preview?policy=${policy}`),
+      /** Multipart upload -- deliberately bypasses adminRequest, which always
+       * sets Content-Type: application/json (wrong for FormData; the browser
+       * must set its own multipart boundary). */
+      uploadLogo: async (file: File): Promise<OrgSettings> => {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(`${BASE}/api/admin/org-settings/logo`, { method: "POST", body: form });
+        if (!res.ok) {
+          let detail = `${res.status} ${res.statusText}`;
+          try {
+            const data = await res.json();
+            if (typeof data?.detail === "string") detail = data.detail;
+          } catch {
+            // non-JSON error body -- keep the status-text fallback
+          }
+          throw new ApiError(res.status, detail);
+        }
+        return (await res.json()) as OrgSettings;
+      },
+    },
+
+    // --- admin: semantic model (Draft -> Validate -> Publish) ---
+    // No client_id here either -- same "identity implies scope" contract.
+    semantic: {
+      get: () => getJSON<SemanticModelResponse>("/api/admin/semantic"),
+      saveDraft: (
+        section: SemanticSection,
+        itemKey: string,
+        data: SemanticDraftData,
+        action: "edit" | "create" | "deprecate" = "edit",
+      ) =>
+        adminRequest<SemanticModelResponse>(
+          "PUT",
+          `/api/admin/semantic/${section}/${encodeURIComponent(itemKey)}`,
+          { data, action },
+        ) as Promise<SemanticModelResponse>,
+      discard: (section: SemanticSection, itemKey: string) =>
+        adminRequest<SemanticModelResponse>(
+          "DELETE",
+          `/api/admin/semantic/${section}/${encodeURIComponent(itemKey)}`,
+        ) as Promise<SemanticModelResponse>,
+      validate: (section: SemanticSection, itemKey: string) =>
+        adminRequest<SemanticValidateResult>("POST", "/api/admin/semantic/validate", {
+          section,
+          item_key: itemKey,
+        }) as Promise<SemanticValidateResult>,
+      publish: (items: Array<{ section: SemanticSection; item_key: string }>) =>
+        adminRequest<SemanticModelResponse>("POST", "/api/admin/semantic/publish", { items }) as Promise<SemanticModelResponse>,
+      versions: () => getJSON<SemanticVersion[]>("/api/admin/semantic/versions"),
+      restore: (versionId: string) =>
+        adminRequest<SemanticVersion>(
+          "POST",
+          `/api/admin/semantic/versions/${versionId}/restore`,
+        ) as Promise<SemanticVersion>,
+    },
+
+    // --- admin: audit log (spec §3) ---
+    audit: {
+      list: (filters: AuditFilters) => {
+        const qs = auditQuery(filters);
+        return getJSON<AuditEventList>(`/api/admin/audit${qs ? `?${qs}` : ""}`);
+      },
+      /** No fetch here -- the export is a plain GET the browser downloads
+       * directly (there's no per-request auth header to carry, see
+       * adminRequest's callers), so the caller just navigates an anchor to
+       * this URL. */
+      exportUrl: (filters: AuditFilters) => {
+        const qs = auditQuery(filters);
+        return `${BASE}/api/admin/audit/export${qs ? `?${qs}` : ""}`;
+      },
+    },
+
+    // --- admin: home screen customization (spec §1) ---
+    homeConfig: {
+      get: () => getJSON<HomeConfigResponse>("/api/admin/home-config"),
+      saveDraft: (config: HomeConfig) =>
+        adminRequest<HomeConfigResponse>("PUT", "/api/admin/home-config", config) as Promise<HomeConfigResponse>,
+      publish: () =>
+        adminRequest<HomeConfigResponse>("POST", "/api/admin/home-config/publish") as Promise<HomeConfigResponse>,
+      revert: () =>
+        adminRequest<HomeConfigResponse>("POST", "/api/admin/home-config/revert") as Promise<HomeConfigResponse>,
+      /** POSTs the CURRENT in-memory draft (not the last-saved one) so the
+       * preview never races the separate autosave debounce -- see the
+       * route's own docstring. */
+      preview: (config: HomeConfig) =>
+        postJSON<HomeConfigPreview>("/api/admin/home-config/preview", config),
+    },
+    alertsCatalog: () => getJSON<AlertCatalogItem[]>("/api/admin/alerts-catalog"),
+
+    // --- admin: data sources (spec §4) ---
+    dataSources: {
+      list: () => getJSON<DataSource[]>("/api/admin/data-sources"),
+      reportProblem: (sourceId: string) =>
+        adminRequest<ReportProblemResponse>(
+          "POST",
+          `/api/admin/data-sources/${encodeURIComponent(sourceId)}/report-problem`,
+        ) as Promise<ReportProblemResponse>,
+    },
+  },
 };

@@ -109,9 +109,28 @@ def main() -> None:
         fix_sequence(conn, "order_items", "order_item_id")
         fix_sequence(conn, "website_sessions", "session_id")
 
+        seed_org_users()
+
         print("Done.")
     finally:
         conn.close()
+
+
+def seed_org_users() -> None:
+    """Seed the admin panel's org-users roster into the SQLite metadata store
+    (var/sema_state.db) -- NOT Postgres. Idempotent: a no-op once the client
+    already has users, so re-running the loader never duplicates them. Kept in
+    the loader so the demo roster comes up with the rest of the seed data via
+    the one command developers already run."""
+    from sema_core.org_user_store import OrgUserStore
+    from sema_core.settings import settings
+
+    store = OrgUserStore(settings.conversation_db_path)
+    inserted = store.seed_demo_users("ecommerce")
+    if inserted:
+        print(f"Seeded {inserted} org users for client 'ecommerce'.")
+    else:
+        print("Org users already seeded; skipping.")
 
 
 if __name__ == "__main__":
