@@ -26,12 +26,13 @@ Implements `SEMA-Client-Screens-Spec.pdf` (v1.1) — the four remaining nav item
 12. Status chip ("טיוטה · לא פורסם" / "פורסם לפני שעה"), Publish + Revert buttons. Graceful degradation: if the two-layer brief (`daily_brief_prompt.md`) isn't implemented yet, hide the sensitivity control and keep layer toggles working against the current brief.
 13. Per-user scope filtering at render time (server-side): a user whose data scope blocks finance never receives finance KPIs/cards regardless of config. Deprecated/deleted metric: auto-dropped from render, warning badge in the editor.
 
-## Phase 4 — Data sources, view-only slice (spec §4)
+## Phase 4 — Data sources: status cards + add-source request flow (spec §4, v1.5)
 
 14. Source registry: config-level list per client (`postgres` for both demo tenants; the schema supports `priority`/`salesforce` types for later). Table/config exposes: type, display name, status, last_sync_at, sync_duration, primary date field. For the live Postgres source, health = the existing daily check + data age (`MAX(order_date)` style query per tenant).
 15. Add `source` to semantic entities (default `postgres`, loader backward-compatible); map source→entities→dependent metrics server-side.
 16. `GET /api/admin/data-sources` — cards payload incl. mapped entities + dependent metrics. `POST /api/admin/data-sources/{id}/report-problem` — creates an audit event + logs a platform notification (no email).
-17. UI: status cards per spec — type logo/icon, status pill, last sync, data age, mapped-entities expander showing "revenue, aov ← Postgres" chains; error state banner + "Report a problem" (confirm, includes source details automatically). Read-only: no credentials, no editing, fingerprint only if present. Explicitly OUT OF SCOPE: Priority/Salesforce ETL connectors — schema-ready only.
+17. UI: status cards per spec — type logo/icon, status pill, last sync, data age, mapped-entities expander showing "revenue, aov ← Postgres" chains; error state banner + "Report a problem" (confirm, includes source details automatically). No credentials shown or edited anywhere, fingerprint only if present. Explicitly OUT OF SCOPE: Priority/Salesforce ETL connectors — schema-ready only.
+17a. NOTE (added after this phase was completed): the "Add data source" gallery, DB credentials wizard, and request flows are specced in §4.4 v1.6 and implemented via the separate `data_sources_add_prompt.md` — not part of this phase.
 18. Evidence integration (small): agent evidence panel shows source + freshness for the queried entities; if the source's last sync failed/stale, append the caveat ("נתוני X עודכנו לאחרונה לפני N ימים") — computed server-side like the incident caveat.
 
 ## Constraints

@@ -128,6 +128,35 @@ Persona and tone rules for SEMA's system prompt (`sema_core/agent/prompts.py`
 `SYSTEM_PROMPT`) — read this before touching that file's persona block, the
 off-topic policy, or the `recommended_actions` guidance.
 
+- **SEMA is feminine in Hebrew — everywhere.** All Hebrew copy (UI labels,
+  agent answers, error messages, emails, specs) refers to SEMA in the
+  feminine: "SEMA מזהה", "SEMA ממליצה", "היועצת" — never "היועץ" /
+  "SEMA מזהה" in masculine forms. The product tagline is the English
+  phrase "AI Business Advisor" (kept in English even in Hebrew UI).
+  When touching existing Hebrew copy, fix masculine references to SEMA
+  on sight.
+- **The UI is English, always (MVP decision, July 2026).** Default and
+  seeded org language is English for every client. If an org explicitly
+  opts into Hebrew, EXACTLY two strings change: the chat input ghost
+  placeholder and the "New conversation" label — nothing else. Sidebar,
+  navigation, admin panel, buttons, labels stay English. Full i18n is
+  out of MVP scope.
+- **Layout is anchored — the sidebar is ALWAYS on the left.** Never set
+  `dir="rtl"` on the app shell/body, never mirror the layout. Agent
+  answers carry their own direction (`dir="auto"` per message) — Hebrew
+  answers rendering RTL inside the English chrome is correct behavior.
+  RTL-safe means text renders correctly, not that the chrome flips.
+
+- **Org language vs. answer language — never conflate the two.** The
+  org-settings `default_language` (spec v1.2 §2.1) governs the UI CHROME
+  ONLY — navigation, buttons, labels, admin panel, empty states, system
+  copy. It has zero influence on the agent: the agent ALWAYS answers in
+  the language of the question, regardless of the org's configured
+  language. A Hebrew question gets a Hebrew answer even in an
+  English-configured org, and vice versa — this is correct, expected
+  behavior (a mixed-language screen), not a bug, and no org-language
+  instruction should ever be added to the system prompt.
+
 - **Persona:** a senior e-commerce business advisor with 15+ years of
   hands-on experience — direct and opinionated, says what it would actually
   DO rather than hedging ("you could consider"). Confidence shows up as

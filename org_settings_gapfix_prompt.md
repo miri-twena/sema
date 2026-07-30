@@ -11,17 +11,21 @@ Today `sema_core/retention.py` works but is only reachable via `python -m sema_c
 3. **Auditability.** Each sweep that deletes anything writes an audit event (`org.retention_swept`, actor = system/service actor — extend `log_admin_event` with a system-actor path rather than faking a user). Zero-deletion runs are logged to the app log only, not the audit table.
 4. **Visible in the UI.** Under the retention selector in `OrgSettingsScreen.tsx`, show a muted status line built from `retention_runs`: "ניקוי אחרון: לפני 6 שעות · 12 שיחות נמחקו" / "Last cleanup: 6 hours ago · 12 conversations deleted". If retention is set to "forever": "ניקוי אוטומטי כבוי". If a run errored, show it in warning tone with the error summary. Expose via the existing org-settings GET payload (no new endpoint needed) or a tiny `GET /api/admin/org-settings/retention-status` — pick whichever fits the existing shape.
 
-## Part 2 — Organization language is actually applied (UI only; answers always follow the question)
+## Part 2 — Organization language is actually applied (MINIMAL scope; answers always follow the question)
 
-Per spec v1.2 §2.1, the MVP decision is a SINGLE org-wide language for all users — the personal-settings screen is not specified yet, so do NOT build a per-user preference.
+Per spec v1.8 §2.1 (product decision, July 2026), the org language's effect on the UI is DELIBERATELY MINIMAL:
 
-**Scope boundary — read carefully.** The org language setting governs the INTERFACE ONLY: navigation, buttons, labels, admin panel, empty states, system copy. It does NOT govern the agent's answer language. The existing rule — **the agent always answers in the language of the question** — is absolute and must not be weakened by this task. A Hebrew question gets a Hebrew answer even in an English-configured org, and vice versa. Do not add any org-language instruction to the agent prompts.
+**What changes when org language = Hebrew — exactly two things:**
+   - The chat input ghost placeholder ("...Ask about revenue, customers, campaigns" → "...שאלי על הכנסות, לקוחות, קמפיינים" — feminine per AGENTS.md? No: address the USER neutrally — use "אפשר לשאול על הכנסות, לקוחות, קמפיינים").
+   - The "New conversation" label → "שיחה חדשה".
 
-5. `default_language` is currently excluded from `PublicOrgSettings` (`api/models.py`). Include it (rename to `language` in the public payload if clearer) so the app can read it.
-6. Frontend consumes it at app init alongside the existing `configureFormatting()` call in `App.tsx`: it sets the UI language and `dir` for chrome. Precedence: org setting → system/browser default. No user-level override, no localStorage override — one source of truth for the UI.
-7. Answer-language behavior stays exactly as it is today (mirror the question). Add one line to `AGENTS.md` under Agent Voice stating the split explicitly — org setting = UI chrome; answer language = always the question's language — so this isn't re-litigated later.
-8. Mixed-language reality is expected and fine: an English UI showing a Hebrew answer (or the reverse) is correct behavior, not a bug. Make sure answer containers set `dir="auto"` (or equivalent per-message direction) so a Hebrew answer inside an English-chrome app still renders RTL correctly — verify this in both directions.
-9. Changing the language in the admin screen takes effect for other users on their next load (no live push needed); the editing admin's own UI updates immediately.
+**What NEVER changes:** everything else. The sidebar (all other strings), navigation, admin panel, buttons, labels, empty states — remain in English regardless of org language. The layout is anchored — sidebar always LEFT, no `dir="rtl"` on the app shell, no mirroring. Full UI translation is a future i18n pass, out of scope.
+
+5. `default_language` is currently excluded from `PublicOrgSettings` (`api/models.py`). Include it (rename to `language` in the public payload if clearer) so the app can read it. **MVP default = English, always: seed/reset the stored value to English for ALL clients (including both demo tenants), and the setting's default for new orgs is English.** Hebrew is opt-in per org via the admin screen.
+6. Frontend consumes it at app init alongside the existing `configureFormatting()` call: applies ONLY the two strings above, and only when the org explicitly set Hebrew. Precedence: org setting → English. No user-level override, no localStorage override, no browser-language detection in the app.
+7. Answer-language behavior stays exactly as it is today (the agent always answers in the language of the QUESTION — absolute rule, do not add any org-language instruction to the agent prompts). Update the `AGENTS.md` Agent Voice note to state the final split: org language = the two UI strings above; answer language = always the question's language.
+8. Mixed-language reality is expected: English chrome with Hebrew answers is correct behavior. Answer containers keep per-message `dir="auto"` so Hebrew answers render RTL inside the English chrome — verify both directions.
+9. Changing the language in the admin screen takes effect for other users on next load; the editing admin's own UI updates immediately.
 
 ## Part 3 — Audit semantic draft saves
 
