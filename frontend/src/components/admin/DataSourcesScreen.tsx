@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, Database, Flag, Plus, RefreshCw, Upload } from "lucide-react";
 import { api, ApiError, type DataSource, type DataSourceStatus } from "../../lib/api";
 import { timeAgo } from "../../lib/time";
-import { useUiLang } from "../../lib/useUiLang";
-import { DATA_SOURCE_GALLERY } from "../../lib/placeholderCopy";
 import { AddDataSourceModal } from "./AddDataSourceModal";
 import { useToast } from "./toast-context";
 
@@ -275,7 +273,6 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
   const [error, setError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
-  const lang = useUiLang();
 
   useEffect(() => {
     let cancelled = false;
@@ -308,7 +305,7 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
             onClick={() => setGalleryOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[0.82rem] font-medium text-white hover:bg-primary/90 transition"
           >
-            <Plus size={14} /> {DATA_SOURCE_GALLERY[lang].addButton}
+            <Plus size={14} /> Add data source
           </button>
           <button
             onClick={() => setReloadKey((k) => k + 1)}

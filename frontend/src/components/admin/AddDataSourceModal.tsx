@@ -1,17 +1,15 @@
 import { useEffect, useState } from "react";
 import {
-  BarChart3,
   Database,
   FileSpreadsheet,
-  Megaphone,
-  ShoppingBag,
+  FolderOpen,
+  HardDrive,
   Sheet,
   Upload,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { useDismiss } from "../../hooks/useDismiss";
-import { useUiLang } from "../../lib/useUiLang";
 import { DATA_SOURCE_GALLERY } from "../../lib/placeholderCopy";
 import { api, type ConnectorCatalogItem } from "../../lib/api";
 import { useToast } from "./toast-context";
@@ -26,11 +24,11 @@ const ICONS: Record<string, LucideIcon> = {
   mssql: Database,
   priority: FileSpreadsheet,
   salesforce: FileSpreadsheet,
+  sap_b1: FileSpreadsheet,
   google_sheets: Sheet,
   csv: Upload,
-  shopify: ShoppingBag,
-  google_analytics: BarChart3,
-  meta_ads: Megaphone,
+  google_drive: HardDrive,
+  sharepoint: FolderOpen,
 };
 
 type Group = "sql" | "business" | "easy" | "soon";
@@ -66,8 +64,10 @@ export function AddDataSourceModal({
    * the caller can refresh the Data sources list. */
   onChanged: () => void;
 }) {
-  const lang = useUiLang();
-  const t = DATA_SOURCE_GALLERY[lang];
+  // Per AGENTS.md's "UI is English, always" decision this gallery always
+  // renders English copy (data_sources_cleanup_prompt.md item 9) -- not
+  // driven by useUiLang like the rest of the org-language-aware admin panel.
+  const t = DATA_SOURCE_GALLERY.en;
   const ref = useDismiss<HTMLDivElement>(true, onClose);
   const toast = useToast();
   const [catalog, setCatalog] = useState<ConnectorCatalogItem[] | null>(null);
@@ -87,10 +87,13 @@ export function AddDataSourceModal({
       toast(t.toast);
       return;
     }
-    if (c.kind === "sql_db") setFlow({ kind: "sql_db", connectorType: c.id as "postgres" | "mysql" | "mssql" });
-    else if (c.kind === "saas_request") setFlow({ kind: "saas_request", connectorType: c.id, label: c.label });
-    else if (c.id === "google_sheets") setFlow({ kind: "sheets" });
-    else if (c.id === "csv") setFlow({ kind: "csv" });
+    if (c.kind === "sql_db") return setFlow({ kind: "sql_db", connectorType: c.id as "postgres" | "mysql" | "mssql" });
+    if (c.kind === "saas_request") return setFlow({ kind: "saas_request", connectorType: c.id, label: c.label });
+    if (c.id === "google_sheets") return setFlow({ kind: "sheets" });
+    if (c.id === "csv") return setFlow({ kind: "csv" });
+    // A real, grouped-as-available card whose flow isn't built yet (e.g.
+    // Google Drive) -- same placeholder toast a not-yet-available card gets.
+    toast(t.toast);
   };
 
   const closeFlowAndRefresh = () => {
@@ -181,9 +184,7 @@ export function AddDataSourceModal({
                                 </span>
                               )}
                             </span>
-                            <span className="block text-[0.72rem] text-muted leading-snug">
-                              {c.unlocks[lang] ?? c.unlocks.en}
-                            </span>
+                            <span className="block text-[0.72rem] text-muted leading-snug">{c.unlocks.en}</span>
                           </span>
                         </button>
                       );
