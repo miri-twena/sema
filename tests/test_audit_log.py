@@ -202,6 +202,57 @@ def test_semantic_publish_and_restore_are_audited(monkeypatch, tmp_path):
     assert "semantic.restored" in actions
 
 
+def test_semantic_draft_save_discard_and_archive_are_each_audited_once(monkeypatch, tmp_path):
+    """org_settings_gapfix_prompt.md Part 3: draft save/discard/archive each
+    get exactly one audit event (previously only publish/restore were
+    wired)."""
+    import shutil
+
+    import sema_core.agent.semantic as semantic
+    import sema_core.semantic_editor as semantic_editor
+    from sema_core.client_registry import PROJECT_ROOT
+
+    fake_dir = tmp_path / "semantic"
+    shutil.copytree(PROJECT_ROOT / "sql" / "semantic", fake_dir)
+    monkeypatch.setattr(semantic, "semantic_dir", lambda client_id=None: fake_dir)
+    monkeypatch.setattr(semantic_editor, "semantic_dir", lambda client_id=None: fake_dir)
+    monkeypatch.setattr(main, "semantic_dir", lambda client_id=None: fake_dir)
+
+    client = _client_as_miri(monkeypatch)
+    aov = next(m for m in client.get("/api/admin/semantic").json()["metrics"] if m["name"] == "aov")
+
+    # Save a draft edit -> exactly one semantic.draft_saved event.
+    client.put(
+        "/api/admin/semantic/metric/aov",
+        json={"data": {"description": "Draft edit for the audit test.", "sql": aov["sql"]}},
+    )
+    events = main.audit_store.list_events(CID, category="semantic", page_size=100)["events"]
+    saved = [e for e in events if e["action"] == "semantic.draft_saved"]
+    assert len(saved) == 1
+    assert saved[0]["target_id"] == "aov"
+    assert saved[0]["after"]["description"] == "Draft edit for the audit test."
+    # No prior draft existed yet, so there's nothing to diff against --
+    # the FULL submitted data is the "after" (see _diff_fields's None-either-
+    # side case). A second save on top of an existing draft would instead
+    # be limited to just the fields that changed between the two drafts.
+    assert saved[0]["before"] == {}
+
+    # Discard that same draft -> exactly one semantic.draft_discarded event.
+    client.delete("/api/admin/semantic/metric/aov")
+    events = main.audit_store.list_events(CID, category="semantic", page_size=100)["events"]
+    discarded = [e for e in events if e["action"] == "semantic.draft_discarded"]
+    assert len(discarded) == 1
+    assert discarded[0]["target_id"] == "aov"
+
+    # No draft exists now (just discarded) -> DELETE archives the published
+    # item instead, producing exactly one semantic.draft_archived event.
+    client.delete("/api/admin/semantic/metric/aov")
+    events = main.audit_store.list_events(CID, category="semantic", page_size=100)["events"]
+    archived = [e for e in events if e["action"] == "semantic.draft_archived"]
+    assert len(archived) == 1
+    assert archived[0]["target_id"] == "aov"
+
+
 def test_org_settings_and_logo_updates_are_audited(monkeypatch):
     client = _client_as_miri(monkeypatch)
     client.get("/api/admin/org-settings")

@@ -55,6 +55,19 @@ class ChatRequest(BaseModel):
     turn_index: int | None = None
 
 
+class FeedbackRequest(BaseModel):
+    """POST /api/feedback body. `rating: null` clears an existing rating
+    (sema_core.feedback_store.clear) -- `comment` is ignored in that case.
+    `turn_index` is the same 0-based "which user question" index ChatRequest
+    already uses for thread anchoring, NOT a raw message-row id."""
+
+    conversation_id: str
+    turn_index: int = Field(ge=0)
+    rating: Literal["up", "down"] | None
+    comment: str | None = Field(default=None, max_length=500)
+    client_id: str | None = None
+
+
 class Kpi(BaseModel):
     label: str
     value: Any  # number or string
@@ -213,15 +226,28 @@ class ConversationSummary(BaseModel):
     message_count: int = 0
 
 
+class TurnFeedback(BaseModel):
+    """A user's thumbs up/down on one answer, plus an optional follow-up
+    comment (only ever collected on a thumbs-down) -- see
+    sema_core.feedback_store. Never present on user-role messages."""
+
+    rating: Literal["up", "down"]
+    comment: str | None = None
+
+
 class ConversationMessage(BaseModel):
     """One stored turn. `payload` carries the assistant turn's rendered answer
     (a ChatResponse as JSON) so reopening a chat restores its KPI cards and
     charts rather than degrading to plain text. None for user turns and for
-    turns recorded before payloads were stored."""
+    turns recorded before payloads were stored. `feedback` is populated only
+    on ConversationDetail's messages (a real, persisted conversation) -- never
+    on ThreadDetail's, since drill/thread turns are out of scope for feedback
+    (answer_feedback_prompt.md item 5)."""
 
     role: Literal["user", "assistant"]
     content: str
     payload: ChatResponse | None = None
+    feedback: TurnFeedback | None = None
 
 
 class ConversationDetail(BaseModel):
@@ -366,6 +392,87 @@ class AlertCatalogItem(BaseModel):
     severity: Literal["critical", "warning"]
 
 
+# --- alert_templates_prompt.md: template-based alert builder ---------------
+class AlertTemplateParam(BaseModel):
+    """One template's declared param keys -- purely descriptive (drives the
+    builder's param form); the actual validation happens server-side in
+    sema_core.alert_templates.validate_params."""
+
+    key: str
+
+
+class AlertTemplateCatalogItem(BaseModel):
+    template: Literal["pct_change", "absolute_threshold", "anomaly", "streak"]
+    label: str
+    label_he: str
+    description: str
+    description_he: str
+    params: list[str]
+
+
+class AlertMetricCatalogItem(BaseModel):
+    """One of the fixed KPI_CATALOG metrics this builder may target --
+    mirrors home_config's own KPI picker, not an open certified-metric pick
+    (see sema_core.alert_templates' module docstring)."""
+
+    metric: str
+    label: str
+
+
+class AlertTestRequest(BaseModel):
+    metric: str
+    template: Literal["pct_change", "absolute_threshold", "anomaly", "streak"]
+    params: dict
+
+
+class AlertTestResult(BaseModel):
+    ok: bool
+    fire_count: int = 0
+    fire_dates: list[str] = []
+    error: str | None = None
+
+
+class CreateAlertRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    metric: str
+    template: Literal["pct_change", "absolute_threshold", "anomaly", "streak"]
+    params: dict
+    severity: Literal["critical", "warning"] = "warning"
+
+
+class UpdateAlertRequest(BaseModel):
+    """Every field optional -- a PATCH may just toggle `enabled`, or may
+    rewrite the whole rule (metric/template/params), which re-runs the
+    dry-run test server-side before saving (spec item 4)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    metric: str | None = None
+    template: Literal["pct_change", "absolute_threshold", "anomaly", "streak"] | None = None
+    params: dict | None = None
+    severity: Literal["critical", "warning"] | None = None
+    enabled: bool | None = None
+
+
+class AlertRuleInfo(BaseModel):
+    """One row of the unified admin alert list -- org-owned (editable) or
+    system/YAML-owned (view-only, `system=True`, no edit/delete)."""
+
+    id: str
+    name: str
+    metric: str
+    metric_label: str
+    template: str
+    params: dict
+    severity: Literal["critical", "warning"]
+    enabled: bool
+    system: bool
+    disabled_reason: str | None = None
+    summary_en: str
+    summary_he: str
+    created_by: str | None = None
+    updated_at: str
+
+
 class Client(BaseModel):
     id: str
     label: str
@@ -407,15 +514,16 @@ class DataSourceEntity(BaseModel):
 
 
 class DataSource(BaseModel):
-    """A status card in the client panel's Data sources screen (spec §4.3),
-    view-only: no credentials, no connection editing, no manual sync
-    trigger -- all platform-level. `status` mirrors the spec's enum; only
-    "postgres" is a live, implemented connector today, so "syncing"/"paused"
-    are schema-ready for a future ETL connector rather than reachable states
-    for the demo tenants."""
+    """A status card in the client panel's Data sources screen (spec §4.3 +
+    §4.4 v1.6's add-flows). `status` mirrors the spec's enum. `origin` says
+    which store this card came from -- one unified list/shape either way, no
+    parallel UI path: "config" is the original Phase 4 static YAML source,
+    "connection" is a self-service SQL DB wizard connection, "request" is a
+    tracked SaaS/Sheets request awaiting platform setup, "upload" is a CSV/
+    Excel-backed table. Never a credential/password field, at any origin."""
 
     id: str
-    type: Literal["postgres", "priority", "salesforce"]
+    type: str
     display_name: str
     status: Literal["healthy", "error", "syncing", "paused"]
     last_sync_at: str | None = None
@@ -424,6 +532,11 @@ class DataSource(BaseModel):
     primary_table: str | None = None
     primary_date_field: str | None = None
     entities: list[DataSourceEntity] = []
+    origin: Literal["config", "connection", "request", "upload"] = "config"
+    # Only set for origin="request" -- the "being set up" progress rail.
+    progress_step: Literal["requested", "configuring", "testing", "active", "rejected"] | None = None
+    # Display-safe credential hint ("last 4 of a hash") -- origin="connection" only.
+    fingerprint: str | None = None
 
 
 class ReportProblemResponse(BaseModel):
@@ -433,6 +546,125 @@ class ReportProblemResponse(BaseModel):
     reported: bool
     source_id: str
     audit_event_id: str
+
+
+# --- data sources: add-flow (data_sources_add_prompt.md) --------------------
+
+class ConnectorCatalogItem(BaseModel):
+    """One entry in the server-driven 'add a data source' gallery -- the
+    frontend renders whatever this returns rather than hardcoding connector
+    metadata (spec §4.4 v1.6 item 1)."""
+
+    id: str
+    kind: Literal["sql_db", "saas_request", "light"]
+    label: str
+    unlocks: dict[str, str]
+    availability: Literal["available", "coming_soon", "driver_pending"]
+
+
+class TestConnectionRequest(BaseModel):
+    connector_type: Literal["postgres", "mysql", "mssql"]
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    ssl_enabled: bool = False
+
+
+class TestConnectionResponse(BaseModel):
+    """Never persists anything -- credentials are stored only after this
+    reports ok=True (item 4: 'never store the credentials before a passed
+    test'). `error` is always a scrubbed, generic message."""
+
+    ok: bool
+    tables: list[str] = []
+    write_access: bool | None = None
+    error: str | None = None
+    readonly_user_sql: str | None = None
+
+
+class CreateConnectionRequest(BaseModel):
+    connector_type: Literal["postgres", "mysql", "mssql"]
+    display_name: str
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    ssl_enabled: bool = False
+    primary_table: str | None = None
+    primary_date_field: str | None = None
+    # Required true when the test reported write_access=True -- the
+    # explicit acknowledgment checkbox item 4 requires before continuing.
+    write_access_acknowledged: bool = False
+
+
+class ClientConnectionInfo(BaseModel):
+    """A stored self-service connection -- deliberately has NO password or
+    encrypted_password field; `fingerprint` is the only credential-adjacent
+    value ever returned."""
+
+    id: str
+    connector_type: str
+    display_name: str
+    host: str
+    port: int
+    database_name: str
+    username: str
+    ssl_enabled: bool
+    fingerprint: str
+    primary_table: str | None = None
+    primary_date_field: str | None = None
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class SourceRequestCreate(BaseModel):
+    connector_type: str
+    details: dict[str, str]
+
+
+class SourceRequestInfo(BaseModel):
+    id: str
+    connector_type: str
+    details: dict
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class InterestRequest(BaseModel):
+    connector_type: str
+
+
+class InterestResponse(BaseModel):
+    recorded: bool
+    connector_type: str
+
+
+class UploadColumnPlan(BaseModel):
+    source_name: str
+    column_name: str
+    sql_type: str
+
+
+class UploadInfo(BaseModel):
+    id: str
+    table_name: str
+    original_filename: str
+    columns: list[UploadColumnPlan]
+    row_count: int
+
+
+class SheetsInfo(BaseModel):
+    """Whether the Google Sheets connector's service account is configured
+    (SEMA_GSHEETS_SA_EMAIL) -- when it isn't, the flow still works, it just
+    lands the source in a tracked 'setting up' state instead of validating
+    access immediately (spec's own documented graceful-degradation path)."""
+
+    sa_email: str | None = None
 
 
 class PopularQuestion(BaseModel):
@@ -686,6 +918,14 @@ class OrgSettings(BaseModel):
     # caller hadn't seen yet (their `expected_updated_at` didn't match) --
     # the write still applied (last-write-wins); the UI shows a toast.
     conflict: bool = False
+    # The retention sweep's last run for this client (sema_core.retention_
+    # store), embedded here rather than a separate endpoint -- backs the "Last
+    # cleanup: 6 hours ago · 12 conversations deleted" status line. All null
+    # when the sweep has never run yet for this client (fresh install).
+    last_retention_run_at: str | None = None
+    last_retention_deleted_count: int | None = None
+    last_retention_status: Literal["ok", "error"] | None = None
+    last_retention_error: str | None = None
 
 
 class OrgSettingsUpdate(BaseModel):
@@ -715,7 +955,13 @@ class PublicOrgSettings(BaseModel):
     """The subset of org settings every user (not just admins) needs: the
     sidebar's name/logo and the shared display-formatting config (currency/
     number_format) that drives KPI/table/chart rendering app-wide. Never
-    includes timezone/retention_policy -- those are admin-only concerns."""
+    includes timezone/retention_policy -- those are admin-only concerns.
+
+    `language` governs the UI CHROME ONLY (nav, buttons, labels, empty
+    states) -- it never governs the agent's answer language, which always
+    mirrors the question's own language regardless of this setting
+    (org_settings_gapfix_prompt.md Part 2; see AGENTS.md's Agent Voice
+    section for the explicit split)."""
 
     name: str
     logo_path: str | None = None
@@ -723,6 +969,7 @@ class PublicOrgSettings(BaseModel):
     currency_symbol: str
     currency_position: Literal["prefix", "suffix"]
     number_format: str
+    language: Literal["en", "he"]
 
 
 # --- admin: audit log (spec §3) ---------------------------------------------

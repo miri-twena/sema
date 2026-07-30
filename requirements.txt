@@ -17,3 +17,16 @@ plotly==5.24.1           # interactive charts
 pyyaml==6.0.2            # loads the semantic layer (sql/semantic/*.yaml)
 sqlglot==25.24.0         # parses/validates agent SQL (SELECT-only, auto-limit)
 anthropic==0.109.1       # Claude API client (the agent's LLM)
+
+# Data sources add-flow (data_sources_add_prompt.md) -- explicitly pre-approved
+# in that prompt's own text:
+cryptography             # Fernet encryption-at-rest for stored DB credentials
+pymysql                  # pure-Python MySQL driver (no system libs), for the
+                          # self-service SQL DB wizard's MySQL connector
+pymssql                  # MS SQL Server driver -- ships a manylinux wheel with
+                          # FreeTDS statically bundled, confirmed installs
+                          # cleanly with no apt-get/system packages required
+openpyxl                  # pandas' .xlsx engine, for the Excel-upload connector
+                          # (not named in the prompt's pre-approved list, but a
+                          # direct, minimal, pure-Python requirement of the
+                          # explicitly-requested "Excel/CSV upload" feature)

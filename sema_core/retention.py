@@ -20,10 +20,17 @@ from datetime import datetime, timedelta, timezone
 
 from sema_core.client_registry import load_clients
 from sema_core.conversation_store import SqliteConversationStore
-from sema_core.obs import get_logger, log_event
+from sema_core.obs import get_logger, log_admin_event, log_event
 from sema_core.org_settings_store import OrgSettingsStore
+from sema_core.retention_store import RetentionRunStore
 
 logger = get_logger("retention")
+
+# The actor recorded for audit events the retention sweep itself generates --
+# no human triggered this run. `log_admin_event`/`audit_store.record` only
+# need a dict supporting .get("id")/.get("name")/.get("role"); AuditEvent's
+# own docstring already documents actor_id=null as the system-event shape.
+SYSTEM_ACTOR = {"id": None, "name": "System", "role": "system"}
 
 # "forever" has no entry -- a policy of "forever" simply never sweeps.
 RETENTION_DAYS: dict[str, int] = {"90d": 90, "30d": 30}
@@ -86,6 +93,51 @@ def run_all_clients_sweep(
         except Exception:
             logger.warning("retention sweep failed for client %s", cid, exc_info=True)
             results[cid] = 0
+    return results
+
+
+def run_all_clients_sweep_tracked(
+    conversation_store: SqliteConversationStore,
+    org_settings_store: OrgSettingsStore,
+    retention_run_store: RetentionRunStore,
+    audit_store,
+) -> dict[str, dict]:
+    """The version the scheduled background job actually calls: adds
+    idempotency (skip a client swept within the last SKIP_WINDOW_HOURS -- a
+    restart loop must never re-sweep), a persisted run record per client (the
+    org-settings screen's "last cleanup" line), and an audit trail.
+
+    A non-zero deletion count is audited under the "access"-adjacent org
+    category (action `org.retention_swept`, system actor -- see SYSTEM_ACTOR)
+    since it's a real data-affecting event an admin should be able to see; a
+    zero-deletion run is recorded for the status line but NOT audited (spec:
+    "zero-deletion runs are logged to the app log only"). One client's
+    exception is caught, recorded as an error run, and never blocks the rest
+    -- same isolation guarantee run_all_clients_sweep already gives, now with
+    the failure visible in the UI instead of only the server log.
+    """
+    results: dict[str, dict] = {}
+    for client in load_clients():
+        cid = client["id"]
+        if retention_run_store.should_skip(cid):
+            log_event(logger, "retention_sweep_skipped", client_id=cid, reason="within_skip_window")
+            results[cid] = retention_run_store.get(cid)
+            continue
+        try:
+            deleted = run_sweep_for_client(conversation_store, org_settings_store, cid)
+            results[cid] = retention_run_store.record(cid, deleted_count=deleted, status="ok")
+            if deleted:
+                log_admin_event(
+                    logger, "retention_swept", audit_store=audit_store, client_id=cid,
+                    actor=SYSTEM_ACTOR, action="org.retention_swept",
+                    target_type="org_settings", target_label="Retention sweep",
+                    after={"deleted_count": deleted},
+                )
+        except Exception as e:
+            logger.warning("tracked retention sweep failed for client %s", cid, exc_info=True)
+            results[cid] = retention_run_store.record(
+                cid, deleted_count=0, status="error", error=str(e)[:500]
+            )
     return results
 
 

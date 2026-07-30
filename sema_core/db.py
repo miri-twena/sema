@@ -144,13 +144,18 @@ def run_query(sql: str, params: dict | None = None, client_id: str | None = None
     return _run(sql, params, client_id, role="full")
 
 
-def run_sql_readonly(sql: str, client_id: str | None = None) -> pd.DataFrame:
+def run_sql_readonly(sql: str, params: dict | None = None, client_id: str | None = None) -> pd.DataFrame:
     """Run already-validated SQL through the active client's read-only role.
 
-    Validation/sanitization happens in agent/safety.py BEFORE this is called.
+    Validation/sanitization happens in agent/safety.py BEFORE this is called
+    (agent tool calls) -- or, for server-authored SQL with no user-controlled
+    text (e.g. sema_core.alert_templates), by construction: no dynamic
+    identifiers, only bind parameters. `params` (optional, %(name)s-style) is
+    passed straight through to psycopg2/pandas for real parameter binding --
+    never string-interpolate a value into `sql` instead of using this.
     This function is the last hop to the database.
     """
-    return _run(sql, None, client_id, role="readonly")
+    return _run(sql, params, client_id, role="readonly")
 
 
 def check_connection(client_id: str | None = None) -> bool:
@@ -160,3 +165,51 @@ def check_connection(client_id: str | None = None) -> bool:
         return True
     except Exception:
         return False
+
+
+def run_write(sql, params: tuple | list | None = None, client_id: str | None = None) -> None:
+    """Execute a single DDL/DML statement (CREATE TABLE, INSERT, ...) against
+    the active (or given) client's DB using the "full" role -- the CSV/Excel
+    upload connector (data_sources_add_prompt.md Path C) is the only caller
+    today. Unlike run_query (pandas' read_sql_query, SELECT-only), this
+    commits a real write. Callers are responsible for safe SQL construction
+    (psycopg2.sql.Identifier for any dynamic table/column name -- see
+    sema_core.file_upload) since this function does not validate or scope
+    the statement in any way."""
+    cid = client_id or active_client_id()
+    p = _get_pool(cid, "full")
+    conn = p.getconn()
+    broken = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+        conn.commit()
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        p.putconn(conn, close=broken)
+
+
+def run_write_many(sql, rows: list[tuple], client_id: str | None = None) -> None:
+    """Batch-execute the same parameterized statement over many rows (bulk
+    INSERT) in one transaction -- see run_write's docstring."""
+    cid = client_id or active_client_id()
+    p = _get_pool(cid, "full")
+    conn = p.getconn()
+    broken = False
+    try:
+        with conn.cursor() as cur:
+            cur.executemany(sql, rows)
+        conn.commit()
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        p.putconn(conn, close=broken)

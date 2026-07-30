@@ -93,6 +93,58 @@ def _isolated_home_config_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_retention_run_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway retention-run-tracking store (admin
+    panel), same isolation as the other admin-panel stores above."""
+    import api.main as main
+    from sema_core.retention_store import RetentionRunStore
+
+    monkeypatch.setattr(main, "retention_run_store", RetentionRunStore(tmp_path / "test_retention_runs.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_source_add_stores(tmp_path, monkeypatch):
+    """Every test gets its own throwaway client-connections/source-requests/
+    uploads stores (data_sources_add_prompt.md), same isolation as the other
+    admin-panel stores above."""
+    import api.main as main
+    from sema_core.client_connections_store import ClientConnectionsStore
+    from sema_core.source_requests_store import SourceRequestsStore
+    from sema_core.uploads_store import UploadsStore
+
+    monkeypatch.setattr(main, "client_connections_store", ClientConnectionsStore(tmp_path / "test_connections.db"))
+    monkeypatch.setattr(main, "source_requests_store", SourceRequestsStore(tmp_path / "test_source_requests.db"))
+    monkeypatch.setattr(main, "uploads_store", UploadsStore(tmp_path / "test_uploads.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_org_alerts_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway org-alerts store (alert_templates_
+    prompt.md), same isolation as the other admin-panel stores above."""
+    import api.main as main
+    from sema_core.org_alerts_store import OrgAlertsStore
+
+    monkeypatch.setattr(main, "org_alerts_store", OrgAlertsStore(tmp_path / "test_org_alerts.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_feedback_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway turn-feedback store (answer_feedback_
+    prompt.md), same isolation as the other admin-panel stores above."""
+    import api.main as main
+    from sema_core.feedback_store import TurnFeedbackStore
+
+    monkeypatch.setattr(main, "feedback_store", TurnFeedbackStore(tmp_path / "test_feedback.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_secrets_key(monkeypatch):
+    """A fixed, valid Fernet key for every test -- SEMA_SECRETS_KEY must
+    never depend on whatever happens to be in the developer's real .env."""
+    monkeypatch.setenv("SEMA_SECRETS_KEY", "4YuN_Pa2xK8a5jsT1v_fixLfh__sV_YGBUBg0ZL7j70=")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_data_source_health(monkeypatch):
     """Every test gets a deterministic, always-reachable data-source health
     check instead of a real Postgres round-trip -- same isolation rationale

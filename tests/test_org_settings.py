@@ -333,8 +333,17 @@ def test_public_org_settings_does_not_require_admin(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == {
-        "name", "logo_path", "currency", "currency_symbol", "currency_position", "number_format",
+        "name", "logo_path", "currency", "currency_symbol", "currency_position", "number_format", "language",
     }
+    assert body["language"] == "en"  # org_settings_store's default
+
+
+def test_public_org_settings_reflects_the_configured_language(monkeypatch):
+    main.org_settings_store.get_or_create(CID, default_name="E-Commerce")
+    main.org_settings_store.update(CID, {"default_language": "he"})
+    client = TestClient(main.app)
+    resp = client.get("/api/org-settings", params={"client_id": CID})
+    assert resp.json()["language"] == "he"
 
 
 def test_public_org_settings_unknown_client_404s(monkeypatch):

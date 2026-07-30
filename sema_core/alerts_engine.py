@@ -24,6 +24,7 @@ from sema_core.agent.semantic import load_semantic_layer
 from sema_core.cache import ttl_cache
 from sema_core.client_registry import active_client_id
 from sema_core.db import run_sql_readonly
+from sema_core.org_alerts import MIGRATED_YAML_ALERT_IDS
 
 # Supported comparison operators for an alert `condition`. Longer tokens first
 # so "<=" / ">=" are matched before "<" / ">".
@@ -86,6 +87,8 @@ def catalog(client_id: str | None = None) -> list[dict]:
     out = []
     for metric in metrics:
         for alert in metric.get("alerts") or []:
+            if alert["id"] in MIGRATED_YAML_ALERT_IDS:
+                continue  # now an editable org_alerts row (sema_core.org_alerts) -- avoid listing it twice
             out.append(
                 {
                     "id": alert["id"],
@@ -97,7 +100,9 @@ def catalog(client_id: str | None = None) -> list[dict]:
     return out
 
 
-def evaluate_all_alerts(client_id: str | None = None, alert_config: dict | None = None) -> list[dict]:
+def evaluate_all_alerts(
+    client_id: str | None = None, alert_config: dict | None = None, org_alert_readings: list[dict] | None = None
+) -> list[dict]:
     """Triggered alerts for the given (or currently-active) client, critical
     first. Each dict carries internal `_domain`/`_sensitive` keys for
     filter_for_scope; strip them (or call filter_for_scope, which does) before
@@ -108,8 +113,17 @@ def evaluate_all_alerts(client_id: str | None = None, alert_config: dict | None 
     feature shipped, and any client with nothing published) reproduces
     today's behavior exactly: every alert enabled at its metric-file default
     threshold. Applied AFTER the cached raw readings (_raw_alert_readings),
-    so a threshold change never needs to bust or bypass that cache."""
-    readings = _raw_alert_readings(client_id or active_client_id())
+    so a threshold change never needs to bust or bypass that cache.
+
+    `org_alert_readings` (alert_templates_prompt.md) is the caller-fetched
+    output of sema_core.org_alerts.readings_for_alerts_engine -- already
+    live (enabled/effective org alerts only), so it's merged in UNCACHED
+    and evaluated through the exact same _triggered_from_readings/threshold
+    machinery as the YAML-sourced readings. Kept as an explicit parameter
+    (not fetched here) so this module stays store-agnostic -- callers own
+    the org_alerts_store instance, same reason alert_config is passed in
+    rather than read from a global."""
+    readings = _raw_alert_readings(client_id or active_client_id()) + (org_alert_readings or [])
     return _triggered_from_readings(readings, alert_config or {})
 
 
@@ -148,6 +162,8 @@ def _raw_alert_readings(client_id: str) -> list[dict]:
     readings: list[dict] = []
     for metric in metrics:
         for alert in metric.get("alerts") or []:
+            if alert["id"] in MIGRATED_YAML_ALERT_IDS:
+                continue  # sourced from org_alerts instead now (see evaluate_all_alerts)
             # One bad alert must never take down the whole panel.
             try:
                 df = run_sql_readonly(alert["sql"], client_id=client_id)

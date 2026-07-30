@@ -45,6 +45,15 @@ def _csv(name: str, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _bool(name: str, default: bool) -> bool:
+    """Read a boolean from env ("0"/"false"/"no" -> False, anything else set
+    -> True), falling back to `default` if unset/blank."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "no")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of the backend's configuration."""
@@ -82,6 +91,17 @@ class Settings:
     conversation_db_path: Path  # SQLite file for conversation metadata
     history_token_budget: int  # approx. tokens of prior turns sent to the model
 
+    # --- retention sweep (org_settings_gapfix_prompt.md) ---
+    # Disable the background daily sweep entirely (tests/local runs that don't
+    # want a scheduled task running against their DB). Default on.
+    retention_enabled: bool
+
+    # --- data sources add-flow (data_sources_add_prompt.md) ---
+    # Service-account email for the Google Sheets connector's "share this
+    # sheet with..." instructions. Blank in local dev -- the flow still
+    # works, it just lands in "setting up" state (see .env.example).
+    gsheets_sa_email: str
+
 
 def load_settings() -> Settings:
     """Build a Settings snapshot from the current environment.
@@ -117,6 +137,8 @@ def load_settings() -> Settings:
             os.environ.get("SEMA_CONVERSATION_DB", str(_PROJECT_ROOT / "var" / "sema_state.db"))
         ),
         history_token_budget=_int("SEMA_HISTORY_TOKEN_BUDGET", 8000),
+        retention_enabled=_bool("SEMA_RETENTION_ENABLED", True),
+        gsheets_sa_email=os.environ.get("SEMA_GSHEETS_SA_EMAIL", "").strip(),
     )
 
 

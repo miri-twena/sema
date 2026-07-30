@@ -13,6 +13,7 @@ Then open http://localhost:8000/docs (Swagger).
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -21,6 +22,7 @@ import re
 import secrets
 import threading
 import time
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,7 +65,19 @@ from sema_core.org_settings_store import (
     OrgSettingsStore,
 )
 from sema_core import retention
+from sema_core.retention_store import RetentionRunStore
 from sema_core import data_sources
+from sema_core import connector_catalog
+from sema_core import db_probe
+from sema_core import file_upload
+from sema_core.secrets import encrypt_secret, fingerprint as make_fingerprint, SecretsKeyNotConfigured
+from sema_core.client_connections_store import ClientConnectionsStore, ConnectionNotFoundError
+from sema_core.source_requests_store import SourceRequestsStore
+from sema_core.uploads_store import UploadsStore, UploadNotFoundError
+from sema_core import alert_templates
+from sema_core import org_alerts
+from sema_core.org_alerts_store import OrgAlertLimitExceededError, OrgAlertNotFoundError, OrgAlertsStore
+from sema_core.feedback_store import InvalidRatingError, TurnFeedbackStore
 from sema_core.agent.semantic import (
     get_metric,
     load_glossary,
@@ -101,11 +115,30 @@ from api.models import (
     AdminUserList,
     AdminUserUpdate,
     AlertCatalogItem,
+    AlertMetricCatalogItem,
+    AlertRuleInfo,
+    AlertTemplateCatalogItem,
+    AlertTestRequest,
+    AlertTestResult,
+    CreateAlertRequest,
+    UpdateAlertRequest,
     AuditEvent,
     AuditEventList,
     CurrencyInfo,
     DataSource,
     ReportProblemResponse,
+    ConnectorCatalogItem,
+    TestConnectionRequest,
+    TestConnectionResponse,
+    CreateConnectionRequest,
+    ClientConnectionInfo,
+    SourceRequestCreate,
+    SourceRequestInfo,
+    InterestRequest,
+    InterestResponse,
+    UploadColumnPlan,
+    UploadInfo,
+    SheetsInfo,
     HomeConfig,
     HomeConfigPreview,
     HomeConfigResponse,
@@ -136,6 +169,8 @@ from api.models import (
     ClientChangeRequest,
     ConversationDetail,
     ConversationMessage,
+    FeedbackRequest,
+    TurnFeedback,
     ConversationSummary,
     ConversationUpdate,
     Health,
@@ -179,6 +214,32 @@ audit_store = AuditStore(settings.conversation_db_path)
 # table. Module-level singleton; tests monkeypatch this attribute with an
 # isolated store pointed at a temp file, same as the stores above.
 home_config_store = HomeConfigStore(settings.conversation_db_path)
+
+# Retention-sweep run tracking (org_settings_gapfix_prompt.md) -- same SQLite
+# metadata DB, separate table. Module-level singleton; tests monkeypatch this
+# attribute with an isolated store pointed at a temp file, same as the stores
+# above.
+retention_run_store = RetentionRunStore(settings.conversation_db_path)
+
+# Data-sources add-flow stores (data_sources_add_prompt.md) -- same SQLite
+# metadata DB, separate tables. Module-level singletons; tests monkeypatch
+# these attributes with isolated stores pointed at temp files, same as the
+# stores above.
+client_connections_store = ClientConnectionsStore(settings.conversation_db_path)
+source_requests_store = SourceRequestsStore(settings.conversation_db_path)
+uploads_store = UploadsStore(settings.conversation_db_path)
+
+# Org-owned template-based alerts (alert_templates_prompt.md) -- same SQLite
+# metadata DB, separate tables. Module-level singleton; tests monkeypatch this
+# attribute with an isolated store pointed at a temp file, same as the stores
+# above.
+org_alerts_store = OrgAlertsStore(settings.conversation_db_path)
+
+# Per-answer thumbs up/down feedback (answer_feedback_prompt.md) -- same
+# SQLite metadata DB, separate table. Module-level singleton; tests
+# monkeypatch this attribute with an isolated store pointed at a temp file,
+# same as the stores above.
+feedback_store = TurnFeedbackStore(settings.conversation_db_path)
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -256,10 +317,55 @@ def current_org_user(cid: str) -> dict:
         return _UNSCOPED_USER
 
 
+_RETENTION_INITIAL_DELAY_S = 60
+_RETENTION_INTERVAL_S = 24 * 3600
+
+
+async def _retention_loop() -> None:
+    """The scheduled daily sweep (org_settings_gapfix_prompt.md Part 1): runs
+    once ~60s after boot (so startup itself is never blocked waiting on it),
+    then every 24h thereafter. One iteration's failure is logged and never
+    kills the loop -- a bad day's sweep must not silently cancel every future
+    day's sweep too. The actual sweep runs in a thread (asyncio.to_thread):
+    it's synchronous DB work (psycopg2 + sqlite3), and would otherwise block
+    the whole event loop -- every concurrent chat request -- for its duration.
+    References the module-level store singletons by NAME (not captured as
+    default args) so a test that monkeypatches e.g. `main.conversation_store`
+    is still honored if this loop ever runs under test.
+    """
+    await asyncio.sleep(_RETENTION_INITIAL_DELAY_S)
+    while True:
+        try:
+            await asyncio.to_thread(
+                retention.run_all_clients_sweep_tracked,
+                conversation_store, org_settings_store, retention_run_store, audit_store,
+            )
+        except Exception:
+            logger.exception("retention loop iteration failed")
+        await asyncio.sleep(_RETENTION_INTERVAL_S)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Starts the retention loop as a background task for the life of the
+    process. Disableable via SEMA_RETENTION_ENABLED for tests/local runs that
+    don't want a scheduled task running against their DB -- FastAPI's
+    TestClient only invokes this at all when used as a context manager
+    (`with TestClient(app) as client`), which none of this app's tests do, so
+    existing tests are unaffected either way."""
+    task = asyncio.create_task(_retention_loop()) if settings.retention_enabled else None
+    yield
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 app = FastAPI(
     title="SEMA API",
     version="0.1.0",
     dependencies=[Depends(require_api_key)],  # applied to ALL routes
+    lifespan=lifespan,
 )
 
 # CORS for local React dev (origins configurable via SEMA_CORS_ORIGINS).
@@ -510,6 +616,7 @@ def public_org_settings(client_id: str | None = None) -> PublicOrgSettings:
         currency_symbol=symbol,
         currency_position=position,
         number_format=row["number_format"],
+        language=row["default_language"],
     )
 
 
@@ -712,8 +819,12 @@ def get_conversation(conversation_id: str, client_id: str | None = None) -> Conv
     except ConversationNotFoundError:
         raise HTTPException(status_code=404, detail="unknown conversation_id") from None
 
+    feedback_by_turn = feedback_store.get_for_conversation(conversation_id)
     messages: list[ConversationMessage] = []
+    turn_index = -1
     for m in raw:
+        if m["role"] == "user":
+            turn_index += 1
         payload = None
         if m.get("payload"):
             try:
@@ -724,8 +835,12 @@ def get_conversation(conversation_id: str, client_id: str | None = None) -> Conv
                 logger.warning(
                     "unreadable payload in conversation %s; falling back to text", conversation_id
                 )
+        feedback = None
+        if m["role"] == "assistant" and turn_index in feedback_by_turn:
+            row = feedback_by_turn[turn_index]
+            feedback = TurnFeedback(rating=row["rating"], comment=row["comment"])
         messages.append(
-            ConversationMessage(role=m["role"], content=m["content"], payload=payload)
+            ConversationMessage(role=m["role"], content=m["content"], payload=payload, feedback=feedback)
         )
 
     return ConversationDetail(
@@ -735,6 +850,30 @@ def get_conversation(conversation_id: str, client_id: str | None = None) -> Conv
         archived=meta["archived"],
         messages=messages,
     )
+
+
+@app.post("/api/feedback", response_model=TurnFeedback | None)
+def submit_feedback(req: FeedbackRequest) -> TurnFeedback | None:
+    """Rate (or clear the rating on) one answer. Not admin-gated -- any
+    resolvable identity (viewer/analyst/admin/unscoped) may give feedback,
+    same tier as the chat endpoints themselves. `rating: null` clears an
+    existing rating and returns null; otherwise upserts and returns the
+    saved feedback."""
+    cid = _resolve_client(req.client_id)
+    _conversation_or_404(req.conversation_id, cid)
+    me = current_org_user(cid)
+
+    if req.rating is None:
+        feedback_store.clear(req.conversation_id, req.turn_index)
+        return None
+
+    try:
+        row = feedback_store.set(
+            req.conversation_id, cid, req.turn_index, req.rating, req.comment, me["id"]
+        )
+    except InvalidRatingError:
+        raise HTTPException(status_code=422, detail="invalid rating") from None
+    return TurnFeedback(rating=row["rating"], comment=row["comment"])
 
 
 @app.patch("/api/conversations/{conversation_id}", response_model=ConversationSummary)
@@ -1069,6 +1208,20 @@ def _semantic_author(me: dict) -> str:
     return me.get("name") or me["email"]
 
 
+def _diff_fields(before: dict | None, after: dict | None) -> tuple[dict, dict]:
+    """Only the keys that actually changed between two semantic-item dicts --
+    "before/after limited to the changed fields" (org_settings_gapfix_prompt.md
+    Part 3), same trust-panel-friendly diffing idea as org-settings' own
+    per-field audit, just applied to a whole nested item instead of one
+    primitive. `None` on either side (no prior draft / discarded entirely)
+    means "everything in the other side is the whole story"."""
+    if before is None or after is None:
+        return (before or {}), (after or {})
+    keys = set(before) | set(after)
+    changed = {k for k in keys if before.get(k) != after.get(k)}
+    return {k: before.get(k) for k in changed}, {k: after.get(k) for k in changed}
+
+
 def _item_exists_published(cid: str, section: str, item_key: str) -> bool:
     """Whether this item is in the published YAML today -- the ONLY source of
     truth for create-vs-edit. Never trust the client's claimed action here: a
@@ -1135,7 +1288,15 @@ def admin_save_semantic_draft(
             raise HTTPException(
                 status_code=422, detail=f"missing required field(s): {', '.join(missing)}"
             )
+    existing_draft = semantic_store.get_draft(cid, section, item_key)
     semantic_store.save_draft(cid, section, item_key, req.data, action, author=_semantic_author(me))
+    before, after = _diff_fields(existing_draft["data"] if existing_draft else None, req.data)
+    _audit(
+        "admin_semantic_draft_saved", client_id=cid, actor=me,
+        action="semantic.draft_archived" if action == "deprecate" else "semantic.draft_saved",
+        target_type=section, target_id=item_key, target_label=item_key,
+        before=before, after=after,
+    )
     return _semantic_model_response(cid)
 
 
@@ -1151,10 +1312,21 @@ def admin_delete_semantic_item(
     cid = me["client_id"]
     if section not in _SEMANTIC_REQUIRED_FIELDS:
         raise HTTPException(status_code=404, detail=f"unknown section: {section}")
-    if semantic_store.get_draft(cid, section, item_key) is not None:
+    existing_draft = semantic_store.get_draft(cid, section, item_key)
+    if existing_draft is not None:
         semantic_store.discard_draft(cid, section, item_key)
+        _audit(
+            "admin_semantic_draft_discarded", client_id=cid, actor=me, action="semantic.draft_discarded",
+            target_type=section, target_id=item_key, target_label=item_key,
+            before=existing_draft["data"], after=None,
+        )
     else:
         semantic_store.save_draft(cid, section, item_key, {}, action="deprecate", author=_semantic_author(me))
+        _audit(
+            "admin_semantic_draft_archived", client_id=cid, actor=me, action="semantic.draft_archived",
+            target_type=section, target_id=item_key, target_label=item_key,
+            before=None, after={"action": "deprecate"},
+        )
     return _semantic_model_response(cid)
 
 
@@ -1340,12 +1512,26 @@ def _logos_dir() -> Path:
     return settings.conversation_db_path.parent / "logos"
 
 
+def _org_settings_response(row: dict, cid: str, conflict: bool) -> OrgSettings:
+    """Attach this client's last retention-sweep run (if any) to the
+    org-settings payload -- one embedded read rather than a separate
+    endpoint (org_settings_gapfix_prompt.md Part 1 explicitly allows either)."""
+    run = retention_run_store.get(cid)
+    return OrgSettings(
+        **row, conflict=conflict,
+        last_retention_run_at=run["last_run_at"] if run else None,
+        last_retention_deleted_count=run["deleted_count"] if run else None,
+        last_retention_status=run["status"] if run else None,
+        last_retention_error=run["error"] if run else None,
+    )
+
+
 @app.get("/api/admin/org-settings", response_model=OrgSettings)
 def admin_get_org_settings(me: dict = Depends(require_client_admin)) -> OrgSettings:
     cid = me["client_id"]
     label = client_registry.get_client_by_id(cid).get("label", cid)
     row = org_settings_store.get_or_create(cid, default_name=label)
-    return OrgSettings(**row, conflict=False)
+    return _org_settings_response(row, cid, conflict=False)
 
 
 @app.patch("/api/admin/org-settings", response_model=OrgSettings)
@@ -1363,7 +1549,7 @@ def admin_update_org_settings(
 
     before = org_settings_store.get(cid) or {}
     if not patch:
-        return OrgSettings(**before, conflict=False)
+        return _org_settings_response(before, cid, conflict=False)
     try:
         updated = org_settings_store.update(cid, patch, expected_updated_at=req.expected_updated_at)
     except InvalidSettingError as e:
@@ -1377,7 +1563,7 @@ def admin_update_org_settings(
             target_label=_ORG_SETTINGS_FIELD_LABELS.get(field, field),
             before={field: before.get(field)}, after={field: updated.get(field)},
         )
-    return OrgSettings(**updated, conflict=conflict)
+    return _org_settings_response(updated, cid, conflict=conflict)
 
 
 @app.get("/api/admin/org-settings/currencies", response_model=list[CurrencyInfo])
@@ -1440,7 +1626,7 @@ async def admin_upload_logo(
         before={"logo_path": before.get("logo_path") if before else None},
         after={"logo_path": updated["logo_path"]},
     )
-    return OrgSettings(**updated, conflict=False)
+    return _org_settings_response(updated, cid, conflict=False)
 
 
 @app.get("/api/admin/org-settings/logo/{client_id}")
@@ -1548,6 +1734,175 @@ def admin_alerts_catalog(me: dict = Depends(require_client_admin)) -> list[Alert
     return [AlertCatalogItem(**a) for a in alerts_engine.catalog(me["client_id"])]
 
 
+# --- admin: template-based alert builder (alert_templates_prompt.md) -------
+
+
+@app.get("/api/admin/alerts/templates", response_model=list[AlertTemplateCatalogItem])
+def admin_alert_templates() -> list[AlertTemplateCatalogItem]:
+    """The 4 template types + their param keys -- server-driven so the
+    builder's radio cards never hardcode what only sema_core.alert_templates
+    should own, same pattern as the data-source connector catalog."""
+    return [
+        AlertTemplateCatalogItem(template=key, **{k: v for k, v in d.items() if k != "params"}, params=d["params"])
+        for key, d in alert_templates.TEMPLATE_DEFS.items()
+    ]
+
+
+@app.get("/api/admin/alerts/metrics", response_model=list[AlertMetricCatalogItem])
+def admin_alert_metrics() -> list[AlertMetricCatalogItem]:
+    """The fixed KPI_CATALOG metrics a template-based alert may target."""
+    from sema_core.home_config import KPI_CATALOG
+
+    return [AlertMetricCatalogItem(metric=m, label=KPI_CATALOG[m]["label"]) for m in alert_templates.SUPPORTED_METRICS]
+
+
+def _alert_rule_info(row: dict, *, system: bool) -> AlertRuleInfo:
+    from sema_core.home_config import KPI_CATALOG
+
+    return AlertRuleInfo(
+        id=row["id"],
+        name=row["name"],
+        metric=row["metric"],
+        metric_label=KPI_CATALOG[row["metric"]]["label"],
+        template=row["template"],
+        params=row["params"],
+        severity=row["severity"],
+        enabled=row["enabled"],
+        system=system,
+        disabled_reason=row.get("disabled_reason"),
+        summary_en=org_alerts.summary_sentence(row["metric"], row["template"], row["params"]),
+        summary_he=org_alerts.summary_sentence_he(row["metric"], row["template"], row["params"]),
+        created_by=row.get("created_by"),
+        updated_at=row["updated_at"],
+    )
+
+
+def _system_alert_as_rule(cat_item: dict) -> AlertRuleInfo:
+    """A YAML/system alert has no template/params -- surfaced read-only in
+    the unified list with the same fields the OLD catalog already exposed
+    (spec accept criterion: 'visibly System'), never editable/deletable."""
+    return AlertRuleInfo(
+        id=cat_item["id"], name=cat_item["label"], metric=cat_item["id"], metric_label=cat_item["metric_label"],
+        template="system", params={}, severity=cat_item["severity"], enabled=True, system=True,
+        disabled_reason=None, summary_en=cat_item["label"], summary_he=cat_item["label"],
+        created_by=None, updated_at="",
+    )
+
+
+@app.get("/api/admin/alerts", response_model=list[AlertRuleInfo])
+def admin_list_alerts(me: dict = Depends(require_client_admin)) -> list[AlertRuleInfo]:
+    """The unified alert list: org-owned (editable) + system/YAML-owned
+    (view-only) alerts side by side, so an admin sees "everything that can
+    fire" in one place even though only org alerts came through this
+    builder (spec accept criterion: both kinds visible, one engine path)."""
+    cid = me["client_id"]
+    org_rows = [_alert_rule_info(r, system=False) for r in org_alerts.list_effective(cid, org_alerts_store)]
+    system_rows = [_system_alert_as_rule(a) for a in alerts_engine.catalog(cid)]
+    return org_rows + system_rows
+
+
+@app.post("/api/admin/alerts/test", response_model=AlertTestResult)
+def admin_test_alert(req: AlertTestRequest, me: dict = Depends(require_client_admin)) -> AlertTestResult:
+    """Dry-run: how many times would this candidate alert have fired in the
+    last 90 days. REQUIRED before create/enable -- create/PATCH re-run this
+    exact check server-side rather than trusting a client-supplied token, so
+    there's no stale-token replay risk."""
+    try:
+        alert_templates.validate_params(req.template, req.params)
+    except alert_templates.AlertTemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    result = alert_templates.dry_run(me["client_id"], req.metric, req.template, req.params)
+    return AlertTestResult(**result)
+
+
+def _require_valid_alert_target(metric: str, template: str, params: dict) -> None:
+    if metric not in alert_templates.SUPPORTED_METRICS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported metric '{metric}'. Choose one of: {', '.join(alert_templates.SUPPORTED_METRICS)}.",
+        )
+    try:
+        alert_templates.validate_params(template, params)
+    except alert_templates.AlertTemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+def _require_passing_test(client_id: str, metric: str, template: str, params: dict) -> None:
+    result = alert_templates.dry_run(client_id, metric, template, params)
+    if not result["ok"]:
+        raise HTTPException(status_code=422, detail=result.get("error") or "This alert could not be tested.")
+
+
+@app.post("/api/admin/alerts", response_model=AlertRuleInfo, status_code=201)
+def admin_create_alert(req: CreateAlertRequest, me: dict = Depends(require_client_admin)) -> AlertRuleInfo:
+    cid = me["client_id"]
+    _require_valid_alert_target(req.metric, req.template, req.params)
+    _require_passing_test(cid, req.metric, req.template, req.params)
+    try:
+        row = org_alerts_store.create(
+            cid, name=req.name, metric=req.metric, template=req.template, params=req.params,
+            severity=req.severity, created_by=_semantic_author(me),
+        )
+    except OrgAlertLimitExceededError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except Exception as exc:
+        if "UNIQUE" in str(exc):
+            raise HTTPException(status_code=409, detail=f'An alert named "{req.name}" already exists.') from None
+        raise
+    _audit(
+        "admin_alert_created", client_id=cid, actor=me, action="alert.created",
+        target_type="alert", target_id=row["id"], target_label=row["name"],
+        after={"metric": row["metric"], "template": row["template"], "params": row["params"], "severity": row["severity"]},
+    )
+    return _alert_rule_info(row, system=False)
+
+
+@app.patch("/api/admin/alerts/{alert_id}", response_model=AlertRuleInfo)
+def admin_update_alert(alert_id: str, req: UpdateAlertRequest, me: dict = Depends(require_client_admin)) -> AlertRuleInfo:
+    cid = me["client_id"]
+    before = org_alerts_store.get(cid, alert_id)
+    if before is None:
+        raise HTTPException(status_code=404, detail="Alert not found.")
+
+    patch = req.model_dump(exclude_unset=True)
+    rule_changed = any(k in patch for k in ("metric", "template", "params"))
+    if rule_changed:
+        metric = patch.get("metric", before["metric"])
+        template = patch.get("template", before["template"])
+        params = patch.get("params", before["params"])
+        _require_valid_alert_target(metric, template, params)
+        _require_passing_test(cid, metric, template, params)
+
+    try:
+        row = org_alerts_store.update(cid, alert_id, patch)
+    except OrgAlertLimitExceededError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except OrgAlertNotFoundError:
+        raise HTTPException(status_code=404, detail="Alert not found.") from None
+
+    before_diff, after_diff = _diff_fields(before, row)
+    action = "alert.updated" if rule_changed or "name" in patch or "severity" in patch else "alert.toggled"
+    _audit(
+        "admin_alert_updated", client_id=cid, actor=me, action=action,
+        target_type="alert", target_id=row["id"], target_label=row["name"],
+        before=before_diff, after=after_diff,
+    )
+    return _alert_rule_info(row, system=False)
+
+
+@app.delete("/api/admin/alerts/{alert_id}", status_code=204)
+def admin_delete_alert(alert_id: str, me: dict = Depends(require_client_admin)) -> None:
+    cid = me["client_id"]
+    row = org_alerts_store.get(cid, alert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Alert not found.")
+    org_alerts_store.delete(cid, alert_id)
+    _audit(
+        "admin_alert_deleted", client_id=cid, actor=me, action="alert.deleted",
+        target_type="alert", target_id=alert_id, target_label=row["name"],
+    )
+
+
 @app.get("/api/admin/home-config", response_model=HomeConfigResponse)
 def admin_get_home_config(me: dict = Depends(require_client_admin)) -> HomeConfigResponse:
     """The editor's full state: draft (if any), published (if any), and
@@ -1641,7 +1996,10 @@ def admin_preview_home_config(body: HomeConfig, me: dict = Depends(require_clien
             brief_data = {**brief_data, "pulse": []}
         if not cfg["daily_brief"]["insights_enabled"]:
             brief_data = {**brief_data, "insights": []}
-        raw_alerts = alerts_engine.evaluate_all_alerts(client_id=cid, alert_config=cfg["alerts"])
+        org_readings = org_alerts.readings_for_alerts_engine(cid, org_alerts_store)
+        raw_alerts = alerts_engine.evaluate_all_alerts(
+            client_id=cid, alert_config=cfg["alerts"], org_alert_readings=org_readings
+        )
         alerts_data = alerts_engine.filter_for_scope(raw_alerts, scope_id)
         popular = [] if not cfg["suggested_questions"]["trending_enabled"] else conversation_store.top_questions(cid)
         if scope_id != "full" and popular:
@@ -1675,12 +2033,339 @@ def admin_preview_home_config(body: HomeConfig, me: dict = Depends(require_clien
 # --- admin: data sources (spec §4, view-only slice) -------------------------
 
 
+_REQUEST_STATUS_TO_CARD_STATUS = {
+    "requested": "syncing", "configuring": "syncing", "testing": "syncing",
+    "active": "healthy", "rejected": "error",
+}
+
+
+def _connection_to_card(row: dict, cid: str) -> dict:
+    """Live-health a stored self-service connection into the shared
+    DataSource card shape (same idea as sema_core.data_sources.source_
+    health, against an arbitrary stored connection instead of this
+    project's own tenant DB)."""
+    try:
+        password = client_connections_store.decrypted_password_for_test(cid, row["id"])
+        health = db_probe.check_health(
+            row["connector_type"], host=row["host"], port=row["port"], database=row["database_name"],
+            username=row["username"], password=password, ssl_enabled=row["ssl_enabled"],
+            primary_table=row["primary_table"], primary_date_field=row["primary_date_field"],
+        )
+    except Exception:
+        health = {"reachable": False, "data_age_days": None}
+    return {
+        "id": row["id"],
+        "type": row["connector_type"],
+        "display_name": row["display_name"],
+        "status": "healthy" if health["reachable"] else "error",
+        "last_sync_at": datetime.now(timezone.utc).isoformat() if health["reachable"] else None,
+        "data_age_days": health["data_age_days"],
+        "primary_table": row["primary_table"],
+        "primary_date_field": row["primary_date_field"],
+        "origin": "connection",
+        "fingerprint": row["fingerprint"],
+    }
+
+
+def _request_to_card(row: dict) -> dict:
+    connector = connector_catalog.get_connector(row["connector_type"])
+    label = row["details"].get("display_name") or (connector["label"] if connector else row["connector_type"])
+    return {
+        "id": row["id"],
+        "type": row["connector_type"],
+        "display_name": label,
+        "status": _REQUEST_STATUS_TO_CARD_STATUS.get(row["status"], "syncing"),
+        "origin": "request",
+        "progress_step": row["status"],
+    }
+
+
+def _upload_to_card(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "type": "csv",
+        "display_name": row["original_filename"],
+        "status": "healthy",
+        "last_sync_at": row["updated_at"],
+        "primary_table": row["table_name"],
+        "origin": "upload",
+    }
+
+
 @app.get("/api/admin/data-sources", response_model=list[DataSource])
 def admin_list_data_sources(me: dict = Depends(require_client_admin)) -> list[DataSource]:
-    """Status cards for every data source configured for this client (today:
-    always exactly one, PostgreSQL) -- read-only, no credentials, no manual
-    sync trigger (all platform-level, spec §4.3)."""
-    return [DataSource(**s) for s in data_sources.get_data_sources(me["client_id"])]
+    """Status cards for every data source configured for this client: the
+    Phase 4 static config source(s), PLUS every self-service connection,
+    tracked request, and upload this client has added since (spec §4.4
+    v1.6) -- one unified list, no parallel UI path."""
+    cid = me["client_id"]
+    cards = [DataSource(**s) for s in data_sources.get_data_sources(cid)]
+    cards += [DataSource(**_connection_to_card(c, cid)) for c in client_connections_store.list_for_client(cid)]
+    cards += [DataSource(**_request_to_card(r)) for r in source_requests_store.list_for_client(cid)]
+    cards += [DataSource(**_upload_to_card(u)) for u in uploads_store.list_for_client(cid)]
+    return cards
+
+
+@app.get("/api/admin/data-sources/catalog", response_model=list[ConnectorCatalogItem])
+def admin_data_sources_catalog(me: dict = Depends(require_client_admin)) -> list[ConnectorCatalogItem]:
+    """The server-driven 'add a data source' gallery catalog (item 1) --
+    the frontend renders this rather than hardcoding connector metadata."""
+    return [ConnectorCatalogItem(**c) for c in connector_catalog.get_catalog()]
+
+
+def _require_available_sql_connector(connector_type: str) -> None:
+    connector = connector_catalog.get_connector(connector_type)
+    if connector is None or connector["kind"] != "sql_db":
+        raise HTTPException(status_code=404, detail="unknown SQL connector type")
+    if connector["availability"] != "available":
+        raise HTTPException(status_code=409, detail="this connector is not available yet")
+
+
+@app.post("/api/admin/data-sources/test", response_model=TestConnectionResponse)
+def admin_test_data_source_connection(
+    req: TestConnectionRequest, me: dict = Depends(require_client_admin)
+) -> TestConnectionResponse:
+    """Path A step 2: connectivity + read probe + write-permission probe.
+    Never persists anything -- a passed test is a PRECONDITION for storing
+    credentials, not a side effect of testing them. Every failure is
+    reported via a scrubbed, generic message (sema_core.db_probe._scrub)."""
+    _require_available_sql_connector(req.connector_type)
+    result = db_probe.test_connection(
+        req.connector_type, host=req.host, port=req.port, database=req.database,
+        username=req.username, password=req.password, ssl_enabled=req.ssl_enabled,
+    )
+    _audit(
+        "admin_data_source_test", client_id=me["client_id"], actor=me,
+        action="data_source.test_passed" if result["ok"] else "data_source.test_failed",
+        target_type="data_source_connection", target_label=f"{req.connector_type}:{req.host}",
+        after={"ok": result["ok"], "write_access": result["write_access"]},
+    )
+    readonly_sql = db_probe.readonly_user_sql(req.connector_type, req.database) if result["write_access"] else None
+    return TestConnectionResponse(**result, readonly_user_sql=readonly_sql)
+
+
+@app.post("/api/admin/data-sources/connections", response_model=ClientConnectionInfo)
+def admin_create_data_source_connection(
+    req: CreateConnectionRequest, me: dict = Depends(require_client_admin)
+) -> ClientConnectionInfo:
+    """Path A step 4: re-tests server-side (never trusts a client-reported
+    'it passed') before ever encrypting and storing the credentials. If the
+    (fresh) test finds write access, the explicit acknowledgment checkbox is
+    required -- same all-or-nothing gate the semantic model's publish step
+    already uses for a different kind of "don't trust the client" check."""
+    cid = me["client_id"]
+    _require_available_sql_connector(req.connector_type)
+    result = db_probe.test_connection(
+        req.connector_type, host=req.host, port=req.port, database=req.database,
+        username=req.username, password=req.password, ssl_enabled=req.ssl_enabled,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+    if result["write_access"] and not req.write_access_acknowledged:
+        raise HTTPException(
+            status_code=409,
+            detail="This user has write access. Acknowledge the warning to continue, or use a read-only user.",
+        )
+
+    try:
+        encrypted = encrypt_secret(req.password)
+    except SecretsKeyNotConfigured as e:
+        raise HTTPException(status_code=500, detail=str(e)) from None
+
+    row = client_connections_store.create(
+        cid, connector_type=req.connector_type, display_name=req.display_name, host=req.host,
+        port=req.port, database_name=req.database, username=req.username, encrypted_password=encrypted,
+        ssl_enabled=req.ssl_enabled, fingerprint=make_fingerprint(req.password),
+        primary_table=req.primary_table, primary_date_field=req.primary_date_field,
+        created_by=_semantic_author(me),
+    )
+    _audit(
+        "admin_data_source_connected", client_id=cid, actor=me, action="data_source.connected",
+        target_type="data_source_connection", target_id=row["id"], target_label=req.display_name,
+        after={"connector_type": req.connector_type, "host": req.host, "database": req.database},
+    )
+    return ClientConnectionInfo(**row)
+
+
+@app.patch("/api/admin/data-sources/connections/{connection_id}", response_model=ClientConnectionInfo)
+def admin_update_data_source_connection(
+    connection_id: str, req: CreateConnectionRequest, me: dict = Depends(require_client_admin)
+) -> ClientConnectionInfo:
+    """Editing a connection means re-entering every credential (item 3) --
+    there is no partial update that could leave a stale, unverified
+    credential in place. Re-tests server-side, exactly like create."""
+    cid = me["client_id"]
+    if client_connections_store.get(cid, connection_id) is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    _require_available_sql_connector(req.connector_type)
+    result = db_probe.test_connection(
+        req.connector_type, host=req.host, port=req.port, database=req.database,
+        username=req.username, password=req.password, ssl_enabled=req.ssl_enabled,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+    if result["write_access"] and not req.write_access_acknowledged:
+        raise HTTPException(
+            status_code=409,
+            detail="This user has write access. Acknowledge the warning to continue, or use a read-only user.",
+        )
+    try:
+        encrypted = encrypt_secret(req.password)
+    except SecretsKeyNotConfigured as e:
+        raise HTTPException(status_code=500, detail=str(e)) from None
+
+    row = client_connections_store.update_credentials(
+        cid, connection_id, host=req.host, port=req.port, database_name=req.database,
+        username=req.username, encrypted_password=encrypted, ssl_enabled=req.ssl_enabled,
+        fingerprint=make_fingerprint(req.password),
+    )
+    _audit(
+        "admin_data_source_connection_updated", client_id=cid, actor=me, action="data_source.connection_updated",
+        target_type="data_source_connection", target_id=connection_id, target_label=req.display_name,
+        after={"connector_type": req.connector_type, "host": req.host, "database": req.database},
+    )
+    return ClientConnectionInfo(**row)
+
+
+# Field names that must never appear in a non-secret request form (Path B) --
+# case-insensitive substring match, deliberately broad (better to reject a
+# false positive and let the admin rename a field than silently accept a
+# real credential into a plaintext, unencrypted JSON blob).
+_CREDENTIAL_LIKE_FIELD_NAMES = (
+    "password", "passwd", "secret", "token", "api_key", "apikey", "credential",
+    "private_key", "access_key", "client_secret",
+)
+
+
+def _reject_credential_like_fields(details: dict) -> None:
+    for key in details:
+        lowered = key.lower()
+        if any(bad in lowered for bad in _CREDENTIAL_LIKE_FIELD_NAMES):
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{key}' looks like a credential field -- this form never accepts secrets.",
+            )
+
+
+@app.get("/api/admin/data-sources/sheets-info", response_model=SheetsInfo)
+def admin_data_sources_sheets_info(me: dict = Depends(require_client_admin)) -> SheetsInfo:
+    """The Google Sheets flow's 'share this sheet with...' instructions
+    (Path C item 7) -- null when no service account is configured yet."""
+    return SheetsInfo(sa_email=settings.gsheets_sa_email or None)
+
+
+@app.post("/api/admin/data-sources/requests", response_model=SourceRequestInfo)
+def admin_create_source_request(
+    req: SourceRequestCreate, me: dict = Depends(require_client_admin)
+) -> SourceRequestInfo:
+    """Path B (Priority/Salesforce) and the Google Sheets flow's fallback
+    (Path C item 7, when no service account is configured) -- both a
+    non-secret request that lands the source in a tracked 'being set up'
+    state. Status transitions from here are platform-side only (no route
+    in this file moves a request forward)."""
+    cid = me["client_id"]
+    connector = connector_catalog.get_connector(req.connector_type)
+    if connector is None or connector["kind"] not in ("saas_request", "light") or req.connector_type == "csv":
+        raise HTTPException(status_code=404, detail="unknown connector type for a request")
+    _reject_credential_like_fields(req.details)
+
+    row = source_requests_store.create(
+        cid, connector_type=req.connector_type, details=req.details, created_by=_semantic_author(me)
+    )
+    label = req.details.get("display_name") or connector["label"]
+    _audit(
+        "admin_source_requested", client_id=cid, actor=me, action="data_source.requested",
+        target_type="source_request", target_id=row["id"], target_label=label,
+        after={"connector_type": req.connector_type},
+    )
+    log_event(logger, "platform_notification", client_id=cid, kind="source_request", connector_type=req.connector_type)
+    return SourceRequestInfo(**row)
+
+
+@app.post("/api/admin/data-sources/interest", response_model=InterestResponse)
+def admin_record_data_source_interest(
+    req: InterestRequest, me: dict = Depends(require_client_admin)
+) -> InterestResponse:
+    """A 'coming soon' connector card's click (Shopify/Google Analytics/Meta
+    Ads, or a driver_pending SQL engine) -- no flow opens, just records
+    interest (audit + platform log), per item 1's connector catalog note."""
+    cid = me["client_id"]
+    connector = connector_catalog.get_connector(req.connector_type)
+    label = connector["label"] if connector else req.connector_type
+    _audit(
+        "admin_data_source_interest", client_id=cid, actor=me, action="data_source.interest_recorded",
+        target_type="connector", target_label=label, after={"connector_type": req.connector_type},
+    )
+    log_event(logger, "platform_notification", client_id=cid, kind="connector_interest", connector_type=req.connector_type)
+    return InterestResponse(recorded=True, connector_type=req.connector_type)
+
+
+@app.post("/api/admin/data-sources/upload", response_model=UploadInfo)
+async def admin_upload_data_source_file(
+    file: UploadFile = File(...), me: dict = Depends(require_client_admin)
+) -> UploadInfo:
+    """Path C item 8: CSV/.xlsx -> a real queryable table in the client's own
+    analytics DB (uploads schema). 10MB cap, same pattern as the org-settings
+    logo upload."""
+    cid = me["client_id"]
+    data = await file.read(file_upload.MAX_UPLOAD_BYTES + 1)
+    if len(data) > file_upload.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=422, detail="File must be 10MB or smaller.")
+    filename = file.filename or "upload.csv"
+    try:
+        df = file_upload.parse_file(filename, data)
+        table_name = file_upload.table_name_for_filename(filename)
+        plan = file_upload.create_table_from_dataframe(cid, table_name, df)
+    except file_upload.FileUploadError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+    row = uploads_store.create(
+        cid, table_name=table_name, original_filename=filename,
+        column_count=len(plan), row_count=len(df), uploaded_by=_semantic_author(me),
+    )
+    _audit(
+        "admin_data_source_uploaded", client_id=cid, actor=me, action="data_source.uploaded",
+        target_type="upload", target_id=row["id"], target_label=filename,
+        after={"table_name": table_name, "row_count": len(df), "column_count": len(plan)},
+    )
+    return UploadInfo(
+        id=row["id"], table_name=table_name, original_filename=filename,
+        columns=[UploadColumnPlan(**c) for c in plan], row_count=len(df),
+    )
+
+
+@app.post("/api/admin/data-sources/uploads/{upload_id}/replace", response_model=UploadInfo)
+async def admin_replace_data_source_upload(
+    upload_id: str, file: UploadFile = File(...), me: dict = Depends(require_client_admin)
+) -> UploadInfo:
+    """The upload card's 'replace file' action -- same table name, fresh
+    data, same 10MB/.csv/.xlsx rules as the initial upload."""
+    cid = me["client_id"]
+    existing = uploads_store.get(cid, upload_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="unknown upload")
+    data = await file.read(file_upload.MAX_UPLOAD_BYTES + 1)
+    if len(data) > file_upload.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=422, detail="File must be 10MB or smaller.")
+    filename = file.filename or existing["original_filename"]
+    try:
+        df = file_upload.parse_file(filename, data)
+        plan = file_upload.create_table_from_dataframe(cid, existing["table_name"], df)
+    except file_upload.FileUploadError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+    row = uploads_store.replace(
+        cid, upload_id, original_filename=filename, column_count=len(plan), row_count=len(df)
+    )
+    _audit(
+        "admin_data_source_upload_replaced", client_id=cid, actor=me, action="data_source.upload_replaced",
+        target_type="upload", target_id=upload_id, target_label=filename,
+        after={"table_name": existing["table_name"], "row_count": len(df), "column_count": len(plan)},
+    )
+    return UploadInfo(
+        id=row["id"], table_name=row["table_name"], original_filename=filename,
+        columns=[UploadColumnPlan(**c) for c in plan], row_count=len(df),
+    )
 
 
 @app.post("/api/admin/data-sources/{source_id}/report-problem", response_model=ReportProblemResponse)
@@ -1700,7 +2385,7 @@ def admin_report_data_source_problem(
     event = _audit(
         "admin_data_source_problem_reported", client_id=cid, actor=me,
         action="data_source.problem_reported",
-        target_type="data_source", target_id=source_id, target_label=source["display_name"],
+        target_type="data_source", target_id=source_id, target_label=source.get("display_name", source_id),
         after={"status": source["status"], "data_age_days": source["data_age_days"]},
     )
     log_event(
@@ -1792,7 +2477,8 @@ def alerts(client_id: str | None = None) -> list[Alert]:
     # evaluate_all_alerts's raw-readings cache is per-CLIENT too (config-
     # independent by design -- see its docstring), same reasoning as the
     # brief above, filter_for_scope runs on the cached (unfiltered) result.
-    raw = alerts_engine.evaluate_all_alerts(client_id=cid, alert_config=cfg["alerts"])
+    org_readings = org_alerts.readings_for_alerts_engine(cid, org_alerts_store)
+    raw = alerts_engine.evaluate_all_alerts(client_id=cid, alert_config=cfg["alerts"], org_alert_readings=org_readings)
     return [Alert(**a) for a in alerts_engine.filter_for_scope(raw, scope_id)]
 
 
