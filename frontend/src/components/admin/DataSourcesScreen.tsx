@@ -1,8 +1,44 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, Database, Flag, RefreshCw } from "lucide-react";
-import { api, type DataSource, type DataSourceStatus } from "../../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, ChevronDown, Database, Flag, Plus, RefreshCw, Upload } from "lucide-react";
+import { api, ApiError, type DataSource, type DataSourceStatus } from "../../lib/api";
 import { timeAgo } from "../../lib/time";
+import { useUiLang } from "../../lib/useUiLang";
+import { DATA_SOURCE_GALLERY } from "../../lib/placeholderCopy";
+import { AddDataSourceModal } from "./AddDataSourceModal";
 import { useToast } from "./toast-context";
+
+const REQUEST_STEPS = ["requested", "configuring", "testing", "active"] as const;
+const REQUEST_STEP_LABEL: Record<(typeof REQUEST_STEPS)[number], string> = {
+  requested: "Requested", configuring: "Configuring", testing: "Testing", active: "Active",
+};
+
+function RequestProgressRail({ step }: { step: DataSource["progress_step"] }) {
+  if (step === "rejected") {
+    return (
+      <p className="mt-3 text-[0.78rem] text-critical-fg" dir="auto">
+        This request was declined by the platform team.
+      </p>
+    );
+  }
+  const activeIndex = REQUEST_STEPS.indexOf((step ?? "requested") as (typeof REQUEST_STEPS)[number]);
+  return (
+    <div className="mt-3 flex items-center gap-1.5" dir="ltr">
+      {REQUEST_STEPS.map((s, i) => (
+        <div key={s} className="flex items-center gap-1.5 flex-1">
+          <div className="flex flex-col items-center gap-1 flex-1">
+            <span
+              className={`w-full h-1.5 rounded-full ${i <= activeIndex ? "bg-primary" : "bg-lineSoft"}`}
+              aria-hidden
+            />
+            <span className={`text-[0.65rem] ${i <= activeIndex ? "text-ink font-medium" : "text-faint"}`}>
+              {REQUEST_STEP_LABEL[s]}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const STATUS_STYLE: Record<DataSourceStatus, { bg: string; fg: string; label: string }> = {
   healthy: { bg: "#EAFBF4", fg: "#1B7A5E", label: "Healthy" },
@@ -44,12 +80,14 @@ function SkeletonCard() {
   );
 }
 
-function SourceCard({ source }: { source: DataSource }) {
+function SourceCard({ source, onChanged }: { source: DataSource; onChanged: () => void }) {
   const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [reported, setReported] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const submitReport = async () => {
     setReporting(true);
@@ -64,7 +102,21 @@ function SourceCard({ source }: { source: DataSource }) {
     }
   };
 
+  const replaceFile = async (file: File) => {
+    setReplacing(true);
+    try {
+      await api.admin.dataSources.replaceUpload(source.id, file);
+      toast(`${file.name} uploaded — the table has been refreshed.`);
+      onChanged();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't replace the file. Try again.");
+    } finally {
+      setReplacing(false);
+    }
+  };
+
   const entityCount = source.entities.length;
+  const isRequest = source.origin === "request";
 
   return (
     <div className="rounded-xl2 border border-line bg-surface p-5">
@@ -76,36 +128,45 @@ function SourceCard({ source }: { source: DataSource }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-ink">{source.display_name}</span>
             <StatusPill status={source.status} />
+            {source.fingerprint && (
+              <span className="text-[0.7rem] text-faint" dir="ltr">•••• {source.fingerprint}</span>
+            )}
           </div>
-          <p className="text-[0.75rem] text-muted mt-1">
-            {entityCount} entit{entityCount === 1 ? "y" : "ies"} mapped
-          </p>
+          {!isRequest && (
+            <p className="text-[0.75rem] text-muted mt-1">
+              {entityCount} entit{entityCount === 1 ? "y" : "ies"} mapped
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 text-[0.78rem]">
-        <div>
-          <div className="text-muted">Last checked</div>
-          <div className="text-ink font-medium" dir="ltr">
-            {source.status === "healthy" || source.status === "syncing"
-              ? `${timeAgo(source.last_sync_at)}${
-                  source.sync_duration_ms !== null ? ` (${source.sync_duration_ms}ms)` : ""
-                }`
-              : "Unavailable"}
+      {isRequest ? (
+        <RequestProgressRail step={source.progress_step} />
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-3 text-[0.78rem]">
+          <div>
+            <div className="text-muted">Last checked</div>
+            <div className="text-ink font-medium" dir="ltr">
+              {source.status === "healthy" || source.status === "syncing"
+                ? `${timeAgo(source.last_sync_at)}${
+                    source.sync_duration_ms !== null ? ` (${source.sync_duration_ms}ms)` : ""
+                  }`
+                : "Unavailable"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted">Data age</div>
+            <div className="text-ink font-medium" dir="ltr">
+              {formatAge(source.data_age_days)}
+              {source.primary_date_field ? (
+                <span className="text-faint"> · {source.primary_date_field}</span>
+              ) : null}
+            </div>
           </div>
         </div>
-        <div>
-          <div className="text-muted">Data age</div>
-          <div className="text-ink font-medium" dir="ltr">
-            {formatAge(source.data_age_days)}
-            {source.primary_date_field ? (
-              <span className="text-faint"> · {source.primary_date_field}</span>
-            ) : null}
-          </div>
-        </div>
-      </div>
+      )}
 
-      {source.status === "error" && (
+      {!isRequest && source.status === "error" && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-critical-fg/25 bg-critical-bg px-3 py-2 text-[0.78rem] text-critical-fg">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
           <span>This source isn't reachable right now. Questions touching its data will show a caveat.</span>
@@ -140,41 +201,65 @@ function SourceCard({ source }: { source: DataSource }) {
         </div>
       )}
 
-      <div className="mt-4 border-t border-lineSoft pt-3">
-        {reported ? (
-          <p className="text-[0.78rem] text-muted">Reported — the platform team has been notified.</p>
-        ) : confirming ? (
-          <div className="rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
-            Report a problem with {source.display_name}? The current status and data age will be
-            attached automatically.
-            <div className="mt-2 flex gap-2">
+      {!isRequest && (
+        <div className="mt-4 border-t border-lineSoft pt-3 flex flex-wrap items-center gap-2">
+          {source.origin === "upload" && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void replaceFile(file);
+                }}
+              />
               <button
-                type="button"
-                onClick={submitReport}
-                disabled={reporting}
-                className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 disabled:opacity-60 transition"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={replacing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.78rem] text-ink hover:border-primary hover:text-primary disabled:opacity-60 transition"
               >
-                {reporting ? "Sending…" : "Confirm"}
+                <Upload size={13} /> {replacing ? "Uploading…" : "Replace file"}
               </button>
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                disabled={reporting}
-                className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
-              >
-                Cancel
-              </button>
+            </>
+          )}
+
+          {reported ? (
+            <p className="text-[0.78rem] text-muted">Reported — the platform team has been notified.</p>
+          ) : confirming ? (
+            <div className="w-full rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
+              Report a problem with {source.display_name}? The current status and data age will be
+              attached automatically.
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={submitReport}
+                  disabled={reporting}
+                  className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 disabled:opacity-60 transition"
+                >
+                  {reporting ? "Sending…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={reporting}
+                  className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setConfirming(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.78rem] text-ink hover:border-primary hover:text-primary transition"
-          >
-            <Flag size={13} /> Report a problem
-          </button>
-        )}
-      </div>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.78rem] text-ink hover:border-primary hover:text-primary transition"
+            >
+              <Flag size={13} /> Report a problem
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -189,6 +274,8 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
   const [sources, setSources] = useState<DataSource[] | null>(null);
   const [error, setError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const lang = useUiLang();
 
   useEffect(() => {
     let cancelled = false;
@@ -216,12 +303,20 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
             at the platform level.
           </p>
         </div>
-        <button
-          onClick={() => setReloadKey((k) => k + 1)}
-          className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.82rem] text-ink hover:border-primary hover:text-primary transition"
-        >
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <button
+            onClick={() => setGalleryOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[0.82rem] font-medium text-white hover:bg-primary/90 transition"
+          >
+            <Plus size={14} /> {DATA_SOURCE_GALLERY[lang].addButton}
+          </button>
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.82rem] text-ink hover:border-primary hover:text-primary transition"
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -237,9 +332,18 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
         ) : sources.length === 0 ? (
           <p className="text-sm text-muted py-8 text-center col-span-2">No data sources configured.</p>
         ) : (
-          sources.map((s) => <SourceCard key={s.id} source={s} />)
+          sources.map((s) => (
+            <SourceCard key={s.id} source={s} onChanged={() => setReloadKey((k) => k + 1)} />
+          ))
         )}
       </div>
+
+      {galleryOpen && (
+        <AddDataSourceModal
+          onClose={() => setGalleryOpen(false)}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   type PublicOrgSettings,
 } from "./lib/api";
 import { configureFormatting } from "./lib/format";
+import { detectBrowserLang } from "./lib/loginCopy";
 import { useChat } from "./hooks/useChat";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
@@ -62,6 +63,19 @@ export default function App() {
   // which thread to resume when one exists.
   const threads = useThreads(activeId, chat.conversationId);
 
+  // UI-chrome language (org_settings_gapfix_prompt.md Part 2) -- browser
+  // default until the org is identified, matching the login page's own
+  // precedence (lib/loginCopy.detectBrowserLang). Sets ONLY <html lang> for
+  // now (screen-reader pronunciation, spell-check) -- see AGENTS.md's Agent
+  // Voice "Layout is anchored" rule: the shell/body must NEVER flip to
+  // dir="rtl" even when the org's chrome language is Hebrew (sidebar always
+  // left; no chrome string translation exists yet either). Per-message
+  // direction is unaffected either way: each turn keeps setting its OWN dir
+  // from the question (see useChat.ts/lib/rtl.ts), independent of chrome.
+  useEffect(() => {
+    document.documentElement.lang = detectBrowserLang(navigator.language);
+  }, []);
+
   useEffect(() => {
     api.health()
       .then((h) => {
@@ -98,6 +112,9 @@ export default function App() {
         if (cancelled) return;
         setOrgSettings(s);
         configureFormatting(s);
+        // Org setting wins over the browser-default fallback above, once
+        // known -- lang only, never dir (see the mount effect's comment).
+        document.documentElement.lang = s.language;
       })
       .catch(() => {});
     return () => {
@@ -372,6 +389,8 @@ export default function App() {
                 // Clarification choices / cannot-answer alternatives continue
                 // the SAME conversation (chat.send keeps conversation_id).
                 onAsk={sendQuestion}
+                onFeedback={chat.setFeedback}
+                clientId={activeId}
               />
             ))}
           </div>

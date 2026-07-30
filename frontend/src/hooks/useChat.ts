@@ -4,6 +4,7 @@ import {
   type ChatResponse,
   type DrillContextPayload,
   type Message,
+  type TurnFeedback,
 } from "../lib/api";
 import { type ChatTurn, turnsFromDetail } from "../lib/conversations";
 import { pickFollowUp } from "../lib/questions";
@@ -207,6 +208,20 @@ export function useChat({
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
+  // Optimistic local update after a feedback POST -- the request itself
+  // (and its silent-revert-on-failure) is MessageActions' concern; this just
+  // keeps the turn's state in sync so it survives this component staying
+  // mounted across re-renders (and round-trips through persistKey's
+  // localStorage cache alongside the rest of a completed turn).
+  const setFeedback = useCallback((index: number, feedback: TurnFeedback | null) => {
+    setTurns((t) => {
+      if (!t[index]) return t;
+      const copy = [...t];
+      copy[index] = { ...copy[index], feedback };
+      return copy;
+    });
+  }, []);
+
   // Retry a failed turn: drop it and resend its question.
   const retry = useCallback(
     (index: number) => {
@@ -284,5 +299,6 @@ export function useChat({
     reset,
     openConversation,
     openThread,
+    setFeedback,
   };
 }

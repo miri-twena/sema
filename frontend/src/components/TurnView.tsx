@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import type { ChatTurn } from "../hooks/useChat";
+import type { TurnFeedback } from "../lib/api";
 import { ChatMessage } from "./ChatMessage";
 import { AssistantResponseCard } from "./AssistantResponseCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
@@ -17,10 +18,12 @@ export const TurnView = memo(function TurnView({
   isFirst,
   answerRef,
   conversationId,
+  clientId,
   getThreadCount,
   onDrill,
   onRetry,
   onAsk,
+  onFeedback,
 }: {
   turn: ChatTurn;
   index: number;
@@ -33,12 +36,20 @@ export const TurnView = memo(function TurnView({
    * panel itself (nested drills aren't supported) and wherever there is no
    * server conversation yet. */
   conversationId?: string;
+  /** Which client's DB this turn belongs to -- needed alongside conversationId
+   * to persist feedback. Undefined inside the drill panel, same as
+   * conversationId (feedback is skipped there regardless). */
+  clientId?: string;
   /** Stable per-conversation lookup for a widget's existing thread follow-up
    * count (badges). See DrillChat.ThreadCountLookup. */
   getThreadCount?: ThreadCountLookup;
   onDrill?: (ctx: DrillContext) => void;
   onRetry?: (index: number) => void;
   onAsk?: (q: string) => void;
+  /** Persists this turn's feedback (answer_feedback_prompt.md) -- undefined
+   * inside the drill panel, where conversationId is also undefined and
+   * feedback is out of scope. */
+  onFeedback?: (index: number, feedback: TurnFeedback | null) => void;
 }) {
   const r = turn.response;
   return (
@@ -70,10 +81,13 @@ export const TurnView = memo(function TurnView({
               dir={turn.dir}
               turnIndex={index}
               conversationId={conversationId}
+              clientId={clientId}
+              feedback={turn.feedback}
               getThreadCount={getThreadCount}
               onDrill={onDrill}
               onRetry={onRetry ? () => onRetry(index) : undefined}
               onAsk={onAsk}
+              onFeedback={onFeedback ? (fb) => onFeedback(index, fb) : undefined}
             />
           </ErrorBoundary>
         )

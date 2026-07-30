@@ -11,6 +11,7 @@ import { useHomeConfig } from "../../hooks/useHomeConfig";
 import { AccordionSection } from "./AccordionSection";
 import { HomeDashboard } from "../HomeDashboard";
 import { timeAgo } from "../../lib/time";
+import { AlertBuilder } from "./AlertBuilder";
 
 const KPI_LABELS: Record<HomeConfigKpiId, string> = {
   revenue: "Revenue",
@@ -357,12 +358,11 @@ function AlertsAccordion({
       return { ...p, alerts: { ...p.alerts, [id]: { ...current, ...patch } } };
     });
 
-  if (catalog.length === 0) {
-    return <p className="text-[0.78rem] text-muted py-2">No alerts are defined for this business yet.</p>;
-  }
-
   return (
     <div className="flex flex-col gap-2">
+      {catalog.length === 0 && (
+        <p className="text-[0.78rem] text-muted py-2">No alerts are defined for this business yet.</p>
+      )}
       {catalog.map((a) => {
         const cfg = config.alerts[a.id] ?? { enabled: true, threshold: null };
         return (
@@ -537,6 +537,8 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
             open={openSection === "alerts"}
             onToggle={() => openAndScroll("alerts")}
           >
+            <AlertBuilder />
+            <div className="my-3 border-t border-lineSoft" />
             <AlertsAccordion config={draft} update={update} catalog={alertsCatalog} />
             <p className="mt-3 text-[0.72rem] text-faint">Email / Slack delivery -- coming in a future release.</p>
           </AccordionSection>

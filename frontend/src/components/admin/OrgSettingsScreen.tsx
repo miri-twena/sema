@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Image as ImageIcon, Loader2 } from "lucide-react";
 import { api, ApiError, resolveApiUrl, type CurrencyInfo, type OrgSettings, type RetentionPolicy } from "../../lib/api";
 import { configureFormatting } from "../../lib/format";
+import { timeAgo } from "../../lib/time";
 import { useToast } from "./toast-context";
 
 const RETENTION_LABEL: Record<RetentionPolicy, string> = {
@@ -16,6 +17,31 @@ const NUMBER_FORMAT_LABEL: Record<string, string> = {
   "1,234.56": "1,234.56 (US/UK style)",
   "1.234,56": "1.234,56 (EU style)",
 };
+
+/** The "Last cleanup: 6 hours ago · 12 conversations deleted" status line
+ * under the retention selector (org_settings_gapfix_prompt.md Part 1) --
+ * read-only, reflects the scheduled background sweep's own last run. */
+function RetentionStatusLine({ settings }: { settings: OrgSettings }) {
+  if (settings.retention_policy === "forever") {
+    return <p className="mt-1.5 text-[0.75rem] text-faint">Automatic cleanup is off.</p>;
+  }
+  if (settings.last_retention_status === "error") {
+    return (
+      <p className="mt-1.5 text-[0.75rem] text-critical-fg">
+        Last cleanup attempt failed ({timeAgo(settings.last_retention_run_at)}): {settings.last_retention_error}
+      </p>
+    );
+  }
+  if (!settings.last_retention_run_at) {
+    return <p className="mt-1.5 text-[0.75rem] text-faint">No cleanup has run yet.</p>;
+  }
+  const count = settings.last_retention_deleted_count ?? 0;
+  return (
+    <p className="mt-1.5 text-[0.75rem] text-faint">
+      Last cleanup: {timeAgo(settings.last_retention_run_at)} · {count} conversation{count === 1 ? "" : "s"} deleted
+    </p>
+  );
+}
 
 /** One field group's section header -- small uppercase label, same style the
  * sidebar uses for "Organization admin". */
@@ -384,6 +410,7 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
             </option>
           ))}
         </select>
+        <RetentionStatusLine settings={settings} />
         {pendingRetention && pendingRetention !== settings.retention_policy && (
           <div className="mt-2 rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
             {retentionPreviewCount === null ? (

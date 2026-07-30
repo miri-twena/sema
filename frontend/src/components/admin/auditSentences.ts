@@ -42,6 +42,7 @@ const CATEGORY_LABEL: Record<string, { en: string; he: string }> = {
   home_config: { en: "Home screen", he: "מסך הבית" },
   data_source: { en: "Data sources", he: "מקורות נתונים" },
   impersonation: { en: "Impersonation", he: "התחזות" },
+  alert: { en: "Alerts", he: "התראות" },
 };
 
 export function auditCategoryLabel(action: string, dir: Dir): string {
@@ -85,6 +86,18 @@ const SENTENCES: Record<string, Sentence> = {
       : `${actorOf(e)} removed ${targetOf(e)} from the organization`,
   "user.invite_resent": (e, dir) =>
     dir === "rtl" ? `${actorOf(e)} שלח/ה שוב הזמנה ל-${targetOf(e)}` : `${actorOf(e)} resent an invite to ${targetOf(e)}`,
+  "semantic.draft_saved": (e, dir) =>
+    dir === "rtl"
+      ? `${actorOf(e)} שמר/ה טיוטה עבור ${targetOf(e)}`
+      : `${actorOf(e)} saved a draft for ${targetOf(e)}`,
+  "semantic.draft_discarded": (e, dir) =>
+    dir === "rtl"
+      ? `${actorOf(e)} מחק/ה את הטיוטה עבור ${targetOf(e)}`
+      : `${actorOf(e)} discarded the draft for ${targetOf(e)}`,
+  "semantic.draft_archived": (e, dir) =>
+    dir === "rtl"
+      ? `${actorOf(e)} סימן/ה את ${targetOf(e)} כמיושן (ממתין לפרסום)`
+      : `${actorOf(e)} marked ${targetOf(e)} as deprecated (pending publish)`,
   "semantic.published": (e, dir) =>
     dir === "rtl"
       ? `${actorOf(e)} פרסם/ה את המודל הסמנטי (${targetOf(e)})`
@@ -104,6 +117,23 @@ const SENTENCES: Record<string, Sentence> = {
     dir === "rtl"
       ? `${actorOf(e)} דיווח/ה על בעיה במקור הנתונים "${targetOf(e)}"`
       : `${actorOf(e)} reported a problem with the "${targetOf(e)}" data source`,
+  "alert.created": (e, dir) =>
+    dir === "rtl" ? `${actorOf(e)} יצר/ה את ההתראה "${targetOf(e)}"` : `${actorOf(e)} created the "${targetOf(e)}" alert`,
+  "alert.updated": (e, dir) =>
+    dir === "rtl" ? `${actorOf(e)} ערך/ה את ההתראה "${targetOf(e)}"` : `${actorOf(e)} edited the "${targetOf(e)}" alert`,
+  "alert.toggled": (e, dir) => {
+    const enabled = field(e.after, "enabled");
+    if (dir === "rtl") {
+      return enabled === false
+        ? `${actorOf(e)} ניטרל/ה את ההתראה "${targetOf(e)}"`
+        : `${actorOf(e)} הפעיל/ה את ההתראה "${targetOf(e)}"`;
+    }
+    return enabled === false
+      ? `${actorOf(e)} disabled the "${targetOf(e)}" alert`
+      : `${actorOf(e)} enabled the "${targetOf(e)}" alert`;
+  },
+  "alert.deleted": (e, dir) =>
+    dir === "rtl" ? `${actorOf(e)} מחק/ה את ההתראה "${targetOf(e)}"` : `${actorOf(e)} deleted the "${targetOf(e)}" alert`,
 };
 
 /** One human-readable sentence for an audit row, in the app's active

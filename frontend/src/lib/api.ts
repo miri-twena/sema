@@ -167,11 +167,21 @@ export interface ConversationSummary {
   message_count: number;
 }
 
-/** A stored turn; `payload` is the rendered answer for assistant turns. */
+/** A user's thumbs up/down on one answer (answer_feedback_prompt.md), plus an
+ * optional follow-up comment (only ever collected on a thumbs-down). */
+export interface TurnFeedback {
+  rating: "up" | "down";
+  comment: string | null;
+}
+
+/** A stored turn; `payload` is the rendered answer for assistant turns.
+ * `feedback` is populated only on a real conversation's assistant turns
+ * (never on a drill/thread turn -- see MessageActions/lib/conversations.ts). */
 export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   payload: ChatResponse | null;
+  feedback?: TurnFeedback | null;
 }
 
 /** A conversation plus its transcript -- what "reopen this chat" returns. */
@@ -234,6 +244,10 @@ export interface PublicOrgSettings {
   currency_symbol: string;
   currency_position: "prefix" | "suffix";
   number_format: string;
+  // UI chrome language ONLY -- the agent's answer language always mirrors
+  // the question regardless of this setting (org_settings_gapfix_prompt.md
+  // Part 2; see AGENTS.md's Agent Voice section).
+  language: "en" | "he";
 }
 
 export interface Health {
@@ -362,6 +376,70 @@ export interface AlertCatalogItem {
   label: string;
   metric_label: string;
   severity: "critical" | "warning";
+}
+
+// --- alert_templates_prompt.md: template-based alert builder ---------------
+export type AlertTemplateType = "pct_change" | "absolute_threshold" | "anomaly" | "streak";
+
+export interface AlertTemplateCatalogItem {
+  template: AlertTemplateType;
+  label: string;
+  label_he: string;
+  description: string;
+  description_he: string;
+  params: string[];
+}
+
+export interface AlertMetricCatalogItem {
+  metric: string;
+  label: string;
+}
+
+export interface AlertTestRequest {
+  metric: string;
+  template: AlertTemplateType;
+  params: Record<string, unknown>;
+}
+
+export interface AlertTestResult {
+  ok: boolean;
+  fire_count: number;
+  fire_dates: string[];
+  error: string | null;
+}
+
+export interface CreateAlertRequest {
+  name: string;
+  metric: string;
+  template: AlertTemplateType;
+  params: Record<string, unknown>;
+  severity: "critical" | "warning";
+}
+
+export interface UpdateAlertRequest {
+  name?: string;
+  metric?: string;
+  template?: AlertTemplateType;
+  params?: Record<string, unknown>;
+  severity?: "critical" | "warning";
+  enabled?: boolean;
+}
+
+export interface AlertRuleInfo {
+  id: string;
+  name: string;
+  metric: string;
+  metric_label: string;
+  template: string;
+  params: Record<string, unknown>;
+  severity: "critical" | "warning";
+  enabled: boolean;
+  system: boolean;
+  disabled_reason: string | null;
+  summary_en: string;
+  summary_he: string;
+  created_by: string | null;
+  updated_at: string;
 }
 
 export interface HomeConfigPreview {
@@ -539,6 +617,12 @@ export interface OrgSettings {
   retention_policy: RetentionPolicy;
   updated_at: string;
   conflict: boolean;
+  // The retention sweep's last run for this client -- null when it has
+  // never run yet (fresh install).
+  last_retention_run_at: string | null;
+  last_retention_deleted_count: number | null;
+  last_retention_status: "ok" | "error" | null;
+  last_retention_error: string | null;
 }
 
 export interface OrgSettingsUpdatePatch {
@@ -688,7 +772,9 @@ export type DataSourceStatus = "healthy" | "error" | "syncing" | "paused";
  * credentials, no connection editing, no manual sync trigger. */
 export interface DataSource {
   id: string;
-  type: DataSourceType;
+  /** Any connector catalog id (not just the original 3) once the add-flow
+   * (data_sources_add_prompt.md) is live. */
+  type: string;
   display_name: string;
   status: DataSourceStatus;
   last_sync_at: string | null;
@@ -697,12 +783,105 @@ export interface DataSource {
   primary_table: string | null;
   primary_date_field: string | null;
   entities: DataSourceEntity[];
+  origin: "config" | "connection" | "request" | "upload";
+  progress_step: "requested" | "configuring" | "testing" | "active" | "rejected" | null;
+  fingerprint: string | null;
 }
 
 export interface ReportProblemResponse {
   reported: boolean;
   source_id: string;
   audit_event_id: string;
+}
+
+// --- admin: data sources add-flow (data_sources_add_prompt.md) --------------
+export interface ConnectorCatalogItem {
+  id: string;
+  kind: "sql_db" | "saas_request" | "light";
+  label: string;
+  unlocks: Record<string, string>;
+  availability: "available" | "coming_soon" | "driver_pending";
+}
+
+export type SqlConnectorType = "postgres" | "mysql" | "mssql";
+
+export interface TestConnectionRequest {
+  connector_type: SqlConnectorType;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  ssl_enabled: boolean;
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  tables: string[];
+  write_access: boolean | null;
+  error: string | null;
+  readonly_user_sql: string | null;
+}
+
+export interface CreateConnectionRequest extends TestConnectionRequest {
+  display_name: string;
+  primary_table?: string | null;
+  primary_date_field?: string | null;
+  write_access_acknowledged: boolean;
+}
+
+export interface ClientConnectionInfo {
+  id: string;
+  connector_type: string;
+  display_name: string;
+  host: string;
+  port: number;
+  database_name: string;
+  username: string;
+  ssl_enabled: boolean;
+  fingerprint: string;
+  primary_table: string | null;
+  primary_date_field: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourceRequestCreate {
+  connector_type: string;
+  details: Record<string, string>;
+}
+
+export interface SourceRequestInfo {
+  id: string;
+  connector_type: string;
+  details: Record<string, unknown>;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterestResponse {
+  recorded: boolean;
+  connector_type: string;
+}
+
+export interface UploadColumnPlan {
+  source_name: string;
+  column_name: string;
+  sql_type: string;
+}
+
+export interface UploadInfo {
+  id: string;
+  table_name: string;
+  original_filename: string;
+  columns: UploadColumnPlan[];
+  row_count: number;
+}
+
+export interface SheetsInfo {
+  sa_email: string | null;
 }
 
 // --- admin: audit log (spec §3) ---------------------------------------------
@@ -874,6 +1053,11 @@ export const api = {
   deleteConversation: (id: string, clientId: string) =>
     sendJSON<null>("DELETE", `/api/conversations/${id}?${clientQuery(clientId)}`),
 
+  // --- per-answer feedback (answer_feedback_prompt.md) ---
+  // `rating: null` clears an existing rating and resolves to `null`.
+  sendFeedback: (req: { conversation_id: string; turn_index: number; rating: "up" | "down" | null; comment?: string; client_id: string }) =>
+    postJSON<TurnFeedback | null>("/api/feedback", req),
+
   // --- drill-down threads (widget-anchored, never in the sidebar) ---
   threads: (conversationId: string, clientId: string) =>
     getJSON<ThreadSummary[]>(
@@ -1017,6 +1201,21 @@ export const api = {
     },
     alertsCatalog: () => getJSON<AlertCatalogItem[]>("/api/admin/alerts-catalog"),
 
+    // --- admin: template-based alert builder (alert_templates_prompt.md) ---
+    alerts: {
+      templates: () => getJSON<AlertTemplateCatalogItem[]>("/api/admin/alerts/templates"),
+      metrics: () => getJSON<AlertMetricCatalogItem[]>("/api/admin/alerts/metrics"),
+      list: () => getJSON<AlertRuleInfo[]>("/api/admin/alerts"),
+      test: (req: AlertTestRequest) => postJSON<AlertTestResult>("/api/admin/alerts/test", req),
+      create: (req: CreateAlertRequest) =>
+        adminRequest<AlertRuleInfo>("POST", "/api/admin/alerts", req) as Promise<AlertRuleInfo>,
+      update: (alertId: string, req: UpdateAlertRequest) =>
+        adminRequest<AlertRuleInfo>(
+          "PATCH", `/api/admin/alerts/${encodeURIComponent(alertId)}`, req,
+        ) as Promise<AlertRuleInfo>,
+      remove: (alertId: string) => adminRequest<null>("DELETE", `/api/admin/alerts/${encodeURIComponent(alertId)}`),
+    },
+
     // --- admin: data sources (spec §4) ---
     dataSources: {
       list: () => getJSON<DataSource[]>("/api/admin/data-sources"),
@@ -1025,6 +1224,50 @@ export const api = {
           "POST",
           `/api/admin/data-sources/${encodeURIComponent(sourceId)}/report-problem`,
         ) as Promise<ReportProblemResponse>,
+
+      // --- add-flow (data_sources_add_prompt.md) ---
+      catalog: () => getJSON<ConnectorCatalogItem[]>("/api/admin/data-sources/catalog"),
+      sheetsInfo: () => getJSON<SheetsInfo>("/api/admin/data-sources/sheets-info"),
+      test: (req: TestConnectionRequest) =>
+        postJSON<TestConnectionResponse>("/api/admin/data-sources/test", req),
+      createConnection: (req: CreateConnectionRequest) =>
+        adminRequest<ClientConnectionInfo>(
+          "POST", "/api/admin/data-sources/connections", req,
+        ) as Promise<ClientConnectionInfo>,
+      updateConnection: (connectionId: string, req: CreateConnectionRequest) =>
+        adminRequest<ClientConnectionInfo>(
+          "PATCH", `/api/admin/data-sources/connections/${encodeURIComponent(connectionId)}`, req,
+        ) as Promise<ClientConnectionInfo>,
+      createRequest: (req: SourceRequestCreate) =>
+        adminRequest<SourceRequestInfo>(
+          "POST", "/api/admin/data-sources/requests", req,
+        ) as Promise<SourceRequestInfo>,
+      recordInterest: (connectorType: string) =>
+        adminRequest<InterestResponse>(
+          "POST", "/api/admin/data-sources/interest", { connector_type: connectorType },
+        ) as Promise<InterestResponse>,
+      /** Multipart upload -- same rationale as orgSettings.uploadLogo above:
+       * bypasses adminRequest so the browser sets its own multipart boundary. */
+      upload: (file: File) => uploadFile<UploadInfo>("/api/admin/data-sources/upload", file),
+      replaceUpload: (uploadId: string, file: File) =>
+        uploadFile<UploadInfo>(`/api/admin/data-sources/uploads/${encodeURIComponent(uploadId)}/replace`, file),
     },
   },
 };
+
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}${path}`, { method: "POST", body: form });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch {
+      // non-JSON error body -- keep the status-text fallback
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}

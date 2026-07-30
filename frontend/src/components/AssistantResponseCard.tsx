@@ -2,7 +2,7 @@ import { Suspense, lazy, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, Code2, Sparkles } from "lucide-react";
-import type { ChatResponse } from "../lib/api";
+import type { ChatResponse, TurnFeedback } from "../lib/api";
 import { Card } from "./ui/Card";
 import { KpiCards } from "./KpiCards";
 import { DataTable } from "./DataTable";
@@ -55,10 +55,13 @@ export function AssistantResponseCard({
   dir,
   turnIndex = 0,
   conversationId,
+  clientId,
+  feedback,
   getThreadCount,
   onDrill,
   onRetry,
   onAsk,
+  onFeedback,
 }: {
   response: ChatResponse;
   dir: "rtl" | "ltr";
@@ -70,6 +73,12 @@ export function AssistantResponseCard({
    * the home dashboard's overview KPIs, which have no parent conversation) ->
    * widgets drill ephemerally, exactly as before threads existed. */
   conversationId?: string;
+  /** Which client's DB this answer belongs to -- needed alongside
+   * conversationId/turnIndex to persist feedback. */
+  clientId?: string;
+  /** This turn's current feedback (answer_feedback_prompt.md), hydrated from
+   * the hosting turn -- undefined/null renders as unrated. */
+  feedback?: TurnFeedback | null;
   /** Stable lookup for an existing thread's follow-up count, keyed by turn +
    * widget. Undefined wherever conversationId is (no anchor, nothing to look
    * up). See DrillChat.ThreadCountLookup for the stability contract. */
@@ -79,6 +88,7 @@ export function AssistantResponseCard({
   /** Sends a follow-up in the SAME conversation -- drives clarification
    * choices and cannot-answer alternatives. */
   onAsk?: (q: string) => void;
+  onFeedback?: (feedback: TurnFeedback | null) => void;
 }) {
   const proseRef = useRef<HTMLDivElement>(null);
 
@@ -124,7 +134,15 @@ export function AssistantResponseCard({
           </div>
           <NoticeBadges notices={response.notices} dir={dir} />
           <ModeCard response={response} dir={dir} onAsk={onAsk} />
-          <MessageActions text={response.answer} onRetry={onRetry} />
+          <MessageActions
+            text={response.answer}
+            onRetry={onRetry}
+            conversationId={anchor?.conversationId}
+            turnIndex={anchor?.turnIndex}
+            clientId={clientId}
+            feedback={feedback}
+            onFeedbackChange={onFeedback}
+          />
         </div>
       </Card>
     );
@@ -234,7 +252,15 @@ export function AssistantResponseCard({
 
           <EvidencePanel evidence={response.evidence} dir={dir} />
 
-          <MessageActions text={copyPlain} onRetry={onRetry} />
+          <MessageActions
+            text={copyPlain}
+            onRetry={onRetry}
+            conversationId={anchor?.conversationId}
+            turnIndex={anchor?.turnIndex}
+            clientId={clientId}
+            feedback={feedback}
+            onFeedbackChange={onFeedback}
+          />
         </div>
       </div>
     </Card>

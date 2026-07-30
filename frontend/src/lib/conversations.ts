@@ -2,7 +2,7 @@
 // turns, and bucketing the sidebar list by time. Kept out of the components so
 // both can be tested without a DOM.
 
-import type { ChatResponse, ConversationMessage, ConversationSummary, Message } from "./api";
+import type { ChatResponse, ConversationMessage, ConversationSummary, Message, TurnFeedback } from "./api";
 import type { ProgressEvent } from "./progress";
 import { dirOf } from "./rtl";
 
@@ -16,6 +16,10 @@ export interface ChatTurn {
    * timer-driven or invented stages. Drives the live ProgressPanel shown while
    * the answer is streaming (cleared from view once the answer lands). */
   progress?: ProgressEvent[];
+  /** This answer's thumbs up/down (answer_feedback_prompt.md), hydrated from
+   * the stored transcript on reopen; undefined for a fresh (unrated, not yet
+   * loaded) turn, null once explicitly cleared. */
+  feedback?: TurnFeedback | null;
 }
 
 /** An answer stored before payloads were persisted (or whose payload failed to
@@ -57,6 +61,7 @@ export function turnsFromDetail(
       question: m.content,
       response: answer ? (answer.payload ?? textOnlyResponse(answer.content)) : null,
       dir: dirOf(m.content),
+      feedback: answer?.feedback ?? null,
     });
     history.push({ role: "user", content: m.content });
     if (answer) history.push({ role: "assistant", content: answer.content });

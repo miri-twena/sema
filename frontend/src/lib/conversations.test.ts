@@ -54,6 +54,31 @@ describe("turnsFromDetail", () => {
     expect(turns[0].response?.answer).toBe("Electronics fell.");
   });
 
+  it("hydrates feedback from the assistant message onto the turn", () => {
+    const { turns } = turnsFromDetail(
+      detail([
+        { role: "user", content: "why?", payload: null, feedback: null },
+        {
+          role: "assistant",
+          content: "text",
+          payload: answer(),
+          feedback: { rating: "down", comment: "wrong numbers" },
+        },
+      ]),
+    );
+    expect(turns[0].feedback).toEqual({ rating: "down", comment: "wrong numbers" });
+  });
+
+  it("defaults feedback to null when the assistant message has none", () => {
+    const { turns } = turnsFromDetail(
+      detail([
+        { role: "user", content: "why?", payload: null },
+        { role: "assistant", content: "text", payload: answer() },
+      ]),
+    );
+    expect(turns[0].feedback).toBeNull();
+  });
+
   it("uses the stored payload when there is one", () => {
     const { turns } = turnsFromDetail(
       detail([

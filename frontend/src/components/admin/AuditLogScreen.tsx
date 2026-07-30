@@ -13,6 +13,7 @@ const CATEGORIES = [
   { id: "org_settings", label: "Organization settings" },
   { id: "home_config", label: "Home screen" },
   { id: "data_source", label: "Data sources" },
+  { id: "alert", label: "Alerts" },
   { id: "impersonation", label: "Impersonation" },
 ];
 
