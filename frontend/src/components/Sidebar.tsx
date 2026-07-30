@@ -4,6 +4,7 @@ import type { Client, ConversationSummary } from "../lib/api";
 import { ConversationList, Rows } from "./ConversationList";
 import type { ConversationActions } from "./ConversationItem";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { UserFooter } from "./UserFooter";
 
 /**
  * Navigation and conversations only. Discovery questions (suggested /
@@ -201,6 +202,7 @@ export function Sidebar({
           onOpenAdmin={onOpenAdmin}
         />
       )}
+      <UserFooter />
     </aside>
   );
 }
