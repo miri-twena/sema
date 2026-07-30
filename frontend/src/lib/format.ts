@@ -1,6 +1,29 @@
 // Shared formatting helpers. Single source of truth for numbers/dates across
 // KPI cards, charts, and tables (previously duplicated in three components).
 
+/** Org-settings display config (spec §2: "currency and number format --
+ * display only, no conversion"). A module-level singleton rather than
+ * threading props through every KPI/chart/table call site -- App.tsx calls
+ * `configureFormatting()` once after fetching org-settings, and every
+ * formatter below reads it, the same "single source of truth, set once"
+ * shape client_registry's active-client ContextVar uses server-side. */
+let _currencySymbol = "$";
+let _currencyPosition: "prefix" | "suffix" = "prefix";
+// Drives ONLY full-precision separators (count format, table/chart values) --
+// the K/M abbreviation below stays a universal shorthand regardless of
+// locale, so it isn't re-derived from this.
+let _locale = "en-US";
+
+export function configureFormatting(settings: {
+  currency_symbol: string;
+  currency_position: "prefix" | "suffix";
+  number_format: string; // "1,234.56" (US/UK) or "1.234,56" (EU)
+}): void {
+  _currencySymbol = settings.currency_symbol;
+  _currencyPosition = settings.currency_position;
+  _locale = settings.number_format === "1.234,56" ? "de-DE" : "en-US";
+}
+
 /** How a value should read. `count` and `currency` differ deliberately:
  * money abbreviates (K/M) because magnitude is what matters at a glance,
  * counts never do because "1.2K customers" hides whether it's 1,200 or 1,249. */
@@ -26,7 +49,7 @@ export function compact(n: number): string {
   const a = Math.abs(n);
   if (a >= 1_000_000) return `${trimZeros((n / 1_000_000).toFixed(2))}M`;
   if (a >= 1_000) return `${trimZeros((n / 1_000).toFixed(1))}K`;
-  return n.toLocaleString();
+  return n.toLocaleString(_locale);
 }
 
 /** Columns whose values identify an entity. Such values are TEXT even when
@@ -52,10 +75,12 @@ export function formatMetric(value: unknown, type: MetricType): string {
 
   switch (type) {
     case "currency":
-      return `$${compact(value)}`;
+      return _currencyPosition === "prefix"
+        ? `${_currencySymbol}${compact(value)}`
+        : `${compact(value)}${_currencySymbol}`;
     case "count":
       // Always full precision with thousands separators: "1,247", never "1.2K".
-      return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      return value.toLocaleString(_locale, { maximumFractionDigits: 2 });
     case "percent":
       return `${value.toFixed(1)}%`;
     case "ratio":

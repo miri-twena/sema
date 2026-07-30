@@ -31,6 +31,21 @@ function execCommandCopy(text: string): boolean {
   return ok;
 }
 
+/** Strips common Markdown syntax the agent sometimes uses in short strings
+ * (bold numbers, inline code) so a copied recommendation reads as plain
+ * text, not raw markup. Deliberately minimal -- these are one-line
+ * action/why/impact strings, not full documents. */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/(\*\*\*|___)(.+?)\1/g, "$2")
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/(\*|_)(.+?)\1/g, "$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+}
+
 /** Plain text, with the execCommand fallback. Throws if both routes fail. */
 export async function copyText(text: string): Promise<void> {
   try {

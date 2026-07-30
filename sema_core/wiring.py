@@ -37,6 +37,7 @@ def get_response(
     request_id: str | None = None,
     on_progress=None,
     internal_context: str | None = None,
+    scope_id: str = "full",
 ) -> dict:
     """Return the response dict for a question (agent first, router fallback).
 
@@ -46,7 +47,10 @@ def get_response(
     (it's instant -- no meaningful progress to report). `request_id`
     correlates this call with the API request's log lines. `internal_context`
     is SERVER-built drill-down framing (never client free text) -- see
-    agent.run.
+    agent.run. `scope_id` is the requester's data-access scope, forwarded to
+    the agent only -- the rule-based router has no data-scope enforcement of
+    its own (it's a fixed set of curated reports, not a channel for arbitrary
+    SQL), so it doesn't need it.
     """
     # True when the agent was configured but crashed, so the router is a
     # DEGRADED path (not the normal no-key path) -- surfaced to the user.
@@ -59,6 +63,7 @@ def get_response(
                 request_id=request_id,
                 on_progress=on_progress,
                 internal_context=internal_context,
+                scope_id=scope_id,
             )
         except Exception:
             # Don't swallow silently: record the traceback AND flag the run so

@@ -31,7 +31,7 @@ from typing import Callable, Literal
 
 import pandas as pd
 
-from sema_core import queries
+from sema_core import data_scope, queries
 from sema_core.cache import ttl_cache
 from sema_core.client_registry import active_client_id
 from sema_core.obs import get_logger
@@ -145,11 +145,14 @@ def _same_weekday_history(daily: pd.DataFrame, col: str, target: date, weeks: in
     return [float(by_day[d]) for d in dates if d in by_day.index and pd.notna(by_day[d])]
 
 
-def _deviation(daily: pd.DataFrame, col: str, target: date) -> tuple[Literal["above", "below", "normal"], float | None]:
+def _deviation(
+    daily: pd.DataFrame, col: str, target: date, threshold_pct: float = ANOMALY_THRESHOLD_PCT
+) -> tuple[Literal["above", "below", "normal"], float | None]:
     """Yesterday's (or any day's) value vs. the average of the same weekday
     over the prior weeks. "normal" (with no deviation figure) whenever there
     isn't enough history to call it anything else -- silence is correct when
-    we can't actually tell."""
+    we can't actually tell. `threshold_pct` is home config's sensitivity
+    dial (sema_core.home_config.SENSITIVITY_MULTIPLIER x the default)."""
     by_day = daily.set_index(daily["day"].dt.date)[col]
     if target not in by_day.index or pd.isna(by_day[target]):
         return "normal", None
@@ -160,9 +163,9 @@ def _deviation(daily: pd.DataFrame, col: str, target: date) -> tuple[Literal["ab
     if not typical:
         return "normal", None
     deviation_pct = round((float(by_day[target]) - typical) / typical * 100, 1)
-    if deviation_pct >= ANOMALY_THRESHOLD_PCT:
+    if deviation_pct >= threshold_pct:
         return "above", deviation_pct
-    if deviation_pct <= -ANOMALY_THRESHOLD_PCT:
+    if deviation_pct <= -threshold_pct:
         return "below", deviation_pct
     return "normal", deviation_pct
 
@@ -202,14 +205,14 @@ _PULSE_METRICS = (
 )
 
 
-def _pulse(daily: pd.DataFrame, max_date: date) -> list[PulseResult]:
+def _pulse(daily: pd.DataFrame, max_date: date, anomaly_threshold_pct: float = ANOMALY_THRESHOLD_PCT) -> list[PulseResult]:
     weekday = _WEEKDAYS_SHORT[max_date.weekday()]
     results = []
     for key, label, col in _PULSE_METRICS:
         spark = _series(daily, col, max_date)
         if spark is None:
             continue  # no usable data for this metric -- omit its tile, don't fake one
-        status, deviation = _deviation(daily, col, max_date)
+        status, deviation = _deviation(daily, col, max_date, anomaly_threshold_pct)
         if status == "normal":
             status_label = "In normal range"
         else:
@@ -383,7 +386,9 @@ def _product_rank_shift_candidates(products: pd.DataFrame | None, max_date: date
     ]
 
 
-def _mtd_pace_candidates(daily: pd.DataFrame, max_date: date, as_of: str) -> list[dict]:
+def _mtd_pace_candidates(
+    daily: pd.DataFrame, max_date: date, as_of: str, notable_pct: float = MTD_NOTABLE_PCT
+) -> list[dict]:
     day_of_month = max_date.day
     if day_of_month < MIN_DAYS_INTO_MONTH:
         return []
@@ -407,7 +412,7 @@ def _mtd_pace_candidates(daily: pd.DataFrame, max_date: date, as_of: str) -> lis
         if cur_val is None or not prev_val:
             continue
         change_pct = round((cur_val - prev_val) / prev_val * 100, 1)
-        if abs(change_pct) < MTD_NOTABLE_PCT:
+        if abs(change_pct) < notable_pct:
             continue  # on-pace is the expected state -- only notable moves are insights
         rising = change_pct > 0
         label, fmt = _METRIC_LABEL[key], _METRIC_FORMAT[key]
@@ -448,7 +453,9 @@ def _rank_and_diversify(candidates: list[dict], max_n: int = MAX_INSIGHTS) -> li
     return [{k: v for k, v in c.items() if k != "_metric_group"} for c in ranked]
 
 
-def _build() -> dict:
+def _build(
+    anomaly_threshold_pct: float = ANOMALY_THRESHOLD_PCT, mtd_notable_pct: float = MTD_NOTABLE_PCT
+) -> dict:
     max_date = _max_date()
     if max_date is None:
         return {"as_of": None, "pulse": [], "insights": []}
@@ -457,7 +464,7 @@ def _build() -> dict:
     orders_df = _safe(queries.get_daily_orders, "daily_orders")
     sessions_df = _safe(queries.get_daily_sessions, "daily_sessions")
     daily = _merged_daily(orders_df, sessions_df)
-    pulse = _pulse(daily, max_date) if daily is not None else []
+    pulse = _pulse(daily, max_date, anomaly_threshold_pct) if daily is not None else []
     if not pulse:
         return {"as_of": as_of, "pulse": [], "insights": []}
 
@@ -469,7 +476,7 @@ def _build() -> dict:
     candidates += _product_rank_shift_candidates(
         _safe(queries.get_product_revenue_by_month, "product_revenue_by_month"), max_date, as_of
     )
-    candidates += _mtd_pace_candidates(daily, max_date, as_of)
+    candidates += _mtd_pace_candidates(daily, max_date, as_of, mtd_notable_pct)
 
     return {
         "as_of": as_of,
@@ -479,16 +486,77 @@ def _build() -> dict:
 
 
 @ttl_cache(ttl=86400, vary_on=active_client_id)
-def build_daily_brief() -> dict:
+def build_daily_brief(sensitivity: str = "balanced") -> dict:
     """The home dashboard's Daily Brief. Reads the ACTIVE client from the same
     ContextVar override /api/overview and /api/alerts already use, so it must
-    be set by the caller before this runs. Cached a day at a time per client
-    -- the underlying data changes at most once a day. Never raises for data
-    reasons: a client with no daily data at all still gets a structured
-    (empty) response, which the client renders as "hide the section".
+    be set by the caller before this runs. Cached a day at a time per
+    (client, sensitivity) -- the underlying data changes at most once a day,
+    and `sensitivity` becomes part of the cache key automatically (ttl_cache
+    keys on every argument, not just vary_on). Never raises for data reasons:
+    a client with no daily data at all still gets a structured (empty)
+    response, which the client renders as "hide the section".
+
+    `sensitivity` is home config's dial (sema_core.home_config,
+    "conservative"/"balanced"/"sensitive") scaling the anomaly/pace
+    thresholds that decide which insight CANDIDATES exist at all -- unlike
+    the pulse/insights layer TOGGLES (whole-layer visibility), which the API
+    layer applies as a post-filter since they don't change what's computed.
+
+    Deliberately NOT scope-filtered here: the cache is keyed per CLIENT, not
+    per requester, so baking one user's data-access scope into a shared cache
+    entry would leak into (or wrongly restrict) every other user's brief.
+    Call filter_for_scope() on the result instead, per request.
     """
+    from sema_core import home_config
+
+    multiplier = home_config.SENSITIVITY_MULTIPLIER.get(sensitivity, 1.0)
     try:
-        return _build()
+        return _build(ANOMALY_THRESHOLD_PCT * multiplier, MTD_NOTABLE_PCT * multiplier)
     except Exception:
         logger.warning("daily_brief: build failed for this client", exc_info=True)
         return {"as_of": None, "pulse": [], "insights": []}
+
+
+# Which domain each PULSE metric belongs to (sema_core.data_scope).
+_METRIC_DOMAIN = {
+    "revenue": "sales",
+    "orders": "sales",
+    "conversion": "marketing",
+}
+
+# Which domain each INSIGHT generator's `kind` belongs to -- unambiguous for
+# every kind except "yesterday_anomaly", which fires for any pulse metric
+# (revenue/orders -> sales, conversion -> marketing) and is resolved via
+# _METRIC_DOMAIN from its id instead (see _insight_domain below). Kept next
+# to the generators themselves so a new one is a one-line addition here too.
+_KIND_DOMAIN = {
+    "campaign_negative_roi": "marketing",
+    "vip_inactive": "customers",
+    "record_day": "sales",
+    "product_rank_shift": "sales",
+    "mtd_pace": "sales",
+}
+
+
+def _insight_domain(insight: dict) -> str:
+    if insight["kind"] == "yesterday_anomaly":
+        # id is f"yesterday_anomaly-{metric}-{as_of}" -- the metric is the
+        # one piece of information not otherwise in the (already-stripped)
+        # dict; embedding it in a stable id format is a lot cheaper than
+        # carrying a separate field just for this one filter.
+        parts = insight.get("id", "").split("-")
+        metric = parts[1] if len(parts) > 2 else ""
+        return _METRIC_DOMAIN.get(metric, "")
+    return _KIND_DOMAIN.get(insight["kind"], "")
+
+
+def filter_for_scope(brief: dict, scope_id: str) -> dict:
+    """Drop pulse tiles and insight cards this requester's data-access scope
+    doesn't allow (sema_core.data_scope) -- applied AFTER build_daily_brief's
+    per-client cache, so one user's scope never leaks into another's cached
+    brief. 'full' (the default) is a no-op copy."""
+    if scope_id == "full":
+        return brief
+    pulse = [p for p in brief["pulse"] if data_scope.domain_allowed(_METRIC_DOMAIN.get(p["metric"], ""), scope_id)]
+    insights = [i for i in brief["insights"] if data_scope.domain_allowed(_insight_domain(i), scope_id)]
+    return {**brief, "pulse": pulse, "insights": insights}

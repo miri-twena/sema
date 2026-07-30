@@ -20,6 +20,7 @@ export function Sidebar({
   clients,
   activeClientId,
   dbConnected,
+  orgLogoUrl,
   conversations,
   activeConversationId,
   conversationsLoading,
@@ -32,10 +33,14 @@ export function Sidebar({
   onSwitchClient,
   onNewConversation,
   onGoHome,
+  onOpenAdmin,
 }: {
   clients: Client[];
   activeClientId: string;
   dbConnected: boolean;
+  /** The active client's uploaded logo (org settings §2), or null/undefined
+   * to fall back to the initials avatar. */
+  orgLogoUrl?: string | null;
   conversations: ConversationSummary[];
   activeConversationId: string | null;
   conversationsLoading: boolean;
@@ -52,6 +57,8 @@ export function Sidebar({
   onNewConversation: () => void;
   /** Clicking the brand returns to the home screen (new chat). */
   onGoHome: () => void;
+  /** Opens the organization admin panel from the workspace switcher's gear. */
+  onOpenAdmin?: () => void;
 }) {
   // Search is toggled by the "Search conversations" control; open it, type to filter.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -189,7 +196,9 @@ export function Sidebar({
           clients={clients}
           activeId={activeClientId}
           dbConnected={dbConnected}
+          logoUrl={orgLogoUrl}
           onSwitch={onSwitchClient}
+          onOpenAdmin={onOpenAdmin}
         />
       )}
     </aside>

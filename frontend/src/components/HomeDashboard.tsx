@@ -305,7 +305,7 @@ export function HomeDashboard({
       <p className="text-sm text-muted mt-1.5">Here's what needs your attention today.</p>
 
       {/* 2 — today's executive brief (each chip opens a details dropdown) */}
-      <div ref={briefRef} className="flex flex-wrap gap-2 mt-5">
+      <div id="home-preview-alerts" ref={briefRef} className="flex flex-wrap gap-2 mt-5">
         {criticalAlerts.length > 0 && (
           <BriefChip
             bg={SEVERITY.critical.bg}
@@ -350,12 +350,14 @@ export function HomeDashboard({
       {/* 3 — daily brief: a pulse strip (always-fresh yesterday numbers) plus
           up to 3 ranked attention cards -- independent of the Business
           overview's period picker below, deliberately. */}
-      <DailyBrief brief={brief} onAsk={onPick} />
+      <div id="home-preview-daily-brief">
+        <DailyBrief brief={brief} onAsk={onPick} />
+      </div>
 
       {/* 4 — business overview (period picker in the header, so it never
           collides with a KPI card's own drill-down click) */}
       {overview === null ? (
-        <section className="mt-8" aria-busy="true">
+        <section id="home-preview-overview" className="mt-8" aria-busy="true">
           <SectionLabel>Business overview</SectionLabel>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[0, 1, 2, 3].map((i) => (
@@ -365,7 +367,7 @@ export function HomeDashboard({
         </section>
       ) : (
         overview.kpis.length > 0 && (
-          <section className="mt-8">
+          <section id="home-preview-overview" className="mt-8">
             <div className="flex items-center justify-between gap-3 mb-2">
               <SectionLabel className="">Business overview</SectionLabel>
               {onPeriodChange && overview.start && overview.end && overview.available_months.length > 0 && (
@@ -422,7 +424,7 @@ export function HomeDashboard({
           This is the sidebar's former question area, moved here so the sidebar
           can be navigation only. */}
       {(suggested.length > 0 || popularQuestions.length > 0) && (
-        <section className="mt-8">
+        <section id="home-preview-questions" className="mt-8">
           <SectionLabel>Start a conversation</SectionLabel>
           {suggested.length > 0 && (
             <>

@@ -400,6 +400,58 @@ def test_build_returns_empty_response_when_there_is_no_data_at_all(monkeypatch):
     assert out == {"as_of": None, "pulse": [], "insights": []}
 
 
+# --- filter_for_scope (sema_core.data_scope) --------------------------------
+
+def _brief(pulse_metrics: list[str], insights: list[dict]) -> dict:
+    return {
+        "as_of": "2026-07-13",
+        "pulse": [{"metric": m, "label": m, "value": 1, "format": "number",
+                   "spark": [], "status": "normal", "status_label": ""} for m in pulse_metrics],
+        "insights": insights,
+    }
+
+
+def test_filter_for_scope_full_is_a_no_op():
+    brief = _brief(["revenue", "orders", "conversion"], [{"kind": "vip_inactive", "id": "vip_inactive-2026-07-13"}])
+    assert daily_brief.filter_for_scope(brief, "full") == brief
+
+
+def test_filter_for_scope_sales_only_drops_conversion_pulse_tile():
+    brief = _brief(["revenue", "orders", "conversion"], [])
+    out = daily_brief.filter_for_scope(brief, "sales_only")
+    assert {p["metric"] for p in out["pulse"]} == {"revenue", "orders"}
+
+
+def test_filter_for_scope_sales_only_drops_customers_and_marketing_insights():
+    insights = [
+        {"kind": "vip_inactive", "id": "vip_inactive-2026-07-13"},
+        {"kind": "campaign_negative_roi", "id": "campaign_negative_roi-3-2026-07-13"},
+        {"kind": "record_day", "id": "record_day-revenue-2026-07-13"},
+    ]
+    out = daily_brief.filter_for_scope(_brief([], insights), "sales_only")
+    assert [i["kind"] for i in out["insights"]] == ["record_day"]
+
+
+def test_filter_for_scope_resolves_yesterday_anomaly_by_its_embedded_metric():
+    insights = [
+        {"kind": "yesterday_anomaly", "id": "yesterday_anomaly-conversion-2026-07-13"},
+        {"kind": "yesterday_anomaly", "id": "yesterday_anomaly-revenue-2026-07-13"},
+    ]
+    out = daily_brief.filter_for_scope(_brief([], insights), "sales_only")
+    # conversion -> marketing (blocked), revenue -> sales (allowed)
+    assert [i["id"] for i in out["insights"]] == ["yesterday_anomaly-revenue-2026-07-13"]
+
+
+def test_filter_for_scope_no_financials_keeps_marketing_and_customers():
+    insights = [
+        {"kind": "vip_inactive", "id": "vip_inactive-2026-07-13"},
+        {"kind": "campaign_negative_roi", "id": "campaign_negative_roi-3-2026-07-13"},
+    ]
+    out = daily_brief.filter_for_scope(_brief(["conversion"], insights), "no_financials")
+    assert {i["kind"] for i in out["insights"]} == {"vip_inactive", "campaign_negative_roi"}
+    assert {p["metric"] for p in out["pulse"]} == {"conversion"}
+
+
 def test_build_survives_a_query_failure(monkeypatch):
     _stub_data_bounds(monkeypatch, date(2026, 7, 13))
 

@@ -2,12 +2,15 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Menu, X } from "lucide-react";
 import {
   api,
+  resolveApiUrl,
   type Client,
   type Alert,
   type DailyBrief as DailyBriefResponse,
   type Overview,
   type PopularQuestion,
+  type PublicOrgSettings,
 } from "./lib/api";
+import { configureFormatting } from "./lib/format";
 import { useChat } from "./hooks/useChat";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
@@ -22,6 +25,9 @@ import type { DrillContext } from "./components/DrillChat";
 
 // Recharts + the drill panel are the heaviest parts; load them on demand.
 const DrillChat = lazy(() => import("./components/DrillChat").then((m) => ({ default: m.DrillChat })));
+// The admin panel is a separate full-page surface -- lazy so its screens and
+// their code never weigh on the main chat bundle (same rationale as DrillChat).
+const AdminPanel = lazy(() => import("./components/admin/AdminPanel").then((m) => ({ default: m.AdminPanel })));
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -30,6 +36,7 @@ export default function App() {
   const [popularQuestions, setPopularQuestions] = useState<PopularQuestion[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
+  const [orgSettings, setOrgSettings] = useState<PublicOrgSettings | null>(null);
   // The user's chosen period, tagged with the client it belongs to -- so
   // switching clients falls back to that client's default (its latest
   // complete month) instead of carrying over a period it may not even have.
@@ -39,6 +46,7 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillContext | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false); // mobile sidebar drawer
+  const [adminOpen, setAdminOpen] = useState(false); // organization admin panel
 
   const conversations = useConversations(activeId);
   const chat = useChat({
@@ -74,6 +82,27 @@ export default function App() {
     if (!activeId) return;
     api.alerts(activeId).then(setAlerts).catch(() => setAlerts([]));
     api.popularQuestions(activeId).then(setPopularQuestions).catch(() => setPopularQuestions([]));
+  }, [activeId]);
+
+  // Org settings (name/logo/currency/number format) drive the sidebar brand
+  // and the shared KPI/table/chart formatting util -- fetched per active
+  // client, same pattern as alerts/popularQuestions above. A failed fetch
+  // just keeps the built-in defaults (US-style "$", initials avatar) rather
+  // than breaking the app.
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    api
+      .orgSettings(activeId)
+      .then((s) => {
+        if (cancelled) return;
+        setOrgSettings(s);
+        configureFormatting(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
 
   // A period from a different client is ignored, so the server picks that
@@ -226,6 +255,7 @@ export default function App() {
       clients={clients}
       activeClientId={activeId}
       dbConnected={dbConnected}
+      orgLogoUrl={resolveApiUrl(orgSettings?.logo_path ?? null)}
       conversations={conversations.conversations}
       activeConversationId={chat.conversationId}
       conversationsLoading={conversations.loading}
@@ -238,8 +268,23 @@ export default function App() {
       onSwitchClient={switchClient}
       onNewConversation={newChat}
       onGoHome={newChat}
+      onOpenAdmin={() => {
+        setAdminOpen(true);
+        setDrawerOpen(false);
+      }}
     />
   );
+
+  // The admin panel is its own full-page surface (spec §4: "opens as a full
+  // page, not a modal"), so it replaces the whole chat shell rather than
+  // overlaying it. State-based, like the rest of the app's navigation.
+  if (adminOpen) {
+    return (
+      <Suspense fallback={<div className="h-screen bg-bg" />}>
+        <AdminPanel clientLabel={activeClient?.label ?? ""} onClose={() => setAdminOpen(false)} />
+      </Suspense>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-bg text-ink">

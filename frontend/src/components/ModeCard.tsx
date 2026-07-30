@@ -1,8 +1,9 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { HelpCircle, Info, Sparkles } from "lucide-react";
+import { HelpCircle, Info, Lock, Sparkles } from "lucide-react";
 import type { ChatResponse } from "../lib/api";
 import { CodeBlock, InlineCode } from "./CodeBlock";
+import { RecommendedActions } from "./RecommendedActions";
 
 /** Tappable suggestion pill. Sends the text as the next question, continuing
  * the SAME conversation -- the caller passes useChat.send, which keeps the
@@ -40,12 +41,28 @@ export function ModeCard({
   const mode = response.mode;
 
   if (mode === "off_topic") {
-    // Just a normal assistant bubble -- light, human, no chrome at all.
+    // A normal assistant bubble -- light, human, no analytical chrome --
+    // but the witty-redirect-plus-value flow still offers real follow-up
+    // questions and a couple of generic efficiency nudges, same as a
+    // regular answer would (just not data-bound: recommended actions here
+    // are informational, not click-to-drill).
+    const followUps = response.follow_up_questions ?? [];
+    const actions = response.actions ?? [];
     return (
-      <div className="sema-prose text-ink text-[0.94rem]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
-          {response.answer}
-        </ReactMarkdown>
+      <div>
+        <div className="sema-prose text-ink text-[0.94rem]">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
+            {response.answer}
+          </ReactMarkdown>
+        </div>
+        {followUps.length > 0 && onAsk && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            {followUps.map((q) => (
+              <Choice key={q} text={q} dir={dir} onAsk={onAsk} />
+            ))}
+          </div>
+        )}
+        {actions.length > 0 && <RecommendedActions actions={actions} dir={dir} />}
       </div>
     );
   }
@@ -72,6 +89,40 @@ export function ModeCard({
         <div className="mt-2 text-[0.75rem] text-muted">
           Or just type your own answer below.
         </div>
+      </div>
+    );
+  }
+
+  if (mode === "access_denied") {
+    // Data-access-scope refusal (sema_core.data_scope): policy, not failure --
+    // same quiet, neutral treatment as cannot_answer (no red/error styling),
+    // with a lock icon standing in for "why I can't answer this" so a scope
+    // block reads as a normal, expected boundary rather than something
+    // broken. follow_up_questions carries what the user CAN ask instead.
+    const canAskAbout = response.follow_up_questions ?? [];
+    return (
+      <div className="rounded-xl border border-line bg-surfaceAlt p-3.5">
+        <div className="flex items-center gap-1.5 mb-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-muted">
+          <Lock size={13} /> Not included in your access
+        </div>
+        <div className="sema-prose text-ink text-[0.92rem]">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
+            {response.answer}
+          </ReactMarkdown>
+        </div>
+
+        {canAskAbout.length > 0 && onAsk && (
+          <div className="mt-3">
+            <div className="flex items-center gap-1.5 mb-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-muted">
+              <Sparkles size={13} /> You could ask instead
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {canAskAbout.map((q) => (
+                <Choice key={q} text={q} dir={dir} onAsk={onAsk} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }

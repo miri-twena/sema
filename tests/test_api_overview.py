@@ -29,7 +29,7 @@ def test_overview_maps_contract_fields(monkeypatch):
     monkeypatch.setattr(
         main,
         "build_overview",
-        lambda start=None, end=None: {
+        lambda start=None, end=None, scope_id="full", config=None: {
             "kpis": [
                 {
                     "label": "Revenue · May 2026",
@@ -56,7 +56,7 @@ def test_overview_maps_contract_fields(monkeypatch):
 def test_route_forwards_the_requested_window(monkeypatch):
     seen = {}
 
-    def spy(start=None, end=None):
+    def spy(start=None, end=None, scope_id="full", config=None):
         seen["window"] = (start, end)
         return {"kpis": [], "start": start, "end": end, "available_months": []}
 
@@ -223,3 +223,28 @@ def test_all_reports_failing_yields_empty_overview(monkeypatch):
     out = overview_mod.build_overview()
     assert out["kpis"] == []
     assert out["available_months"] == []
+
+
+# --- scope_id filtering (sema_core.data_scope) -------------------------------
+
+def test_sales_only_scope_drops_at_risk_customers_kpi(monkeypatch):
+    _fake_reports(monkeypatch, {"2026-05": (1509, 1144142.93)}, max_date=date(2026, 5, 31))
+    out = overview_mod.build_overview(scope_id="sales_only")
+    labels = [k["label"] for k in out["kpis"]]
+    assert "At-Risk Customers" not in labels
+    assert any(l.startswith("Revenue") for l in labels)  # sales domain still shown
+
+
+def test_scope_with_no_allowed_domains_drops_every_kpi(monkeypatch):
+    _fake_reports(monkeypatch, {"2026-05": (1509, 1144142.93)}, max_date=date(2026, 5, 31))
+    out = overview_mod.build_overview(scope_id="custom")
+    assert out["kpis"] == []
+    # The period itself still resolves -- only the KPI cards are scope-gated.
+    assert out["start"] == "2026-05"
+
+
+def test_full_scope_keeps_every_kpi(monkeypatch):
+    _fake_reports(monkeypatch, {"2026-05": (1509, 1144142.93)}, max_date=date(2026, 5, 31))
+    out = overview_mod.build_overview(scope_id="full")
+    labels = {k["label"] for k in out["kpis"]}
+    assert "At-Risk Customers" in labels

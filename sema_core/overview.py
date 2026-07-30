@@ -31,7 +31,7 @@ from datetime import date
 
 import pandas as pd
 
-from sema_core import queries
+from sema_core import data_scope, queries
 from sema_core.obs import get_logger
 
 logger = get_logger("overview")
@@ -86,19 +86,22 @@ def _complete_months(keys: list[str], max_date: date | None) -> list[str]:
     return [k for k in keys if _month_end(k) <= max_date]
 
 
-def _resolve_window(start: str | None, end: str | None, selectable: list[str]) -> tuple[str, str]:
+def _resolve_window(
+    start: str | None, end: str | None, selectable: list[str], default_months: int = 1
+) -> tuple[str, str]:
     """Resolve the requested period against the months we actually have.
 
-    Unknown or inverted input falls back to the default (the latest complete
-    month) rather than erroring -- a stale bookmark or a hand-edited query
-    string must not break the page.
+    Unknown or inverted input falls back to the default -- the latest
+    `default_months` complete months (spec §1's home-config
+    "default_period_months") -- rather than erroring: a stale bookmark or a
+    hand-edited query string must not break the page.
     """
     valid = set(selectable)
     s = start if start in valid else None
     e = end if end in valid else None
     if s is None and e is None:
-        latest = selectable[-1]
-        return latest, latest
+        span = max(1, min(default_months, len(selectable)))
+        return selectable[-span], selectable[-1]
     s = s or e
     e = e or s
     return (e, s) if s > e else (s, e)  # type: ignore[return-value]
@@ -128,12 +131,15 @@ class ResolvedPeriod:
     baseline_label: str | None
 
 
-def resolve_period(start: str | None = None, end: str | None = None) -> ResolvedPeriod | None:
+def resolve_period(
+    start: str | None = None, end: str | None = None, default_months: int = 1
+) -> ResolvedPeriod | None:
     """Resolve a requested month range against the data this client actually has.
 
     Returns None when the revenue-by-month report is empty or unavailable --
     callers decide whether that means "no cards" or "no brief". `start`/`end`
-    are month keys ("2026-05"); omit both for the latest complete month.
+    are month keys ("2026-05"); omit both for the default window, the latest
+    `default_months` complete months (1 unless a home config says otherwise).
     """
     df = queries.get_revenue_by_month()
     if df is None or df.empty:
@@ -145,7 +151,7 @@ def resolve_period(start: str | None = None, end: str | None = None) -> Resolved
     # Fall back to every month if none is provably complete, rather than
     # resolving to an empty period.
     selectable = _complete_months(list(df["key"]), _max_order_date()) or list(df["key"])
-    resolved_start, resolved_end = _resolve_window(start, end, selectable)
+    resolved_start, resolved_end = _resolve_window(start, end, selectable, default_months)
 
     window = df[(df["key"] >= resolved_start) & (df["key"] <= resolved_end)]
     months = len(window)
@@ -173,11 +179,14 @@ def resolve_period(start: str | None = None, end: str | None = None) -> Resolved
     )
 
 
-def _period_kpis(period: ResolvedPeriod) -> list[dict]:
-    """Revenue / Orders / AOV for the selected window, vs the prior window."""
+def _period_kpis(period: ResolvedPeriod, deltas: dict[str, bool]) -> dict[str, dict]:
+    """Revenue / Orders / AOV for the selected window, vs the prior window,
+    keyed by their home_config.KPI_CATALOG id. `deltas` (home config's
+    per-KPI delta toggle) suppresses the delta/delta_label fields for a KPI
+    the admin chose to show as a bare number."""
     window, baseline = period.window, period.baseline
     if window.empty:
-        return []
+        return {}
 
     months = period.months
     revenue = float(window["revenue"].sum())
@@ -188,73 +197,95 @@ def _period_kpis(period: ResolvedPeriod) -> list[dict]:
     period_label = period.label
     delta_label = "vs prior month" if months == 1 else f"vs prior {months} months"
 
-    kpis = [
-        {
+    out = {
+        "revenue": {
             "label": f"Revenue · {period_label}",
             "value": round(revenue, 2),
             "format": "currency",
-            "delta": _pct_change(revenue, prev_revenue),
-            "delta_label": delta_label,
+            "delta": _pct_change(revenue, prev_revenue) if deltas.get("revenue", True) else None,
+            "delta_label": delta_label if deltas.get("revenue", True) else None,
         },
-        {
+        "orders": {
             "label": f"Orders · {period_label}",
             "value": orders,
             "format": "number",
-            "delta": _pct_change(orders, prev_orders),
-            "delta_label": delta_label,
+            "delta": _pct_change(orders, prev_orders) if deltas.get("orders", True) else None,
+            "delta_label": delta_label if deltas.get("orders", True) else None,
         },
-    ]
+    }
     if orders:
         aov = revenue / orders
         prev_aov = prev_revenue / prev_orders if prev_revenue and prev_orders else None
-        kpis.append(
-            {
-                "label": f"AOV · {period_label}",
-                "value": round(aov, 2),
-                "format": "currency",
-                "delta": _pct_change(aov, prev_aov),
-                "delta_label": delta_label,
-            }
-        )
-    return kpis
+        out["aov"] = {
+            "label": f"AOV · {period_label}",
+            "value": round(aov, 2),
+            "format": "currency",
+            "delta": _pct_change(aov, prev_aov) if deltas.get("aov", True) else None,
+            "delta_label": delta_label if deltas.get("aov", True) else None,
+        }
+    return out
 
 
-def build_overview(start: str | None = None, end: str | None = None) -> dict:
+def build_overview(
+    start: str | None = None, end: str | None = None, scope_id: str = "full", config: dict | None = None
+) -> dict:
     """Headline KPIs for the active client's home dashboard.
 
-    `start`/`end` are month keys ("2026-05"); omit both for the default (the
-    latest complete month). Returns the KPIs plus the resolved window and the
-    months a user may select, so the UI's period picker can only offer periods
-    that actually have complete data.
+    `start`/`end` are month keys ("2026-05"); omit both for the default
+    window (the latest complete month, or `config`'s default_period_months).
+    Returns the KPIs plus the resolved window and the months a user may
+    select, so the UI's period picker can only offer periods that actually
+    have complete data.
+
+    `scope_id` (sema_core.data_scope) drops KPIs outside the requester's data
+    access: Revenue/Orders/AOV are the `sales` domain, At-Risk Customers is
+    `customers`. 'full' (the default) never drops anything.
+
+    `config` is the client's effective home config (sema_core.home_config) --
+    which KPIs to show, in what order, with or without a delta. None (every
+    caller before this feature shipped, and any client with nothing
+    published) falls back to home_config.DEFAULT_CONFIG, reproducing the
+    exact original behavior: Revenue, Orders, AOV, At-Risk Customers, all
+    four, all with deltas where meaningful.
     """
+    from sema_core import home_config
+
+    cfg = config or home_config.DEFAULT_CONFIG
+    kpi_order = cfg["kpis"]["order"]
+    kpi_deltas = cfg["kpis"]["deltas"]
+
     resolved_start: str | None = None
     resolved_end: str | None = None
     selectable: list[str] = []
-    kpis: list[dict] = []
+    kpi_by_id: dict[str, dict] = {}
 
     try:
-        period = resolve_period(start, end)
+        period = resolve_period(start, end, cfg["default_period_months"])
         if period is not None:
             selectable = period.selectable
             resolved_start, resolved_end = period.start, period.end
-            kpis.extend(_period_kpis(period))
+            if data_scope.domain_allowed("sales", scope_id):
+                kpi_by_id.update(_period_kpis(period, kpi_deltas))
     except Exception:
         logger.warning("overview: revenue_by_month unavailable for this client", exc_info=True)
 
     # Churn risk is a right-now snapshot (customers with no completed order in
     # the last 90 days), so it isn't scoped by the selected period.
-    try:
-        at_risk = queries.get_at_risk_customers()
-        if at_risk is not None:
-            kpis.append(
-                {
+    if "churn_risk" in kpi_order:
+        try:
+            at_risk = queries.get_at_risk_customers()
+            if at_risk is not None and data_scope.domain_allowed("customers", scope_id):
+                kpi_by_id["churn_risk"] = {
                     "label": "At-Risk Customers",
                     "value": int(len(at_risk)),
                     "format": "number",
                 }
-            )
-    except Exception:
-        logger.warning("overview: at_risk_customers unavailable for this client", exc_info=True)
+        except Exception:
+            logger.warning("overview: at_risk_customers unavailable for this client", exc_info=True)
+
+    # Preserve the admin's chosen order; silently drop an id whose data isn't
+    # available (report failed, scope blocked it, ...) rather than erroring.
+    kpis = [kpi_by_id[k] for k in kpi_order if k in kpi_by_id]
 
     return {
         "kpis": kpis,
