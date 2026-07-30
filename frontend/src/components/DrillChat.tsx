@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronsLeft, X } from "lucide-react";
 import { useChat } from "../hooks/useChat";
 import { useChatScroll } from "../hooks/useChatScroll";
+import { drillPlaceholder } from "../lib/chatCopy";
+import { useUiLang } from "../lib/useUiLang";
 import { ChatInput } from "./ChatInput";
 import { ScrollToLatest } from "./ScrollToLatest";
 import { TurnView } from "./TurnView";
@@ -107,6 +109,10 @@ export function DrillChat({
   // The header shows the title in full; the placeholder still needs a short
   // form so it stays readable on one line.
   const shortTitle = widget.title.length > 40 ? widget.title.slice(0, 40) + "…" : widget.title;
+  // The input's ghost placeholder follows the ORG's language (same source as
+  // the main chat input) -- distinct from `dir` above, which mirrors the
+  // ORIGINAL question's language for the rest of this panel's static UI.
+  const lang = useUiLang();
   const { scrollRef, lastAnswerRef, onScroll, showScrollToLatest, scrollToLatest, reattach } =
     useChatScroll(chat.turns);
 
@@ -299,7 +305,7 @@ export function DrillChat({
             // Ghost text, not a pre-filled value -- a pre-filled input blocked
             // the user from just typing their own question.
             suggestion={widget.initialInput}
-            placeholder={dir === "rtl" ? `שאל/י לגבי ${shortTitle}...` : `Ask about ${shortTitle}...`}
+            placeholder={drillPlaceholder(lang, shortTitle)}
           />
         </div>
       </aside>

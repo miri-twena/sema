@@ -6,6 +6,8 @@ import {
   filterByTitle,
   previewSplit,
 } from "../lib/conversations";
+import { NEW_CONVERSATION } from "../lib/chatCopy";
+import { useUiLang } from "../lib/useUiLang";
 import { ConversationItem, type ConversationActions } from "./ConversationItem";
 import { SidebarSection } from "./SidebarSection";
 
@@ -132,6 +134,7 @@ export function ConversationList({
   /** When non-empty, show a flat list of title matches instead of groups. */
   search?: string;
 }) {
+  const lang = useUiLang();
   if (error) {
     return <div className="px-1 py-2 text-[0.78rem] text-muted">Couldn't load chat history.</div>;
   }
@@ -163,7 +166,10 @@ export function ConversationList({
     return (
       <div className="px-2 py-2 text-[0.78rem] text-faint leading-relaxed">
         No conversations yet. Start one with{" "}
-        <span className="font-medium text-ink">New conversation</span>.
+        <span className="font-medium text-ink" dir="auto">
+          {NEW_CONVERSATION[lang]}
+        </span>
+        .
       </div>
     );
   }

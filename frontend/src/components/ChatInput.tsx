@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, Send, Square } from "lucide-react";
+import { CHAT_PLACEHOLDER } from "../lib/chatCopy";
+import { useUiLang } from "../lib/useUiLang";
 
 // Collapsed auto-grow cap: 6 lines of text-sm (20px leading) + py-1.5 padding.
 const MAX_COLLAPSED_PX = 6 * 20 + 12;
@@ -27,6 +29,10 @@ export function ChatInput({
   const [expanded, setExpanded] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
+  // Org-language default, used only when the caller doesn't pass its own
+  // placeholder (e.g. DrillChat always does, with its own interpolated text).
+  const lang = useUiLang();
+  const defaultPlaceholder = CHAT_PLACEHOLDER[lang];
 
   // A new suggestion re-enables the ghost even if a previous one was dismissed.
   useEffect(() => setDismissed(false), [suggestion]);
@@ -98,15 +104,22 @@ export function ChatInput({
             }
           }}
           rows={1}
+          // While empty, the placeholder's own language decides direction
+          // (chat_placeholder_language_prompt.md item 1) -- browsers don't
+          // reliably apply dir="auto" to placeholder text the way they do to
+          // a real value, so this can't just be a static "auto". Once there's
+          // real input, "auto" takes over and follows whatever's actually
+          // typed (an English question stays LTR even with a Hebrew org).
+          dir={value ? "auto" : lang === "he" ? "rtl" : "ltr"}
           // The ghost overlay is aria-hidden (it's decorative once it stopped
           // being clickable), so the suggestion is announced from here instead.
           aria-label={
             showGhost
-              ? `${placeholder || "Ask about revenue, customers, campaigns..."}. Suggested follow-up: ${suggestion}. Press Tab to accept.`
-              : placeholder || "Ask about revenue, customers, campaigns..."
+              ? `${placeholder || defaultPlaceholder}. Suggested follow-up: ${suggestion}. Press Tab to accept.`
+              : placeholder || defaultPlaceholder
           }
           // Blank the placeholder while the ghost shows so they don't overlap.
-          placeholder={showGhost ? "" : placeholder || "Ask about revenue, customers, campaigns..."}
+          placeholder={showGhost ? "" : placeholder || defaultPlaceholder}
           className={`w-full resize-none bg-transparent outline-none text-sm leading-5 text-ink placeholder:text-faint py-1.5 overflow-y-auto sema-scroll ${
             expanded ? "h-[40vh]" : ""
           }`}

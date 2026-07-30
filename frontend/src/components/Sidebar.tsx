@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import type { Client, ConversationSummary } from "../lib/api";
+import { NEW_CONVERSATION } from "../lib/chatCopy";
+import { useUiLang } from "../lib/useUiLang";
 import { ConversationList, Rows } from "./ConversationList";
 import type { ConversationActions } from "./ConversationItem";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -61,6 +63,7 @@ export function Sidebar({
   /** Opens the organization admin panel from the workspace switcher's gear. */
   onOpenAdmin?: () => void;
 }) {
+  const lang = useUiLang();
   // Search is toggled by the "Search conversations" control; open it, type to filter.
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -111,7 +114,7 @@ export function Sidebar({
           onClick={onNewConversation}
           className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white text-sm font-medium py-2 shadow-bubble hover:bg-primary/90 transition"
         >
-          <Plus size={16} strokeWidth={2.5} /> New conversation
+          <Plus size={16} strokeWidth={2.5} /> <span dir="auto">{NEW_CONVERSATION[lang]}</span>
         </button>
 
         {searchOpen ? (
