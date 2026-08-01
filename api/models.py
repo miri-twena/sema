@@ -27,7 +27,14 @@ class DrillContextRequest(BaseModel):
     from the client are never trusted or forwarded to the model as framing."""
 
     kind: Literal["kpi", "chart", "table", "action"]
-    title: str = Field(max_length=200)
+    # 500, not a short-label size: for kind="action" this is the FULL
+    # recommended-action sentence (RecommendedActions.tsx sends it verbatim,
+    # unlike the short kpi/chart/table titles), and the agent is explicitly
+    # instructed to make those sentences specific -- citing exact numbers,
+    # segments, and multiple entity names -- which routinely runs past 200
+    # chars, especially in Hebrew. A too-low cap here 422s the request with
+    # no useful message, and Retry can't help since it resends the same title.
+    title: str = Field(max_length=500)
     detail: str = Field(default="", max_length=2000)
 
 

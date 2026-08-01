@@ -142,7 +142,7 @@ def test_api_rejects_oversized_drill_fields():
     with pytest.raises(Exception):  # pydantic ValidationError -> 422 at the boundary
         ChatRequest(
             question="hi",
-            drill_context={"kind": "kpi", "title": "x" * 500, "detail": ""},
+            drill_context={"kind": "kpi", "title": "x" * 501, "detail": ""},
         )
 
 
