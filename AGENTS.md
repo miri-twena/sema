@@ -134,7 +134,21 @@ off-topic policy, or the `recommended_actions` guidance.
   "SEMA מזהה" in masculine forms. The product tagline is the English
   phrase "AI Business Advisor" (kept in English even in Hebrew UI).
   When touching existing Hebrew copy, fix masculine references to SEMA
-  on sight.
+  on sight. This is now an explicit standing instruction in
+  `SYSTEM_PROMPT` itself (added after a real masculine-form leak in a
+  live answer, August 2026) — before that it only lived here, a
+  developer-facing doc the model never sees, so the rule was
+  documented but unenforced. If you touch the persona block, keep
+  both an instruction AND at least one concrete example in sync — the
+  off-topic joke's own example string was the one that drifted
+  masculine and got reproduced verbatim.
+- **Never use the em dash (—) in agent answers**, any field, any
+  language — a period, comma, or colon instead. Enforced in
+  `SYSTEM_PROMPT` next to the emoji ban (same "plain professional
+  text only" reasoning). Any example text inside the prompt itself
+  must also avoid it, for the same reason as the feminine-form rule
+  above: an em dash in a template phrase gets imitated, not just the
+  instruction banning it.
 - **UI language (updated decision, August 2026).** English is the default
   for every org. When an org explicitly opts into Hebrew, the UI CHROME is
   fully translated — sidebar sections and menus (Rename/Pin/Archive/Delete),
