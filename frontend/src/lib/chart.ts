@@ -49,6 +49,31 @@ export function periodSubtitle(rows: Row[], x?: string | null): string | null {
  * earlier `offset={7}` that looked like it should have fixed it. */
 export const BAR_VALUE_LABEL_OFFSET = 8;
 
+// More points than this on a single-series line/area chart and per-point
+// labels start colliding (a daily series over a few months is the motivating
+// case) -- past the threshold only first/last/min/max survive, mirroring the
+// x-axis's own DENSE_TICK_THRESHOLD idea of "past a point, show the
+// meaningful ones instead of everything." The screenshot's 13 monthly points
+// stay under this, so they all get labels.
+export const LINE_LABEL_DENSITY_THRESHOLD = 16;
+
+/** Which point indices get a value label on a single-series line/area chart.
+ * At or under the threshold every point does; past it, only the first, last,
+ * min, and max survive (a flat/short series can make these overlap in index,
+ * which is fine -- it's a Set). */
+export function lineLabelIndices(values: number[]): Set<number> {
+  if (values.length <= LINE_LABEL_DENSITY_THRESHOLD) {
+    return new Set(values.map((_, i) => i));
+  }
+  let minI = 0;
+  let maxI = 0;
+  values.forEach((v, i) => {
+    if (v < values[minI]) minI = i;
+    if (v > values[maxI]) maxI = i;
+  });
+  return new Set([0, values.length - 1, minI, maxI]);
+}
+
 export interface XAxisTickStyle {
   angle: number;
   textAnchor: "middle" | "end";

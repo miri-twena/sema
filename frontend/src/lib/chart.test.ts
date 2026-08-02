@@ -3,6 +3,8 @@ import {
   barVisualState,
   HIGHLIGHT_ANNOTATION,
   highlightPoint,
+  LINE_LABEL_DENSITY_THRESHOLD,
+  lineLabelIndices,
   matchesHighlight,
   niceAxis,
   periodSubtitle,
@@ -182,6 +184,32 @@ describe("barVisualState", () => {
     expect(state.fill).toBe(`${CHART_PALETTE[0]}3D`);
     expect(state.categoryColor).toBe("#94A3B8");
     expect(state.valueColor).toBe("#94A3B8");
+  });
+});
+
+describe("lineLabelIndices", () => {
+  it("labels every point at or under the threshold (13 monthly points)", () => {
+    const values = Array.from({ length: 13 }, (_, i) => i * 10);
+    expect(lineLabelIndices(values)).toEqual(new Set(values.map((_, i) => i)));
+  });
+
+  it("labels every point exactly at the threshold", () => {
+    const values = Array.from({ length: LINE_LABEL_DENSITY_THRESHOLD }, (_, i) => i);
+    expect(lineLabelIndices(values).size).toBe(LINE_LABEL_DENSITY_THRESHOLD);
+  });
+
+  it("past the threshold, keeps only first/last/min/max", () => {
+    // 20 daily points; min at index 5, max at index 15.
+    const values = Array.from({ length: 20 }, () => 50);
+    values[5] = 10;
+    values[15] = 90;
+    expect(lineLabelIndices(values)).toEqual(new Set([0, 19, 5, 15]));
+  });
+
+  it("collapses to fewer than 4 indices when first/last coincide with min/max", () => {
+    // Strictly increasing: min is index 0 (== first), max is the last index.
+    const values = Array.from({ length: 20 }, (_, i) => i);
+    expect(lineLabelIndices(values)).toEqual(new Set([0, 19]));
   });
 });
 

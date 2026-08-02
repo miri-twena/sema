@@ -28,6 +28,7 @@ import {
   BAR_VALUE_LABEL_OFFSET,
   HIGHLIGHT_ANNOTATION,
   highlightPoint,
+  lineLabelIndices,
   matchesHighlight,
   niceAxis,
   periodSubtitle,
@@ -107,6 +108,14 @@ export function ChartRenderer({
   // Line/Area/Pie animate fine, so this is scoped to Bar only. Correctness
   // (bars must actually render) wins over the entrance animation here.
   const barAnimation = { isAnimationActive: false };
+  // Same StrictMode double-invoke family, different symptom: Area's shape
+  // itself renders fine mid-animation (confirmed above), but its LabelList
+  // visibility is gated on an animation-end callback (AreaLabelListProvider's
+  // `showLabels`) that never fires under the double-render -- value labels on
+  // the single-series line chart stayed invisible indefinitely (verified live:
+  // still 0 label <text> nodes 5s after mount, well past the 600ms duration).
+  // Only the single-series branch carries labels, so only it needs this.
+  const lineAnimation = { isAnimationActive: false };
 
   const axis = { stroke: "#94A3B8", fontSize: 12, axisLine: false, tickLine: false };
   const grid = <CartesianGrid stroke="#EEF2F7" vertical={false} />;
@@ -333,8 +342,34 @@ export function ChartRenderer({
     // one `line` chart kind the backend contract actually has.
     const tick = xAxisTickStyle(rows.length);
     const hl = highlightPoint(rows as Row[], x, y, highlight_x);
+    const lineRows = rows as Row[];
+    const yKey = y;
+    const labelIndices = lineLabelIndices(lineRows.map((r) => Number(r[yKey]) || 0));
+
+    // Same shared offset bar labels use (BAR_VALUE_LABEL_OFFSET) -- one
+    // spacing convention for every chart type. `offset`/`position` on
+    // LabelList are ignored once `content` is custom, same reason as bars,
+    // so the shift is applied inside the renderer itself.
+    const lineValueLabel = (props: { x?: number | string; y?: number | string; value?: unknown; index?: number }) => {
+      const index = props.index ?? 0;
+      if (!labelIndices.has(index)) return null;
+      const lx = Number(props.x) || 0;
+      const ly = Number(props.y) || 0;
+      return (
+        <text x={lx} y={ly - BAR_VALUE_LABEL_OFFSET} textAnchor="middle" fontSize={12} fontWeight={600} fill="#334155">
+          {fmt(props.value)}
+        </text>
+      );
+    };
+
     body = (
-      <AreaChart data={rows as Row[]} margin={{ bottom: tick.height > 24 ? tick.height - 24 : 0 }}>
+      <AreaChart
+        data={lineRows}
+        // Top headroom for the highest point's label -- it's always shown
+        // (min/max survive the density guard), so this can't be conditional
+        // the way the bottom margin is.
+        margin={{ top: 24, bottom: tick.height > 24 ? tick.height - 24 : 0 }}
+      >
         {grid}
         <XAxis
           dataKey={x}
@@ -355,8 +390,10 @@ export function ChartRenderer({
           fillOpacity={0.08}
           dot={{ r: 3 }}
           activeDot={{ r: 5 }}
-          {...animation}
-        />
+          {...lineAnimation}
+        >
+          <LabelList dataKey={yKey} content={lineValueLabel} />
+        </Area>
         {/* Spotlights a real backend-chosen point (e.g. the month it's
             explaining) -- never an invented annotation; absent entirely when
             highlight_x isn't in the data. */}
