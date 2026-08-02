@@ -25,3 +25,15 @@ export const SEVERITY: Record<string, { bg: string; fg: string }> = {
   critical: { bg: "#FEE2E2", fg: "#DC2626" },
   warning: { bg: "#FEF9C3", fg: "#CA8A04" },
 };
+
+/** Brand mark palette (Logo.tsx) -- same lavender as tailwind's `primary`
+ * token (#6C74F0), duplicated here because inline SVG fill/stroke attributes
+ * can't read Tailwind classes, same reasoning as the rest of this file. */
+export const BRAND = {
+  lavender: "#6C74F0",
+  lavender400: "#949CFF",
+  lavender200: "#C7CDFF",
+  lavender700: "#5B62C4",
+  coral: "#F2887C",
+  ink: "#15161C",
+} as const;

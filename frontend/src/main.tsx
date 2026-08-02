@@ -1,6 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+// Self-hosted display faces for the brand wordmark/tagline (Logo.tsx) only --
+// see index.css's comment for why these are JS imports, not a CSS @import.
+import "@fontsource/syne/700.css";
+import "@fontsource/manrope/600.css";
 import App from "./App.tsx";
 import { LoginPage } from "./components/login/LoginPage.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary";

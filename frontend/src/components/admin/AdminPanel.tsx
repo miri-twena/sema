@@ -15,6 +15,7 @@ import { OrgSettingsScreen } from "./OrgSettingsScreen";
 import { AuditLogScreen } from "./AuditLogScreen";
 import { HomeConfigScreen } from "./HomeConfigScreen";
 import { DataSourcesScreen } from "./DataSourcesScreen";
+import { Logo } from "../brand/Logo";
 
 // The client panel's nav (spec §4). Every item is built now; none render as
 // disabled "Coming soon" placeholders any more.
@@ -55,8 +56,10 @@ export function AdminPanel({
             >
               <ArrowLeft size={15} /> Back to SEMA
             </button>
-            <div className="mt-3 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-faint">
-              <img src="/favicon.svg" alt="" width={18} height={18} className="shrink-0" aria-hidden />
+            <div className="mt-3">
+              <Logo size={22} />
+            </div>
+            <div className="mt-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-faint">
               Organization admin
             </div>
           </div>

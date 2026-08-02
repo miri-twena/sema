@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import type { LoginState } from "../../hooks/useLoginFlow";
+import { Logo } from "../brand/Logo";
 
 export function CodeStep({
   lang,
@@ -23,10 +24,7 @@ export function CodeStep({
   return (
     <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
       <div className="flex flex-col items-center mb-[26px]">
-        <div className="flex items-center justify-center gap-[9px]">
-          <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
-          <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
-        </div>
+        <Logo size={52} stacked tagline />
         <p className="text-[13.5px] text-muted mt-2" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
           {t.codeSentTo(state.email)}
         </p>

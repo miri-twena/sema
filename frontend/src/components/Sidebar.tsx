@@ -6,6 +6,7 @@ import { ConversationList, Rows } from "./ConversationList";
 import type { ConversationActions } from "./ConversationItem";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { UserFooter } from "./UserFooter";
+import { Logo } from "./brand/Logo";
 
 // Resizable width (sidebar_improvements_prompt.md item 1). The sidebar is
 // ALWAYS on the left (AGENTS.md's anchored-layout rule), so "resize" only
@@ -171,8 +172,7 @@ export function Sidebar({
           title="Home"
           className="flex items-center gap-2.5 mb-1 rounded-lg -mx-1 px-1 py-0.5 hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
         >
-          <span className="inline-block w-7 h-7 rounded-lg bg-gradient-to-br from-primary via-sky to-mint" />
-          <span className="text-xl font-semibold text-ink">SEMA</span>
+          <Logo size={24} />
         </button>
         <div className="text-xs text-muted mb-4 ps-1">AI Business Advisor</div>
 

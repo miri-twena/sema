@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { LOGIN_COPY, type ErrorKind, type Lang } from "../../lib/loginCopy";
+import { Logo } from "../brand/Logo";
 
 // Only the network/provider-cancel error offers a retry -- uninvited/
 // suspended/expired_invite are terminal for this attempt (spec §2.2: the
@@ -25,9 +26,8 @@ export function ErrorScreen({
 
   return (
     <div className="w-full max-w-sm text-center">
-      <div className="flex items-center justify-center gap-[9px] mb-6">
-        <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
-        <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
+      <div className="flex items-center justify-center mb-6">
+        <Logo size={40} stacked />
       </div>
       <div
         role="alert"

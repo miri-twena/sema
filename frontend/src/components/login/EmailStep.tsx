@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Loader2, Mail } from "lucide-react";
 import { LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import { SSOButton } from "./SSOButton";
+import { Logo } from "../brand/Logo";
 
 export function EmailStep({
   lang,
@@ -38,10 +39,7 @@ export function EmailStep({
       )}
 
       <div className="flex flex-col items-center mb-7">
-        <div className="flex items-center justify-center gap-[9px]">
-          <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
-          <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
-        </div>
+        <Logo size={52} stacked tagline />
         <p className="text-[13.5px] text-muted mt-2">{t.headline}</p>
       </div>
 

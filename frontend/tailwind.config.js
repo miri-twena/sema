@@ -44,7 +44,15 @@ export default {
         },
         warning: { bg: "#FEF9C3", fg: "#B45309" },
       },
-      fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
+      fontFamily: {
+        sans: ["Inter", "system-ui", "sans-serif"],
+        // Logo wordmark ONLY (Logo.tsx) -- never headings, buttons, or body
+        // copy. Logo.tsx currently sets this inline rather than via this
+        // class (no build-time SVGR/JSX-className wiring needed for it), but
+        // the token is declared here too so any future Tailwind usage stays
+        // on the same family name instead of a second hardcoded string.
+        display: ["Syne", "system-ui", "sans-serif"],
+      },
       boxShadow: {
         card: "0 6px 24px rgba(30,41,59,0.05)",
         pop: "0 10px 34px rgba(30,41,59,0.16)",
