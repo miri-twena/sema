@@ -23,3 +23,6 @@ var/
 
 # Eval run-to-run diff state (regenerated each run; source of truth is the DB)
 evals/.last_run/
+
+# Scratch/temp output
+tmp/

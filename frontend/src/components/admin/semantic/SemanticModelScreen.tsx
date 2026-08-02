@@ -34,7 +34,7 @@ export function SemanticModelScreen({ clientLabel }: { clientLabel: string }) {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto px-8 py-8">
+    <div className="max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-8 py-8">
       <div className="text-[0.75rem] text-muted mb-2" dir="auto">
         {clientLabel || "Workspace"} <span className="text-faint">›</span> Organization admin
       </div>

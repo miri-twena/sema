@@ -1,0 +1,92 @@
+# Production-shaped local test of the single-service deployment.
+#
+# This is the SAME image docs/deployment.md tells you to deploy (api/
+# Dockerfile.prod) -- run it locally via this compose file to verify
+# SEMA_ENV=production's fail-fast checks, the API serving the built
+# frontend from its own origin, and volume persistence BEFORE trying it on
+# a real platform (Railway/Render/etc., which typically build straight from
+# api/Dockerfile.prod rather than from this compose file).
+#
+# Set SEMA_HOST_PORT to publish on something other than 8000 (e.g. to run
+# this alongside docker-compose.yml's dev stack, which already uses 8000).
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in every value marked "REQUIRED in
+#      production" there (LLM key, SEMA_SECRETS_KEY, SEMA_API_KEY,
+#      SEMA_PUBLIC_URL, real Postgres passwords) -- api/main.py refuses to
+#      boot with any of them missing/left at the dev default once
+#      SEMA_ENV=production.
+#   2. Set SEMA_ENV=production in that .env.
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#   4. Open http://localhost:8000 -- the API serves the built frontend on
+#      the SAME port. No separate frontend service, no CORS between two
+#      local origins to configure.
+#
+# Unlike docker-compose.yml (dev), nothing is bind-mounted from the host:
+# the image is a fixed, built artifact and state lives in named volumes
+# only -- recreating the container preserves everything; only
+# `docker compose -f docker-compose.prod.yml down -v` destroys it.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sema-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sema_db}
+      POSTGRES_USER: ${POSTGRES_USER:-sema_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sema_password}
+    volumes:
+      - sema_pgdata_prod:/var/lib/postgresql/data
+      # Bootstrap scripts: create insurance_db + the read-only role on a
+      # fresh volume only (same as docker-compose.yml).
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sema_user} -d ${POSTGRES_DB:-sema_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No published port by default: only the api service (same compose
+    # network) needs to reach it. Uncomment to inspect the DB directly.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile.prod
+    container_name: sema-api-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Overrides .env's POSTGRES_HOST/PORT for in-network resolution, same
+      # reason as docker-compose.yml: "localhost" inside this container is
+      # the container itself, not the postgres service.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    ports:
+      # Published on all interfaces (not loopback-only like the dev compose):
+      # this image REQUIRES SEMA_API_KEY to be set once SEMA_ENV=production
+      # (api/main.py's startup check refuses to boot otherwise), so unlike
+      # dev it's not "no auth at all" by default. Host port is configurable
+      # (SEMA_HOST_PORT) so this can run alongside docker-compose.yml's own
+      # dev stack on 8000 without a port conflict.
+      - "${SEMA_HOST_PORT:-8000}:8000"
+    volumes:
+      # SQLite conversation/org state -- see .env.example's SEMA_CONVERSATION_DB.
+      - sema_var_prod:/app/var
+      # The semantic model's *.yaml files (sql/semantic/, sql/insurance/
+      # semantic/) are mutated on disk by the admin panel's Publish/Restore
+      # flow (sema_core/semantic_editor.py's write_atomic) -- genuinely
+      # stateful application data, not just config, so it needs the same
+      # persistent-volume treatment as var/ or a published semantic model
+      # would revert to whatever was baked into the image on every restart.
+      - sema_semantic_prod:/app/sql
+
+volumes:
+  sema_pgdata_prod:
+  sema_var_prod:
+  sema_semantic_prod:

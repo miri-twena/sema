@@ -114,6 +114,19 @@ def not_configured_response() -> dict:
     return resp
 
 
+def quota_exceeded_response(message: str) -> dict:
+    """The daily-query-cap message (backend_qa_prompt.md item 5), built the
+    same way as not_configured_response: a plain response dict, no agent
+    call. mode="access_denied" gets it the SAME restrained rendering (no KPI
+    cards/chart/recommended actions) as a data-access-scope refusal -- the
+    prompt's own "same quiet policy-style response pattern" ask."""
+    resp = _empty_response()
+    resp["mode"] = "access_denied"
+    resp["reason_code"] = "daily_query_limit_reached"
+    resp["insight_text"] = message
+    return resp
+
+
 # Titling doesn't need the primary model's reasoning depth -- the small/fast
 # fallback model (Haiku) is plenty, and keeps the extra call cheap and quick.
 TITLE_MODEL = FALLBACK_MODEL or MODEL

@@ -1,7 +1,11 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Info } from "lucide-react";
 import type { AdminRole, RoleInfo } from "../../lib/api";
-import { useDismiss } from "../../hooks/useDismiss";
+import { usePopoverMenu } from "../../hooks/usePopoverMenu";
+import { PopoverMenu } from "../PopoverMenu";
+
+const LEGEND_WIDTH = 288; // w-72
+const LEGEND_EST_HEIGHT = 220;
 
 /** Roles keyed by id, for O(1) lookup from a row's current role. */
 export type RoleCatalog = Partial<Record<AdminRole, RoleInfo>>;
@@ -63,15 +67,18 @@ export function RoleTooltip({
  * way every other popover in the admin panel is.
  */
 export function RoleLegend({ roles }: { roles: RoleInfo[] }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss<HTMLDivElement>(open, close);
+  const { open, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLButtonElement>({
+    width: LEGEND_WIDTH,
+    estHeight: LEGEND_EST_HEIGHT,
+    align: "start",
+  });
 
   return (
-    <span ref={ref} className="relative inline-flex">
+    <span className="relative inline-flex">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="What can each role do?"
@@ -80,10 +87,12 @@ export function RoleLegend({ roles }: { roles: RoleInfo[] }) {
         <Info size={12} />
       </button>
       {open && (
-        <div
+        <PopoverMenu
+          pos={pos}
+          menuRef={menuRef}
           role="dialog"
-          aria-label="Role descriptions"
-          className="absolute top-full mt-1.5 start-0 z-30 w-72 max-w-[85vw] rounded-xl border border-line bg-surface shadow-pop p-3 normal-case tracking-normal"
+          ariaLabel="Role descriptions"
+          className="rounded-xl max-w-[85vw] p-3 normal-case tracking-normal"
         >
           <div className="flex flex-col gap-2.5">
             {roles.map((r) => (
@@ -93,7 +102,7 @@ export function RoleLegend({ roles }: { roles: RoleInfo[] }) {
               </div>
             ))}
           </div>
-        </div>
+        </PopoverMenu>
       )}
     </span>
   );

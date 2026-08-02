@@ -69,16 +69,23 @@ export function turnsFromDetail(
   return { turns, history };
 }
 
+/** The FIRST user question in a conversation's transcript -- what "Rerun"
+ * (rerun_conversation_prompt.md) resubmits fresh in a brand-new conversation.
+ * MVP scope is deliberately just this one message, not the whole turn
+ * sequence: later turns often depend on earlier answers and would drift.
+ * Undefined for a broken/empty conversation (no user message at all) -- the
+ * caller treats that as "nothing to rerun." */
+export function firstUserMessage(detail: { messages: ConversationMessage[] }): string | undefined {
+  return detail.messages.find((m) => m.role === "user")?.content;
+}
+
 // --- sidebar time grouping ---------------------------------------------------
 
 export type GroupId = "pinned" | "today" | "week" | "older";
 
-export const GROUP_LABELS: Record<GroupId, string> = {
-  pinned: "Pinned",
-  today: "Today",
-  week: "Previous 7 days",
-  older: "Older",
-};
+// Display labels for these live in locales/en.ts + he.ts (sidebar.groups) --
+// this module stays presentation-free, same as before, just without its own
+// English-only copy now that the app has a real i18n mechanism.
 
 export const GROUP_ORDER: GroupId[] = ["pinned", "today", "week", "older"];
 

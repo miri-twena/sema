@@ -127,6 +127,28 @@ def test_list_threads_reflects_a_drill(monkeypatch):
     assert summary.turn_count == 1
 
 
+# --- sidebar drill-count aggregation (sidebar_improvements_prompt.md item 3) --
+def test_list_conversations_aggregates_drill_count_across_threads(monkeypatch):
+    """The sidebar's per-row badge needs the TOTAL follow-up questions across
+    EVERY thread on the conversation, not per-thread turn_count -- 2 turns on
+    one widget's thread + 1 turn on a different widget's thread = 3."""
+    seed = _seed_conversation(monkeypatch)
+    monkeypatch.setattr(main, "get_response", _fake_get_response("x"))
+    main.chat(_drill_request(seed.conversation_id, question="Why?", kind="kpi", title="Revenue"))
+    main.chat(_drill_request(seed.conversation_id, question="Any other factor?", kind="kpi", title="Revenue"))
+    main.chat(_drill_request(seed.conversation_id, question="Why orders?", kind="kpi", title="Orders"))
+
+    (summary,) = main.list_conversations()
+    assert summary.drill_count == 3
+
+
+def test_list_conversations_drill_count_zero_when_no_drills(monkeypatch):
+    seed = _seed_conversation(monkeypatch)
+    (summary,) = main.list_conversations()
+    assert summary.id == seed.conversation_id
+    assert summary.drill_count == 0
+
+
 def test_list_threads_unknown_conversation_is_404():
     with pytest.raises(HTTPException) as exc:
         main.list_threads("nope")

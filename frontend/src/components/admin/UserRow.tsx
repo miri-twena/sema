@@ -1,12 +1,23 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { Mail, MoreHorizontal } from "lucide-react";
 import type { AdminDataScope, AdminRole, AdminUser } from "../../lib/api";
-import { useDismiss } from "../../hooks/useDismiss";
+import { usePopoverMenu } from "../../hooks/usePopoverMenu";
 import { initials, pastelFor } from "../../lib/avatar";
 import { daysUntil, timeAgo } from "../../lib/time";
+import { useT } from "../../locales";
+import { PopoverMenu } from "../PopoverMenu";
 import { RoleTooltip, type RoleCatalog } from "./RoleTooltip";
-import { ROLE_LABEL } from "./roleLabels";
 import { DataScopeControl, type ScopeInfo } from "./DataScopeControl";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../../lib/tokens";
+
+// Matches the menu's own `w-44` (11rem).
+const MENU_WIDTH = 176;
+const MENU_EST_HEIGHT = 190;
+
+/** Role -> identity hue index (lavender for admin, sky for analyst, mint for
+ * viewer) -- the same palette KPI cards/chart bars/tables use, so a role's
+ * color carries meaning consistently across the app. */
+const ROLE_HUE: Record<AdminRole, number> = { client_admin: 0, analyst: 2, viewer: 1 };
 
 /** Small avatar: initials on a deterministic pastel for real users, an
  * envelope for pending invites (which have no name yet). 32px per the mockup. */
@@ -35,9 +46,10 @@ function Avatar({ user }: { user: AdminUser }) {
 
 /** Pending badge shown on invited rows. */
 function PendingBadge() {
+  const t = useT();
   return (
     <span className="inline-flex items-center rounded-full bg-warning-bg px-2 py-0.5 text-[0.66rem] font-semibold text-warning-fg">
-      Pending
+      {t.admin.users.pending}
     </span>
   );
 }
@@ -76,13 +88,16 @@ export function UserRow({
   onResend: (id: string) => void;
   onOpenDetail: (user: AdminUser) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const t = useT();
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const closeMenu = useCallback(() => {
-    setMenuOpen(false);
+  const { open: menuOpen, close: closeMenuPos, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLButtonElement>({
+    width: MENU_WIDTH,
+    estHeight: MENU_EST_HEIGHT,
+  });
+  const closeMenu = () => {
+    closeMenuPos();
     setConfirmRemove(false);
-  }, []);
-  const menuRef = useDismiss<HTMLDivElement>(menuOpen, closeMenu);
+  };
 
   const invited = user.status === "invited";
   const suspended = user.status === "suspended";
@@ -99,13 +114,13 @@ export function UserRow({
         type="button"
         onClick={() => onOpenDetail(user)}
         className="min-w-0 flex-1 text-start rounded-lg -m-1 p-1 hover:bg-surfaceAlt/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
-        aria-label={`View details for ${invited ? user.email : displayName}`}
+        aria-label={t.admin.users.viewDetailsForLabel(invited ? user.email : displayName)}
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="truncate font-medium text-ink" dir="auto">
             {invited ? user.email : displayName}
           </span>
-          {user.is_self && <span className="shrink-0 text-muted font-normal">(you)</span>}
+          {user.is_self && <span className="shrink-0 text-muted font-normal">{t.admin.users.youSuffix}</span>}
           {user.title && !invited && (
             <span className="truncate text-muted font-normal" dir="auto">
               · {user.title}
@@ -120,11 +135,10 @@ export function UserRow({
         {invited && (
           <div className="text-[0.75rem]">
             {user.invite_expired ? (
-              <span className="text-critical-fg">Invite expired</span>
+              <span className="text-critical-fg">{t.admin.users.inviteExpired}</span>
             ) : (
               <span className="text-muted">
-                Invite sent · expires in {daysUntil(user.invite_expires_at)} day
-                {daysUntil(user.invite_expires_at) === 1 ? "" : "s"}
+                {t.admin.users.inviteSentExpiresIn(daysUntil(user.invite_expires_at))}
               </span>
             )}
           </div>
@@ -144,7 +158,7 @@ export function UserRow({
               aria-describedby={`role-desc-${user.id}`}
               tabIndex={0}
             >
-              {ROLE_LABEL[user.role]}
+              {t.common.roles[user.role]}
             </span>
           ) : user.is_self ? (
             <span
@@ -152,22 +166,34 @@ export function UserRow({
               aria-describedby={`role-desc-${user.id}`}
               tabIndex={0}
             >
-              {ROLE_LABEL[user.role]}
+              {t.common.roles[user.role]}
             </span>
           ) : (
-            <select
-              value={user.role}
-              aria-label={`Role for ${displayName}`}
-              aria-describedby={`role-desc-${user.id}`}
-              disabled={isLastActiveAdmin}
-              title={isLastActiveAdmin ? "The last active admin's role can't be changed." : undefined}
-              onChange={(e) => onChangeRole(user.id, e.target.value as AdminRole)}
-              className="w-full rounded-lg border border-line bg-surface px-2 py-1 text-[0.78rem] text-ink outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              <option value="client_admin">Admin</option>
-              <option value="analyst">Analyst</option>
-              <option value="viewer">Viewer</option>
-            </select>
+            <span className="flex items-center gap-1.5">
+              <span
+                className="shrink-0 inline-block w-[6px] h-[6px] rounded-[2px]"
+                style={{ background: CHART_PALETTE[ROLE_HUE[user.role]] }}
+                aria-hidden
+              />
+              <select
+                value={user.role}
+                aria-label={t.admin.users.roleForLabel(displayName)}
+                aria-describedby={`role-desc-${user.id}`}
+                disabled={isLastActiveAdmin}
+                title={isLastActiveAdmin ? t.admin.users.lastAdminRoleLocked : undefined}
+                onChange={(e) => onChangeRole(user.id, e.target.value as AdminRole)}
+                style={{
+                  borderColor: `${CHART_PALETTE[ROLE_HUE[user.role]]}66`,
+                  background: `${CHART_PALETTE[ROLE_HUE[user.role]]}1A`,
+                  color: CHART_PALETTE_TEXT[ROLE_HUE[user.role]],
+                }}
+                className="flex-1 min-w-0 rounded-lg border px-2 py-1 text-[0.78rem] outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                <option value="client_admin">{t.common.roles.client_admin}</option>
+                <option value="analyst">{t.common.roles.analyst}</option>
+                <option value="viewer">{t.common.roles.viewer}</option>
+              </select>
+            </span>
           )}
         </RoleTooltip>
       </div>
@@ -188,7 +214,7 @@ export function UserRow({
         {invited ? (
           <PendingBadge />
         ) : suspended ? (
-          <span className="text-warning-fg font-medium">Suspended</span>
+          <span className="text-warning-fg font-medium">{t.admin.users.suspendedStatus}</span>
         ) : (
           <span className="text-muted">{timeAgo(user.last_active_at)}</span>
         )}
@@ -203,31 +229,29 @@ export function UserRow({
               onClick={() => onResend(user.id)}
               className="text-[0.75rem] font-medium text-primary hover:underline"
             >
-              Resend
+              {t.admin.users.resend}
             </button>
             <button
               onClick={() => onRemove(user.id)}
               className="text-[0.75rem] text-muted hover:text-ink"
             >
-              Cancel
+              {t.common.cancel}
             </button>
           </>
         ) : user.is_self ? null : (
-          <div ref={menuRef} className="relative">
+          <div className="relative">
             <button
-              onClick={() => setMenuOpen((o) => !o)}
+              ref={triggerRef}
+              onClick={toggle}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              aria-label={`Actions for ${displayName}`}
+              aria-label={t.admin.users.actionsLabel(displayName)}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:bg-surfaceAlt hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
             >
               <MoreHorizontal size={16} />
             </button>
             {menuOpen && (
-              <div
-                role="menu"
-                className="absolute end-0 top-full mt-1 w-44 z-20 rounded-xl border border-line bg-surface shadow-pop p-1"
-              >
+              <PopoverMenu pos={pos} menuRef={menuRef} className="rounded-xl p-1">
                 <button
                   role="menuitem"
                   onClick={() => {
@@ -236,7 +260,7 @@ export function UserRow({
                   }}
                   className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] text-ink hover:bg-surfaceAlt transition"
                 >
-                  View details
+                  {t.admin.users.viewDetails}
                 </button>
                 {suspended ? (
                   <button
@@ -247,20 +271,20 @@ export function UserRow({
                     }}
                     className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] text-ink hover:bg-surfaceAlt transition"
                   >
-                    Reactivate user
+                    {t.admin.users.reactivateUser}
                   </button>
                 ) : (
                   <button
                     role="menuitem"
                     disabled={isLastActiveAdmin}
-                    title={isLastActiveAdmin ? "The last active admin can't be suspended." : undefined}
+                    title={isLastActiveAdmin ? t.admin.users.lastAdminSuspendLocked : undefined}
                     onClick={() => {
                       onSuspend(user.id);
                       closeMenu();
                     }}
                     className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] text-ink hover:bg-surfaceAlt disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition"
                   >
-                    Suspend user
+                    {t.admin.users.suspendUser}
                   </button>
                 )}
 
@@ -273,20 +297,20 @@ export function UserRow({
                     }}
                     className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] font-medium text-critical-fg hover:bg-critical-bg transition"
                   >
-                    Click again to remove
+                    {t.admin.users.clickAgainToRemove}
                   </button>
                 ) : (
                   <button
                     role="menuitem"
                     disabled={isLastActiveAdmin}
-                    title={isLastActiveAdmin ? "The last active admin can't be removed." : undefined}
+                    title={isLastActiveAdmin ? t.admin.users.lastAdminRemoveLocked : undefined}
                     onClick={() => setConfirmRemove(true)}
                     className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] text-critical-fg hover:bg-critical-bg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition"
                   >
-                    Remove from org
+                    {t.admin.users.removeFromOrg}
                   </button>
                 )}
-              </div>
+              </PopoverMenu>
             )}
           </div>
         )}

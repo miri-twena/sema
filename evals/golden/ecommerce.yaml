@@ -9,9 +9,16 @@
 # layer's alternative_definition computes -- the real number is 48.2%).
 # Always re-verify against the live DB when adding a question here.
 #
-# Re-verified 2026-07-16 after the dataset was extended to 13 months
-# (2025-06-01 .. 2026-06-30). Numbers that moved are noted inline with their
-# previous value, so a future reader can tell a data change from a regression.
+# Re-verified 2026-08-01 after demo_freshness_prompt.md made END_DATE relative
+# (last complete calendar month before today, currently 2025-07-01 ..
+# 2026-07-31). The March-2026-dip story stays pinned to real March by design;
+# the Summer-Sale/price-increase/email-lift story now lives in the window's
+# LAST month, which was June 2026 pre-fix and is July 2026 as of this
+# re-verification -- it will keep sliding forward every time the demo is
+# regenerated. Whoever next regenerates the demo data must re-verify this
+# file against the live DB and update the shifted-month questions/values
+# again (same manual process as any other re-verification here). Numbers
+# that moved are noted inline with their previous value.
 
 questions:
   - id: revenue_trend_peak_month
@@ -19,7 +26,7 @@ questions:
     assertions:
       contains_any: ["December", "Dec"]
       numeric_within:
-        - value: 1698041 # December 2025 revenue, the Q4 peak (was 1672356 pre-extension)
+        - value: 1639978 # December 2025 revenue, the Q4 peak (was 1698041 before the freshness fix)
           tolerance_pct: 10
       expects_sql: true
 
@@ -39,18 +46,18 @@ questions:
   - id: march_dip_category_driver
     question: "Which product category contributed most to the March 2026 revenue drop?"
     assertions:
-      # Feb->Mar: $427.7K -> $369.2K. That is a -$58.5K absolute drop -- the
+      # Feb->Mar: $455.8K -> $342.5K. That is a -$113.2K absolute drop -- the
       # LARGEST of any category, i.e. the biggest contributor to the decline.
-      # Note it is not the steepest by percentage (-13.7%; Sports & Outdoors
-      # falls -31%), so this question is deliberately about absolute
-      # contribution. Pre-extension the same category fell $499K -> $365K.
+      # Note it is not the steepest by percentage (-24.8%; Sports & Outdoors
+      # falls -28.7%), so this question is deliberately about absolute
+      # contribution.
       contains_any: ["Electronics"]
       expects_sql: true
 
   - id: march_dip_channel_driver
     question: "Which marketing channel underperformed in March 2026?"
     assertions:
-      contains_any: ["Meta"] # Feb->Mar order count: 200 -> 132, -34%, steepest of any channel
+      contains_any: ["Meta"] # Feb->Mar order count: 230 -> 126, -45.2%, steepest of any channel
       expects_sql: true
 
   - id: vip_customers_identified
@@ -63,7 +70,7 @@ questions:
     question: "What percentage of total revenue comes from the top 5% of customers?"
     assertions:
       numeric_within:
-        - value: 48.2 # 203 of 4054 paying customers = 48.2% of revenue (was 48.5% pre-extension)
+        - value: 47.9 # 202 of 4030 paying customers = 47.9% of revenue (was 48.2% before the freshness fix)
           tolerance_pct: 15
       expects_sql: true
 
@@ -71,62 +78,70 @@ questions:
     question: "How many customers are at risk of churning (no order in the last 90 days)?"
     assertions:
       # Customers with no completed order in the 90 days before the dataset's
-      # max order date. The cutoff moved 2026-03-02 -> 2026-04-01 with the
-      # extension (it is END_DATE - 90d by design), so this legitimately
-      # changed from 1845.
+      # max order date. The cutoff is END_DATE - 90d by design, so it moves
+      # with END_DATE every regeneration (currently 2026-05-02); the count
+      # itself is stable (1791, was 1795) because it's relative, not because
+      # the window didn't move.
       numeric_within:
-        - value: 1795
+        - value: 1791
           tolerance_pct: 15
       expects_sql: true
 
   - id: worst_campaign
     question: "Which marketing campaign has performed worst?"
     assertions:
-      # CORRECTED 2026-07-16. This previously asserted "Meta Retarget", on the
-      # assumption that the March dip campaign was the worst performer. It
-      # never was: verified against the live DB, the lowest ROAS belongs to
-      # "Email Campaign 4" (6.86), with Meta Retarget only second-worst
-      # (7.98). The old assertion passed by luck, because answers listing the
-      # bottom few campaigns happen to contain the substring "Meta".
-      # Both names are accepted: the two are close enough that a model
-      # reasonably naming either is not a regression, but a model naming a
-      # HIGH-ROAS campaign is.
+      # Re-verified 2026-08-01: lowest ROAS is "Meta Retarget - Electronics"
+      # (6.51), with "Email Campaign 4" a close second-worst (6.69) -- the
+      # two have swapped rank again since the last re-verification (was
+      # Email Campaign 4 6.86 / Meta Retarget 7.98), which is expected: their
+      # random campaign windows/budgets shift every regeneration. Both names
+      # stay accepted: the two are close enough that a model reasonably
+      # naming either is not a regression, but a model naming a HIGH-ROAS
+      # campaign is.
       contains_any: ["Email Campaign 4", "Meta Retarget"]
       expects_sql: true
 
-  # --- June 2026 scenarios (added with the 13-month extension) -------------
+  # --- "Summer Sale" scenarios: always the window's LAST month -------------
+  # These three stories (Summer Sale, Electronics price increase, Email
+  # lift) are all pinned to SUMMER_SALE_MONTH/PRICE_INCREASE_MONTH/
+  # EMAIL_LIFT_MONTH in data/generate_data.py, which is always the window's
+  # last calendar month -- June 2026 pre-freshness-fix, July 2026 as of this
+  # re-verification (2026-08-01). Whoever regenerates the demo again must
+  # bump the month in these questions (and re-verify the numbers) to match
+  # whatever the new last month is.
 
   - id: summer_sale_bought_growth
-    question: "Did June 2026 revenue growth come from more orders or higher order values?"
+    question: "Did July 2026 revenue growth come from more orders or higher order values?"
     assertions:
-      # Orders 1498 -> 1951 (+30%) but revenue only $1.236M -> $1.291M (+4.4%),
-      # because AOV fell $824.80 -> $661.46 (-19.8%) under heavy discounting.
+      # Orders 1501 -> 1861 (+24%) but revenue only $1.166M -> $1.190M (+2.0%),
+      # because AOV fell $777.08 -> $639.36 (-17.7%) under heavy discounting.
       # The answer must attribute growth to VOLUME, not order value.
       contains_any: ["order", "volume", "discount"]
       expects_sql: true
 
   - id: summer_sale_aov_direction
-    question: "What happened to average order value in June 2026 compared to May?"
+    question: "What happened to average order value in July 2026 compared to June?"
     assertions:
-      direction: down # $824.80 -> $661.46
+      direction: down # $777.08 -> $639.36
       numeric_within:
-        - value: 661.46
+        - value: 639.36
           tolerance_pct: 15
       expects_sql: true
 
   - id: electronics_price_increase
-    question: "Electronics prices went up in June 2026. What happened to Electronics revenue and units?"
+    question: "Electronics prices went up in July 2026. What happened to Electronics revenue and units?"
     assertions:
-      # Price +7% (realised avg unit price $409.68 -> $426.34), units
-      # 1521 -> 1425 (-6.3%), revenue $626K -> $612K (-2.2%, i.e. flat) --
-      # while every other category grew on the sale.
+      # Price +7% (realised avg unit price $409.60 -> $428.31), units
+      # 1404 -> 1270 (-9.5%), revenue $577K -> $549K (-4.8%) -- a real
+      # decline this cycle rather than flat, but still the only category
+      # that fell while every other category grew on the sale.
       contains_any: ["flat", "unit", "volume", "declin", "fell"]
       expects_sql: true
 
   - id: best_channel_june
-    question: "Which traffic source converted best in June 2026?"
+    question: "Which traffic source converted best in July 2026?"
     assertions:
-      contains_any: ["Email"] # 29.72% vs Direct 24.96%; Email is normally 3rd
+      contains_any: ["Email"] # 32.06% vs Direct 22.81%; Email is normally 2nd-3rd
       expects_sql: true
 
   # --- component-type + faithfulness coverage ------------------------------
@@ -139,8 +154,45 @@ questions:
     question: "Show me the monthly revenue trend as a chart."
     assertions:
       expects_sql: true
-      expects_components: ["chart"] # a trend question must draw a line/bar chart
+      expects_components: ["chart"]
+      expects_chart_kind: line # trend_line_charts_prompt.md: a time x-axis is ALWAYS a line chart
       faithful: true # no large revenue number in the prose may be ungrounded
+
+  # --- line vs. bar chart selection (trend_line_charts_prompt.md) -----------
+  # x-axis is a date/period sequence -> line, even asked in Hebrew, even for
+  # what reads like a "trend" question about a single thing (not a
+  # multi-category comparison). Mirrors the exact wording from the user
+  # report this task was filed against.
+
+  - id: revenue_by_month_is_a_line_chart_he
+    question: "הכנסות לפי חודש" # "Revenue by month"
+    assertions:
+      expects_sql: true
+      expects_components: ["chart"]
+      expects_chart_kind: line
+
+  - id: revenue_by_month_is_a_line_chart_en
+    question: "Revenue by month"
+    assertions:
+      expects_sql: true
+      expects_components: ["chart"]
+      expects_chart_kind: line
+
+  # x-axis is categorical (no inherent time order) -> bar, not line.
+
+  - id: revenue_by_category_is_a_bar_chart_he
+    question: "הכנסות לפי קטגוריה" # "Revenue by category"
+    assertions:
+      expects_sql: true
+      expects_components: ["chart"]
+      expects_chart_kind: bar
+
+  - id: revenue_by_category_is_a_bar_chart_en
+    question: "Show revenue by category as a chart."
+    assertions:
+      expects_sql: true
+      expects_components: ["chart"]
+      expects_chart_kind: bar
 
   - id: vip_list_full_table
     question: "List all our VIP customers (top 5% by lifetime revenue) with their lifetime revenue."
@@ -231,3 +283,35 @@ questions:
       expects_structured_actions: true
       no_truism_actions: true
       expects_sql: true
+
+  # --- drill-down language anchoring (bugfix_batch_prompt.md bug 2) ---------
+  # A drill-down's [SEMA-CONTEXT] carries the widget's title/detail in
+  # English ALWAYS (KpiCards/ChartRenderer/DataTable build that text as a
+  # hardcoded English literal regardless of the UI or question language --
+  # see frontend/src/components/KpiCards.tsx's `detail`), so these two cases
+  # deliberately mirror each other: same English context text, opposite
+  # parent-turn/follow-up language, to prove the model is anchoring the
+  # `summary` field to THIS TURN's question and not to the context block or
+  # the conversation's dominant language either way.
+
+  - id: drill_summary_hebrew_question_over_english_parent
+    question: "למה זה עלה?" # "Why did it go up?"
+    drill:
+      parent_question: "What was total revenue in July 2026?"
+      parent_answer: "Total revenue in July 2026 was $1,189,852, up 2.0% from June 2026."
+      context_kind: kpi
+      context_title: "Revenue · Jul 2026"
+      context_detail: "current value $1,189,852, up 2.0% MoM"
+    assertions:
+      summary_language: he
+
+  - id: drill_summary_english_question_over_hebrew_parent
+    question: "Why did it go up?"
+    drill:
+      parent_question: "מה היו ההכנסות ביולי 2026?"
+      parent_answer: "ההכנסות ביולי 2026 היו 1,189,852$, עלייה של 2.0% לעומת יוני 2026."
+      context_kind: kpi
+      context_title: "Revenue · Jul 2026"
+      context_detail: "current value $1,189,852, up 2.0% MoM"
+    assertions:
+      summary_language: en

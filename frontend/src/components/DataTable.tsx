@@ -20,6 +20,9 @@ import {
 import type { DataTableModel } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { followUpsLabel, formatCell } from "../lib/format";
+import { matchesHighlight } from "../lib/chart";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../lib/tokens";
+import { columnLabel } from "../lib/columnLabels";
 import { CopyableBlock } from "./CopyButton";
 import { copyRich, toHTMLTable, toTSV } from "../lib/clipboard";
 import { ThreadBadge } from "./ThreadBadge";
@@ -27,10 +30,6 @@ import { ThreadBadge } from "./ThreadBadge";
 type Row = Record<string, unknown>;
 
 const PAGE_SIZE = 50;
-
-function prettify(name: string): string {
-  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 /** RFC-4180 escaping: quote when the value contains a comma, quote or newline,
  * and double any embedded quotes. */
@@ -67,12 +66,18 @@ export function DataTable({
   anchor,
   threadCount,
   onDrill,
+  highlightValue,
 }: {
   table: DataTableModel;
   dir?: "rtl" | "ltr";
   anchor?: { conversationId: string; turnIndex: number };
   threadCount?: (title: string) => number | undefined;
   onDrill?: (ctx: DrillContext) => void;
+  /** The chart's own highlight_x, matched against this table's first column
+   * (answer-screen redesign) -- so the chart's emphasized bar and this
+   * table's emphasized row are always the SAME entity. Undefined/unmatched
+   * highlights nothing, same silent-absence rule the chart follows. */
+  highlightValue?: unknown;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const helper = createColumnHelper<Row>();
@@ -82,14 +87,14 @@ export function DataTable({
       table.columns.map((col) =>
         helper.accessor((row) => row[col], {
           id: col,
-          header: prettify(col),
+          header: columnLabel(col, dir),
           cell: (info) => formatCell(info.getValue(), col),
           // sort by the raw value (numbers/dates), not the formatted string
           sortingFn: "auto",
         }),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [table.columns],
+    [table.columns, dir],
   );
 
   const instance = useReactTable({
@@ -129,6 +134,7 @@ export function DataTable({
             `a table with columns ${table.columns.join(", ")}; ` +
             `${total} row(s), showing (JSON): ${JSON.stringify(table.rows.slice(0, 20))}`,
           dir,
+          hue: CHART_PALETTE[0],
           ...anchor,
         })
     : undefined;
@@ -171,18 +177,22 @@ export function DataTable({
           </button>
         </div>
       </div>
-      <div className="overflow-auto sema-scroll rounded-xl border border-line max-h-80">
+      <div className="rounded-xl border border-line overflow-hidden bg-surface">
+        <span className="block h-[3px] w-full" style={{ background: CHART_PALETTE[0] }} aria-hidden />
+        <div className="overflow-auto sema-scroll max-h-80">
         <table className="w-full text-sm">
           <thead>
             {instance.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
-                {hg.headers.map((h) => {
+                {hg.headers.map((h, colIndex) => {
                   const sorted = h.column.getIsSorted();
                   return (
                     <th
                       key={h.id}
                       onClick={h.column.getToggleSortingHandler()}
-                      className="bg-surfaceAlt text-[#475569] font-semibold text-start px-3 py-2 border-b border-line whitespace-nowrap cursor-pointer select-none hover:text-ink"
+                      className={`bg-surfaceAlt text-[#475569] font-semibold px-3 py-[9px] border-b border-line whitespace-nowrap cursor-pointer select-none hover:text-ink ${
+                        colIndex === 0 ? "text-start" : "text-end"
+                      }`}
                     >
                       <span className="inline-flex items-center gap-1">
                         {flexRender(h.column.columnDef.header, h.getContext())}
@@ -201,17 +211,49 @@ export function DataTable({
             ))}
           </thead>
           <tbody>
-            {instance.getRowModel().rows.map((row) => (
-              <tr key={row.id} className="hover:bg-surfaceAlt/60">
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2 border-b border-lineSoft text-ink whitespace-nowrap">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {instance.getRowModel().rows.map((row) => {
+              const firstCell = row.getVisibleCells()[0];
+              const highlighted = matchesHighlight(firstCell?.getValue(), highlightValue);
+              return (
+                <tr
+                  key={row.id}
+                  className="hover:bg-surfaceAlt/60"
+                  style={highlighted ? { background: `${CHART_PALETTE[0]}14` } : undefined}
+                >
+                  {row.getVisibleCells().map((cell, colIndex) => {
+                    const numeric = typeof cell.getValue() === "number";
+                    const isMeasureCell = highlighted && colIndex === 1;
+                    return (
+                      <td
+                        key={cell.id}
+                        className={`px-3 py-[9px] border-b border-lineSoft whitespace-nowrap ${
+                          numeric ? "text-end tabular-nums" : ""
+                        } ${highlighted && colIndex === 0 ? "font-semibold" : ""} ${
+                          isMeasureCell ? "font-semibold" : "text-ink"
+                        }`}
+                        style={isMeasureCell ? { color: CHART_PALETTE_TEXT[0] } : undefined}
+                      >
+                        {colIndex === 0 ? (
+                          <span className="inline-flex items-center gap-[7px]">
+                            <span
+                              className="shrink-0 inline-block w-[7px] h-[7px] rounded-sm"
+                              style={{ background: highlighted ? CHART_PALETTE[0] : "#CBD5E1" }}
+                              aria-hidden
+                            />
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </span>
+                        ) : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted">
@@ -227,7 +269,12 @@ export function DataTable({
         </div>
 
         {pageCount > 1 && (
-          <div className="flex items-center gap-1">
+          // Isolated LTR: pager digits/chevrons are LTR everywhere in the app
+          // (same convention as SQL/IDs), regardless of the answer's dir --
+          // otherwise an RTL ancestor mirrors this row's flex order while the
+          // chevron glyphs stay fixed, so "next" visually ends up on the left
+          // pointing away from its own action.
+          <div dir="ltr" className="flex items-center gap-1">
             <button
               onClick={() => instance.previousPage()}
               disabled={!instance.getCanPreviousPage()}

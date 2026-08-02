@@ -15,6 +15,8 @@ import {
   Tooltip,
   Legend,
   ReferenceDot,
+  ReferenceLine,
+  LabelList,
 } from "recharts";
 import { useRef } from "react";
 import { MessageSquareText, Image as ImageIcon, Table2 } from "lucide-react";
@@ -22,7 +24,12 @@ import type { Chart } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { followUpsLabel, formatX, makeAxisTickFormatter } from "../lib/format";
 import {
+  barVisualState,
+  BAR_VALUE_LABEL_OFFSET,
+  HIGHLIGHT_ANNOTATION,
   highlightPoint,
+  matchesHighlight,
+  niceAxis,
   periodSubtitle,
   pivot,
   prefersReducedMotion,
@@ -200,21 +207,124 @@ export function ChartRenderer({
       );
     }
   } else if (kind === "bar" && x && y) {
-    const tick = xAxisTickStyle(rows.length);
+    // Answer-screen redesign: one solid hue for every bar (height is the
+    // variable, not the color) -- UNLESS highlight_x picks out the one
+    // category this answer is about, in which case that bar stays full
+    // opacity and every other bar dims to 24% of the same hue (never a
+    // different color). matchesHighlight is the exact same match DataTable
+    // uses for its own row emphasis, so a chart and its table below it can
+    // never disagree about which entity is highlighted.
+    const barRows = rows as Row[];
+    const xKey = x;
+    const yKey = y;
+    const hasHighlight = barRows.some((r) => matchesHighlight(r[xKey], highlight_x));
+    const lang: "rtl" | "ltr" = dir === "rtl" ? "rtl" : "ltr";
+    const annotationLines = HIGHLIGHT_ANNOTATION[lang];
+
+    // Round the Y domain up past the tallest bar (spec: with a ~99%-tall bar
+    // there's no headroom left for its value label) -- standard nice-numbers
+    // rounding, e.g. 3,381 -> axis max 4,000, ticks every 1,000.
+    const maxValue = Math.max(0, ...barRows.map((r) => Number(r[yKey]) || 0));
+    const { max: axisMax, ticks: axisTicks } = niceAxis(maxValue);
+
+    const tick = xAxisTickStyle(barRows.length);
+    const barAxis = { stroke: "#94A3B8", fontSize: 11.5, axisLine: false, tickLine: false };
+    const barGrid = <CartesianGrid stroke="#F1F5F9" vertical={false} />;
+
+    const categoryTick = (props: { x?: number | string; y?: number | string; payload?: { value?: unknown } }) => {
+      const tx = Number(props.x) || 0;
+      const ty = Number(props.y) || 0;
+      const isMatch = matchesHighlight(props.payload?.value, highlight_x);
+      const { categoryColor, categoryWeight } = barVisualState(isMatch, hasHighlight);
+      return (
+        <text x={tx} y={ty + 12} textAnchor="middle" fontSize={12.5} fontWeight={categoryWeight} fill={categoryColor}>
+          {formatX(props.payload?.value)}
+        </text>
+      );
+    };
+
+    const valueLabel = (props: {
+      x?: number | string;
+      y?: number | string;
+      width?: number | string;
+      value?: unknown;
+      index?: number;
+    }) => {
+      const lx = Number(props.x) || 0;
+      const ly = Number(props.y) || 0;
+      const bw = Number(props.width) || 0;
+      const index = props.index ?? 0;
+      const isMatch = matchesHighlight(barRows[index]?.[xKey], highlight_x);
+      const { valueColor } = barVisualState(isMatch, hasHighlight);
+      return (
+        <text
+          x={lx + bw / 2}
+          y={ly - BAR_VALUE_LABEL_OFFSET}
+          textAnchor="middle"
+          fontSize={12}
+          fontWeight={600}
+          fill={valueColor}
+        >
+          {fmt(props.value)}
+        </text>
+      );
+    };
+
+    // Only the matched bar gets the in-bar annotation; every other index
+    // renders nothing -- absence of highlight_x (or no match in the data)
+    // means EVERY index returns null here, silently, same rule ReferenceDot
+    // already follows on the line branch.
+    const inBarAnnotation = (props: {
+      x?: number | string;
+      y?: number | string;
+      width?: number | string;
+      index?: number;
+    }) => {
+      const lx = Number(props.x) || 0;
+      const ly = Number(props.y) || 0;
+      const bw = Number(props.width) || 0;
+      const index = props.index ?? 0;
+      if (!matchesHighlight(barRows[index]?.[xKey], highlight_x)) return null;
+      const cx = lx + bw / 2;
+      return (
+        <text x={cx} y={ly} textAnchor="middle" fill="#fff" fontSize={10.5} fontWeight={600}>
+          <tspan x={cx} dy="1.2em">
+            {annotationLines[0]}
+          </tspan>
+          <tspan x={cx} dy="1.3em">
+            {annotationLines[1]}
+          </tspan>
+        </text>
+      );
+    };
+
     body = (
-      <BarChart data={rows as Row[]} barCategoryGap="28%" margin={{ bottom: tick.height > 24 ? tick.height - 24 : 0 }}>
-        {grid}
+      <BarChart data={barRows} barCategoryGap="12%" margin={{ bottom: tick.height > 24 ? tick.height - 24 : 0 }}>
+        {barGrid}
+        <ReferenceLine y={0} stroke="#E2E8F0" />
         <XAxis
-          dataKey={x}
-          tickFormatter={formatX}
+          dataKey={xKey}
+          tick={categoryTick}
           angle={tick.angle}
           textAnchor={tick.textAnchor}
           height={tick.height}
-          {...axis}
+          stroke="#94A3B8"
+          axisLine={false}
+          tickLine={false}
         />
-        <YAxis tickFormatter={fmt} {...axis} />
+        <YAxis domain={[0, axisMax]} ticks={axisTicks} tickFormatter={fmt} allowDecimals={false} {...barAxis} />
         {tooltip}
-        <Bar dataKey={y} fill={PALETTE[0]} radius={[7, 7, 0, 0]} maxBarSize={44} activeBar={{ fillOpacity: 0.85 }} {...barAnimation} />
+        <Bar dataKey={yKey} radius={[10, 10, 2, 2]} maxBarSize={76} activeBar={{ fillOpacity: 0.85 }} {...barAnimation}>
+          {barRows.map((row, i) => {
+            const isMatch = matchesHighlight(row[xKey], highlight_x);
+            return <Cell key={i} fill={barVisualState(isMatch, hasHighlight).fill} />;
+          })}
+          {/* offset is intentionally omitted -- ignored once `content` is
+              custom (see BAR_VALUE_LABEL_OFFSET's comment); the shift is
+              applied inside valueLabel itself. */}
+          <LabelList dataKey={yKey} position="top" content={valueLabel} />
+          <LabelList dataKey={yKey} position="insideTop" content={inBarAnnotation} />
+        </Bar>
       </BarChart>
     );
   } else if (x && y) {
@@ -285,6 +395,7 @@ export function ChartRenderer({
         `a ${kind} chart of ${y ?? values ?? "value"} by ${x ?? names ?? "category"}; ` +
         `data (JSON rows): ${JSON.stringify(rows).slice(0, 1500)}`,
       dir,
+      hue: PALETTE[0],
       ...anchor,
     });
 
@@ -304,14 +415,26 @@ export function ChartRenderer({
       ]}
     >
       <div ref={wrapRef}>
-        <div className="flex items-start justify-between mb-2 gap-2">
-          <div className="min-w-0" dir={dir} style={{ textAlign: rtl ? "right" : "left" }}>
+        {/* flex-row-reverse (a PHYSICAL flip, unlike ms-/me- which read the
+            element's own `direction`) puts the title on the physical right and
+            the actions on the physical left for an all-Hebrew answer -- the
+            card's own dir stays forced "ltr" (chart axes must never mirror),
+            so this row is the one exception that mirrors with the QUESTION's
+            language instead. pr-9/pl-9 give clearance from the copy control,
+            which always floats top-right regardless of this row's layout. */}
+        <div className={`flex items-start justify-between mb-2 gap-2 ${rtl ? "flex-row-reverse" : ""}`}>
+          <div
+            className={`min-w-0 ${rtl ? "pr-9" : ""}`}
+            dir={dir}
+            style={{ textAlign: rtl ? "right" : "left" }}
+          >
             {title && <div className="text-sm font-semibold text-ink truncate">{title}</div>}
             {subtitle && <div className="text-xs text-muted mt-0.5">{subtitle}</div>}
           </div>
           {onDrill && (
-            // me-9 keeps this clear of the floating copy control.
-            <div className="shrink-0 ms-auto me-9 flex items-center gap-2">
+            // me-9 keeps this clear of the floating copy control (ltr only --
+            // in rtl the actions box sits on the physical left, away from it).
+            <div className={`shrink-0 flex items-center gap-2 ${rtl ? "" : "ms-auto me-9"}`}>
               {typeof badge === "number" && <ThreadBadge count={badge} />}
               <button
                 onClick={drill}

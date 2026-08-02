@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Copy, Check, ChevronDown, AlertCircle } from "lucide-react";
+import { usePopoverMenu } from "../hooks/usePopoverMenu";
+import { PopoverMenu } from "./PopoverMenu";
+
+const MENU_WIDTH = 176; // min-w-[11rem]
+const MENU_EST_HEIGHT = 160;
 
 /** One entry in a block's copy menu. `run` does the actual clipboard write and
  * must be called synchronously from the click so the user gesture is intact. */
@@ -26,31 +31,14 @@ export function CopyButton({
 }) {
   const [state, setState] = useState<State>("idle");
   const [message, setMessage] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const timer = useRef<number | undefined>(undefined);
+  const { open, close, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLButtonElement>({
+    width: MENU_WIDTH,
+    estHeight: MENU_EST_HEIGHT,
+  });
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  // Close the menu on outside click / Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
 
   const flash = (next: State, msg: string | null = null) => {
     setState(next);
@@ -63,7 +51,7 @@ export function CopyButton({
   };
 
   const run = async (action: CopyAction) => {
-    setOpen(false);
+    close();
     try {
       await action.run();
       flash("copied");
@@ -108,10 +96,11 @@ export function CopyButton({
 
         {actions.length > 1 && (
           <button
+            ref={triggerRef}
             type="button"
             onClick={(e) => {
               stop(e);
-              setOpen((v) => !v);
+              toggle();
             }}
             aria-label="More copy options"
             aria-expanded={open}
@@ -124,10 +113,7 @@ export function CopyButton({
       </div>
 
       {open && (
-        <div
-          role="menu"
-          className="absolute top-8 end-0 z-30 min-w-[11rem] rounded-lg border border-line bg-surface shadow-pop py-1"
-        >
+        <PopoverMenu pos={pos} menuRef={menuRef} className="min-w-[11rem] rounded-lg py-1">
           {actions.map((a) => (
             <button
               key={a.label}
@@ -143,7 +129,7 @@ export function CopyButton({
               {a.label}
             </button>
           ))}
-        </div>
+        </PopoverMenu>
       )}
 
       {message && (

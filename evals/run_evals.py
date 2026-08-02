@@ -26,6 +26,7 @@ from pathlib import Path
 import yaml
 
 from sema_core import client_registry, wiring
+from sema_core.agent.prompts import build_drill_context
 from sema_core.obs import get_logger
 
 EVALS_DIR = Path(__file__).resolve().parent
@@ -54,6 +55,26 @@ _TRUISM_PHRASES = (
     "track your kpis", "stay competitive", "improve customer experience",
     "continue monitoring", "review your strategy", "improve conversion",
 )
+
+# Crude Hebrew-vs-English script detector for the `summary_language` assertion
+# (bugfix_batch_prompt.md bug 2: a drill-down's summary field drifting to
+# English when the CURRENT question is Hebrew, pulled by [SEMA-CONTEXT]'s
+# English widget title/detail or a prior English turn). Not a real language
+# classifier -- just "what script dominates the alphabetic characters", same
+# loose-on-purpose spirit as the direction/faithfulness checks above.
+_HEBREW_CHAR_RE = re.compile(r"[֐-׿]")
+
+
+def _text_language(text: str) -> str:
+    """'he' / 'en' / 'unknown' (no alphabetic characters at all, e.g. a bare
+    number) by which script most of the letters belong to."""
+    if not text:
+        return "unknown"
+    hebrew_chars = len(_HEBREW_CHAR_RE.findall(text))
+    letters = sum(1 for c in text if c.isalpha())
+    if letters == 0:
+        return "unknown"
+    return "he" if hebrew_chars / letters > 0.3 else "en"
 
 
 def _action_text(a) -> str:
@@ -225,6 +246,19 @@ def _score(resp: dict, assertions: dict) -> list[tuple[str, bool, str]]:
             (f"component:{kind}", _has_component(resp, kind), f"expected a {kind} in the answer")
         )
 
+    # Chart kind (trend_line_charts_prompt.md): a time-axis question must
+    # render "line", a categorical one "bar"/"grouped_bar"/"donut".
+    if "expects_chart_kind" in assertions:
+        charts = resp.get("charts") or []
+        got_kind = charts[0].get("kind") if charts else None
+        results.append(
+            (
+                "expects_chart_kind",
+                got_kind == assertions["expects_chart_kind"],
+                f"expected chart kind={assertions['expects_chart_kind']}, got {got_kind}",
+            )
+        )
+
     # Data-level formatting guard (e.g. IDs must be format='text', not number).
     for spec in assertions.get("kpi_formats", []):
         results.append(
@@ -240,6 +274,16 @@ def _score(resp: dict, assertions: dict) -> list[tuple[str, bool, str]]:
         offenders = _faithfulness_failures(resp)
         results.append(
             ("faithful", not offenders, f"ungrounded numbers in prose: {offenders}")
+        )
+
+    # Drill-down language anchoring (bugfix_batch_prompt.md bug 2): the
+    # `summary` field must follow THIS TURN's question language, never the
+    # (often English) [SEMA-CONTEXT] widget text or a prior turn's language.
+    if "summary_language" in assertions:
+        want = assertions["summary_language"]
+        got = _text_language(resp.get("summary") or "")
+        results.append(
+            ("summary_language", got == want, f"expected summary language={want}, got {got} (summary={resp.get('summary')!r})")
         )
 
     # Mode gate: e.g. an ambiguous question should ask, not guess.
@@ -321,8 +365,30 @@ def run(client_id: str) -> int:
             request_id = uuid.uuid4().hex[:12]
             capture = _TokenCapture(request_id)
             agent_logger.addHandler(capture)
+            # A `drill` block simulates a drill-down follow-up: a prior
+            # English-API-format turn (the parent question/answer) plus the
+            # SAME server-built [SEMA-CONTEXT] drill framing production uses
+            # (build_drill_context), so the eval exercises the identical
+            # language-anchoring conditions a real drill panel creates --
+            # never a hand-written free-text context block.
+            drill = case.get("drill")
+            history = None
+            internal_context = None
+            if drill:
+                history = [
+                    {"role": "user", "content": drill["parent_question"]},
+                    {"role": "assistant", "content": drill["parent_answer"]},
+                ]
+                internal_context = build_drill_context(
+                    drill.get("context_kind", "kpi"), drill["context_title"], drill["context_detail"]
+                )
             try:
-                resp = wiring.get_response(case["question"], request_id=request_id)
+                resp = wiring.get_response(
+                    case["question"],
+                    history=history,
+                    internal_context=internal_context,
+                    request_id=request_id,
+                )
             finally:
                 agent_logger.removeHandler(capture)
 

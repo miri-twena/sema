@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytz
 
+from sema_core import sqlite_utils
+
 # --- validation: fixed lists, not free text -------------------------------
 
 # pytz's own curated list (~450 IANA zones) -- avoids hand-maintaining one and
@@ -87,7 +89,7 @@ class OrgSettingsStore:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path, timeout=5)
+        return sqlite_utils.connect(self._path)
 
     def _init_schema(self) -> None:
         with closing(self._connect()) as conn, conn:

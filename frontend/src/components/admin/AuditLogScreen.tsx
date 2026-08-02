@@ -1,11 +1,26 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { api, type AuditEvent } from "../../lib/api";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import { initials, pastelFor } from "../../lib/avatar";
 import { timeAgo } from "../../lib/time";
-import { auditCategoryLabel, auditSentence, isImpersonationEvent } from "./auditSentences";
+import { auditCategory, auditCategoryLabel, auditSentence, isImpersonationEvent } from "./auditSentences";
 import { AuditEventDrawer } from "./AuditEventDrawer";
+import { Pager } from "./Pager";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../../lib/tokens";
+
+/** Category -> identity hue index, so a long log becomes scannable at a
+ * glance. `impersonation` shares coral with `alert` -- both read as "needs
+ * attention". */
+const CATEGORY_HUE: Record<string, number> = {
+  user: 0,
+  semantic: 5,
+  org_settings: 2,
+  home_config: 1,
+  data_source: 4,
+  alert: 3,
+  impersonation: 3,
+};
 
 const CATEGORIES = [
   { id: "user", label: "Users" },
@@ -35,6 +50,9 @@ function SkeletonRows() {
 function EventRow({ event, onOpen }: { event: AuditEvent; onOpen: (e: AuditEvent) => void }) {
   const [bg, fg] = pastelFor(event.actor_id || event.actor_name || "system");
   const impersonation = isImpersonationEvent(event.action);
+  const hueIdx = CATEGORY_HUE[auditCategory(event.action)] ?? 0;
+  const hue = CHART_PALETTE[hueIdx];
+  const hueText = CHART_PALETTE_TEXT[hueIdx];
   return (
     <button
       onClick={() => onOpen(event)}
@@ -55,7 +73,11 @@ function EventRow({ event, onOpen }: { event: AuditEvent; onOpen: (e: AuditEvent
       <span className="flex-1 min-w-0 text-[0.85rem] text-ink truncate" dir="auto">
         {auditSentence(event, "ltr")}
       </span>
-      <span className="shrink-0 inline-flex items-center rounded-full bg-surfaceAlt px-2 py-0.5 text-[0.68rem] font-medium text-muted">
+      <span
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[0.68rem] font-medium"
+        style={{ background: `${hue}24`, color: hueText }}
+      >
+        <span className="w-[5px] h-[5px] rounded-full shrink-0" style={{ background: hue }} aria-hidden />
         {auditCategoryLabel(event.action, "ltr")}
       </span>
     </button>
@@ -98,19 +120,17 @@ export function AuditLogScreen({ clientLabel }: { clientLabel: string }) {
   // this list; only the picker itself would no longer offer them.
   const [actorOptions, setActorOptions] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
+    // page_size big enough to cover any real org in one call -- this needs
+    // every user for the dropdown, not one 25-row page (users_pagination_
+    // prompt.md added paging to the default GET /api/admin/users call).
     api.admin
-      .users()
+      .users({ page_size: 1000 })
       .then((data) => setActorOptions(data.users.map((u) => ({ id: u.id, label: u.name || u.email }))))
       .catch(() => setActorOptions([]));
   }, []);
 
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
-  const canPrev = page > 1;
-  const canNext = to < total;
-
   return (
-    <div className="max-w-5xl mx-auto px-8 py-8">
+    <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto px-8 py-8">
       <div className="text-[0.75rem] text-muted mb-2" dir="auto">
         {clientLabel || "Workspace"} <span className="text-faint">›</span> Organization admin
       </div>
@@ -199,55 +219,36 @@ export function AuditLogScreen({ clientLabel }: { clientLabel: string }) {
 
       {/* Table */}
       <div className="mt-4">
-        <div className="flex items-center gap-3 px-2 pb-2 text-[0.68rem] font-semibold uppercase tracking-wide text-faint border-b border-line">
-          <span className="w-28">When</span>
-          <span className="w-7" aria-hidden />
-          <span className="flex-1">Event</span>
-          <span className="w-32">Category</span>
+        <div className="rounded-xl border border-line bg-surface overflow-hidden">
+          <span className="block h-[3px] w-full" style={{ background: CHART_PALETTE[0] }} aria-hidden />
+          <div className="flex items-center gap-3 px-2 pt-2 pb-2 text-[0.68rem] font-semibold uppercase tracking-wide text-faint border-b border-line">
+            <span className="w-28">When</span>
+            <span className="w-7" aria-hidden />
+            <span className="flex-1">Event</span>
+            <span className="w-32">Category</span>
+          </div>
+
+          {loading ? (
+            <SkeletonRows />
+          ) : error ? (
+            <div className="px-2 py-10 text-center text-sm text-muted">
+              Couldn't load the audit log. Please try again.
+            </div>
+          ) : events.length === 0 ? (
+            <div className="px-2 py-10 text-center text-sm text-muted">
+              {filtering ? "No events match your filters." : "No admin activity yet."}
+            </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-lineSoft">
+              {events.map((e) => (
+                <EventRow key={e.id} event={e} onOpen={setSelected} />
+              ))}
+            </div>
+          )}
         </div>
 
-        {loading ? (
-          <SkeletonRows />
-        ) : error ? (
-          <div className="px-2 py-10 text-center text-sm text-muted">
-            Couldn't load the audit log. Please try again.
-          </div>
-        ) : events.length === 0 ? (
-          <div className="px-2 py-10 text-center text-sm text-muted">
-            {filtering ? "No events match your filters." : "No admin activity yet."}
-          </div>
-        ) : (
-          <div className="flex flex-col divide-y divide-lineSoft">
-            {events.map((e) => (
-              <EventRow key={e.id} event={e} onOpen={setSelected} />
-            ))}
-          </div>
-        )}
-
-        {!loading && !error && total > 0 && (
-          <div className="flex items-center justify-between mt-3">
-            <p className="text-[0.75rem] text-muted">
-              Showing {from}–{to} of {total}
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage(page - 1)}
-                disabled={!canPrev}
-                aria-label="Previous page"
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-line text-muted hover:text-ink hover:border-primary disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <button
-                onClick={() => setPage(page + 1)}
-                disabled={!canNext}
-                aria-label="Next page"
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-line text-muted hover:text-ink hover:border-primary disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
+        {!loading && !error && (
+          <Pager page={page} total={total} pageSize={pageSize} onPageChange={setPage} />
         )}
       </div>
 

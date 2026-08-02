@@ -55,7 +55,8 @@ export function AdminPanel({
             >
               <ArrowLeft size={15} /> Back to SEMA
             </button>
-            <div className="mt-3 text-[0.7rem] font-semibold uppercase tracking-wide text-faint">
+            <div className="mt-3 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-faint">
+              <img src="/favicon.svg" alt="" width={18} height={18} className="shrink-0" aria-hidden />
               Organization admin
             </div>
           </div>
@@ -75,6 +76,12 @@ export function AdminPanel({
                 >
                   <Icon size={16} />
                   <span className="flex-1">{label}</span>
+                  {active === id && (
+                    <span
+                      className="shrink-0 w-[3px] h-[15px] rounded-full bg-primary"
+                      aria-hidden
+                    />
+                  )}
                 </button>
               ) : (
                 <div

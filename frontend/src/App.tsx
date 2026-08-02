@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Menu, X } from "lucide-react";
 import {
   api,
   resolveApiUrl,
+  type AdminUser,
   type Client,
   type Alert,
   type DailyBrief as DailyBriefResponse,
@@ -12,6 +13,8 @@ import {
 } from "./lib/api";
 import { configureFormatting } from "./lib/format";
 import { detectBrowserLang } from "./lib/loginCopy";
+import { firstUserMessage } from "./lib/conversations";
+import { shouldFocusAskInput } from "./lib/homeShortcut";
 import { useChat } from "./hooks/useChat";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
@@ -21,6 +24,7 @@ import { Sidebar } from "./components/Sidebar";
 import type { ConversationActions } from "./components/ConversationItem";
 import { ChatInput } from "./components/ChatInput";
 import { HomeDashboard } from "./components/HomeDashboard";
+import { NewConversationCanvas } from "./components/NewConversationCanvas";
 import { TurnView } from "./components/TurnView";
 import type { DrillContext } from "./components/DrillChat";
 
@@ -38,6 +42,7 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [orgSettings, setOrgSettings] = useState<PublicOrgSettings | null>(null);
+  const [me, setMe] = useState<AdminUser | null>(null);
   // The user's chosen period, tagged with the client it belongs to -- so
   // switching clients falls back to that client's default (its latest
   // complete month) instead of carrying over a period it may not even have.
@@ -48,11 +53,27 @@ export default function App() {
   const [drill, setDrill] = useState<DrillContext | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false); // mobile sidebar drawer
   const [adminOpen, setAdminOpen] = useState(false); // organization admin panel
+  // Which empty-state screen to show (new_conversation_canvas_prompt.md):
+  // "home" is the dashboard (brief/KPIs/etc, home_ask_bar_top_prompt.md's own
+  // ask bar); "canvas" is the clean ask-only screen "New conversation" opens.
+  // Both are gated on chat.turns being empty (see showHome/showCanvas below)
+  // -- this state only decides WHICH of the two to show when that's true.
+  // Defaults to "home" so a fresh load/refresh always lands there (item 8's
+  // "home is the app's anchor" rule).
+  const [homeView, setHomeView] = useState<"home" | "canvas">("home");
 
   const conversations = useConversations(activeId);
   const chat = useChat({
     clientId: activeId,
-    persistKey: "sema:chat",
+    // Home is the app's anchor (home_hebrew_polish_prompt.md item 8): every
+    // fresh load/refresh always lands there, never auto-reopening whatever
+    // conversation was on screen last -- the sidebar (a real server fetch
+    // via openConversation) is how you return to one. No persistKey means
+    // no localStorage restore-on-mount at all, not just a cleared one (a
+    // reset()-on-mount would still flash the old transcript for one paint
+    // before clearing it, since the hook's initial state reads localStorage
+    // synchronously on first render).
+    persistKey: null,
     // Refresh the sidebar whenever a turn creates or updates a conversation.
     onConversationChanged: conversations.refresh,
   });
@@ -97,6 +118,22 @@ export default function App() {
     api.alerts(activeId).then(setAlerts).catch(() => setAlerts([]));
     api.popularQuestions(activeId).then(setPopularQuestions).catch(() => setPopularQuestions([]));
   }, [activeId]);
+
+  // The signed-in person's identity (mock today, real once auth Part A
+  // lands) -- same endpoint UserFooter's sidebar row already reads, fetched
+  // independently here so the home greeting doesn't have to reach across
+  // components for it. A failed/unresolved fetch just keeps `me` null,
+  // which HomeDashboard treats as "fall back to the org name."
+  useEffect(() => {
+    let cancelled = false;
+    api.admin
+      .me()
+      .then((u) => !cancelled && setMe(u))
+      .catch(() => !cancelled && setMe(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Org settings (name/logo/currency/number format) drive the sidebar brand
   // and the shared KPI/table/chart formatting util -- fetched per active
@@ -166,10 +203,15 @@ export default function App() {
   );
 
   const activeClient = clients.find((c) => c.id === activeId);
+  // First whitespace-separated token of the signed-in person's display name
+  // (greeting_user_name_prompt.md): "Miri Levi" -> "Miri". Falls back to the
+  // org name below whenever the identity hasn't resolved or has no name set.
+  const userFirstName = me?.name?.trim().split(/\s+/)[0] || null;
 
   const switchClient = useCallback(
     (id: string) => {
       chat.reset();
+      setHomeView("home");
       setActiveId(id);
     },
     [chat],
@@ -185,10 +227,22 @@ export default function App() {
     [chat, reattach],
   );
 
-  // New chat: clear the view (previous conversations stay in the sidebar) and
-  // close the mobile drawer.
-  const newChat = useCallback(() => {
+  // The wordmark/"Back to SEMA" action (home_hebrew_polish_prompt.md item 8):
+  // clear the view (previous conversations stay in the sidebar), close the
+  // mobile drawer, and land on the DASHBOARD specifically -- distinct from
+  // "New conversation" below, which lands on the clean ask canvas instead.
+  const goHome = useCallback(() => {
     chat.reset();
+    setHomeView("home");
+    setDrawerOpen(false);
+  }, [chat]);
+
+  // Sidebar's "+ New conversation" (new_conversation_canvas_prompt.md): same
+  // reset, but opens the clean ask-only canvas instead of the dashboard --
+  // the two are separate entry points into the same empty chat state.
+  const startNewConversation = useCallback(() => {
+    chat.reset();
+    setHomeView("canvas");
     setDrawerOpen(false);
   }, [chat]);
 
@@ -201,21 +255,52 @@ export default function App() {
     [chat],
   );
 
+  // Rerun (rerun_conversation_prompt.md): fetch the source conversation's
+  // FIRST user message (MVP scope -- it's what defines the chat; replaying
+  // every follow-up would drift, since they depend on earlier answers) and
+  // submit it fresh through the normal ask flow in a brand-NEW conversation.
+  // `chat.reset()` clears the current view/conversationId synchronously (it
+  // writes conversationIdRef, not just state) so the immediately-following
+  // `chat.send()` is guaranteed to start a new server conversation rather
+  // than appending to whatever was open. The source conversation (and its
+  // drill threads, which belong to ITS widgets) are never touched.
+  const rerunConversation = useCallback(
+    async (id: string) => {
+      const detail = await api.conversation(id, activeId).catch(() => null);
+      const firstQuestion = detail && firstUserMessage(detail);
+      if (!firstQuestion) return;
+      chat.reset();
+      reattach();
+      chat.send(firstQuestion);
+      setDrawerOpen(false);
+    },
+    [activeId, chat, reattach],
+  );
+
   const conversationActions: ConversationActions = {
     onOpen: openConversation,
     onRename: conversations.rename,
     onTogglePin: conversations.togglePin,
     // Archiving or deleting the conversation that's currently open leaves the
-    // chat view showing an orphan, so clear it back to a new chat.
+    // chat view showing an orphan, so clear it back to a new chat -- HOME
+    // specifically (a sensible default now that home/canvas are two separate
+    // screens), not whichever one happened to be selected last.
     onArchive: (id) => {
       conversations.archive(id);
-      if (id === chat.conversationId) chat.reset();
+      if (id === chat.conversationId) {
+        chat.reset();
+        setHomeView("home");
+      }
     },
     onUnarchive: conversations.unarchive,
     onDelete: (id) => {
       conversations.remove(id);
-      if (id === chat.conversationId) chat.reset();
+      if (id === chat.conversationId) {
+        chat.reset();
+        setHomeView("home");
+      }
     },
+    onRerun: (id) => void rerunConversation(id),
   };
 
   // Same actions, but for rows in the sidebar's separate "Archived" view: a
@@ -225,7 +310,10 @@ export default function App() {
     ...conversationActions,
     onDelete: (id) => {
       conversations.removeArchived(id);
-      if (id === chat.conversationId) chat.reset();
+      if (id === chat.conversationId) {
+        chat.reset();
+        setHomeView("home");
+      }
     },
   };
 
@@ -266,6 +354,39 @@ export default function App() {
   );
 
   const empty = chat.turns.length === 0;
+  const showHome = empty && !chat.loading && homeView === "home";
+  const showCanvas = empty && !chat.loading && homeView === "canvas";
+
+  // "/" focuses the hero ask input on EITHER empty-state screen (home
+  // dashboard: home_ask_bar_top_prompt.md item 5; the ask canvas:
+  // new_conversation_canvas_prompt.md, which reuses the same shortcut) from
+  // anywhere on the page, EXCEPT: not while a modal/drawer is covering it
+  // (the mobile sidebar drawer or the drill-down panel -- the admin panel
+  // returns early above and unmounts this whole tree, so it never needs
+  // checking here), and never while focus is already inside an
+  // input/textarea/contenteditable (typing "/" into the search box, a
+  // textarea, etc. must type the character, not hijack focus).
+  const askInputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!showHome && !showCanvas) return;
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const shouldFocus = shouldFocusAskInput({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        modalOpen: drawerOpen || !!drill,
+        activeElementTag: active?.tagName,
+        activeElementEditable: !!(active as HTMLElement | null)?.isContentEditable,
+      });
+      if (!shouldFocus) return;
+      e.preventDefault();
+      askInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHome, showCanvas, drawerOpen, drill]);
 
   const renderSidebar = () => (
     <Sidebar
@@ -283,8 +404,8 @@ export default function App() {
       conversationActions={conversationActions}
       archivedActions={archivedConversationActions}
       onSwitchClient={switchClient}
-      onNewConversation={newChat}
-      onGoHome={newChat}
+      onNewConversation={startNewConversation}
+      onGoHome={goHome}
       onOpenAdmin={() => {
         setAdminOpen(true);
         setDrawerOpen(false);
@@ -298,7 +419,16 @@ export default function App() {
   if (adminOpen) {
     return (
       <Suspense fallback={<div className="h-screen bg-bg" />}>
-        <AdminPanel clientLabel={activeClient?.label ?? ""} onClose={() => setAdminOpen(false)} />
+        <AdminPanel
+          clientLabel={activeClient?.label ?? ""}
+          onClose={() => {
+            // "Back to SEMA" aligns with the rest of the app's brand-wordmark
+            // navigation (home_hebrew_polish_prompt.md item 8): it lands on
+            // HOME, not just whatever chat state happened to be underneath.
+            goHome();
+            setAdminOpen(false);
+          }}
+        />
       </Suspense>
     );
   }
@@ -338,10 +468,21 @@ export default function App() {
             >
               {drawerOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <div>
+            {/* The wordmark is also a "go home" control (home_hebrew_polish_
+                prompt.md item 8) -- the SAME goHome action the sidebar's own
+                brand button already uses, so it's reachable from the main
+                pane's header even on mobile (where the sidebar itself is
+                tucked away behind the drawer toggle until opened). */}
+            <button
+              type="button"
+              onClick={goHome}
+              aria-label="Home"
+              title="Home"
+              className="text-start rounded-lg -mx-1 px-1 hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
+            >
               <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
               <p className="text-sm text-muted">Ask your business anything.</p>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -358,9 +499,10 @@ export default function App() {
               </div>
             )}
 
-            {empty && !chat.loading && (
+            {showHome && (
               <HomeDashboard
                 clientLabel={activeClient?.label ?? ""}
+                userName={userFirstName}
                 suggested={activeClient?.suggested_questions ?? []}
                 alerts={alerts}
                 overview={overview}
@@ -372,6 +514,22 @@ export default function App() {
                 onDrill={onDrill}
                 onInvestigate={onAlertClick}
                 onPeriodChange={onPeriodChange}
+                onAsk={sendQuestion}
+                onStopAsk={chat.stop}
+                asking={chat.loading}
+                askInputRef={askInputRef}
+                autoFocusAsk
+              />
+            )}
+
+            {showCanvas && (
+              <NewConversationCanvas
+                suggested={activeClient?.suggested_questions ?? []}
+                popularQuestions={popularQuestions}
+                onAsk={sendQuestion}
+                onStopAsk={chat.stop}
+                asking={chat.loading}
+                askInputRef={askInputRef}
               />
             )}
 
@@ -397,16 +555,24 @@ export default function App() {
           {showScrollToLatest && <ScrollToLatest onClick={scrollToLatest} />}
         </div>
 
-        <div className="px-8 py-4 border-t border-line bg-bg">
-          <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
-            <ChatInput
-              onSend={sendQuestion}
-              onStop={chat.stop}
-              loading={chat.loading}
-              suggestion={chat.followUp}
-            />
+        {/* Home and the "New conversation" canvas each have their own
+            prominent ask input (home_ask_bar_top_prompt.md;
+            new_conversation_canvas_prompt.md) -- one ask entry, not two, so
+            this bottom bar is hidden for exactly the same two conditions
+            that show those screens above. Conversation state (once a turn
+            exists) is unchanged: input stays at the bottom, same as before. */}
+        {!showHome && !showCanvas && (
+          <div className="px-8 py-4 border-t border-line bg-bg">
+            <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
+              <ChatInput
+                onSend={sendQuestion}
+                onStop={chat.stop}
+                loading={chat.loading}
+                suggestion={chat.followUp}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </main>
 
       {drill && (

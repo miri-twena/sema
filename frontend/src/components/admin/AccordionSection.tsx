@@ -17,6 +17,10 @@ export function AccordionSection({
   subtitle,
   open,
   onToggle,
+  /** Identity hue for this section's 3px top rule -- e.g. the home-config
+   * screen matches each accordion's hue to the section it configures.
+   * Omitted entirely means no rule (a neutral/structural accordion). */
+  hue,
   children,
 }: {
   id: string;
@@ -24,10 +28,12 @@ export function AccordionSection({
   subtitle?: string;
   open: boolean;
   onToggle: () => void;
+  hue?: string;
   children: ReactNode;
 }) {
   return (
     <div id={`home-config-${id}`} className="rounded-xl border border-line bg-surface overflow-hidden">
+      {hue && <span className="block h-[3px] w-full" style={{ background: hue }} aria-hidden />}
       <button
         type="button"
         onClick={onToggle}

@@ -18,17 +18,21 @@ export function CodeStep({
   const t = LOGIN_COPY[lang];
   const exhausted = state.codeError === "wrong_code" && state.attemptsLeft <= 0;
   const canResend = state.resendCooldown <= 0 && !state.resending;
+  const hasError = state.codeError !== null;
 
   return (
-    <div className="w-full max-w-sm">
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">SEMA</h1>
-        <p className="text-sm text-muted mt-1.5" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
+    <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
+      <div className="flex flex-col items-center mb-[26px]">
+        <div className="flex items-center justify-center gap-[9px]">
+          <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
+          <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
+        </div>
+        <p className="text-[13.5px] text-muted mt-2" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
           {t.codeSentTo(state.email)}
         </p>
       </div>
 
-      <label htmlFor="login-code" className="block text-[0.78rem] font-medium text-ink mb-1">
+      <label htmlFor="login-code" className="block text-[12.5px] font-medium text-ink mb-[5px]">
         {t.codeLabel}
       </label>
       <input
@@ -42,21 +46,25 @@ export function CodeStep({
         disabled={exhausted || state.verifying}
         value={state.code}
         onChange={(e) => onCodeChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
-        className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-center text-lg tracking-[0.5em] text-ink outline-none focus:border-primary disabled:opacity-60 transition"
+        className={`w-full h-[46px] rounded-control border text-center text-[19px] tracking-[0.5em] indent-[0.5em] text-ink outline-none disabled:opacity-60 transition ${
+          hasError
+            ? "border-[1.5px] border-critical-fg bg-critical-bgSoft"
+            : "border-line bg-surface focus:border-[1.5px] focus:border-primary focus:ring focus:ring-primaryRing"
+        }`}
       />
 
       {state.verifying && (
-        <p className="mt-2 flex items-center gap-1.5 text-[0.78rem] text-muted">
+        <p className="mt-2 flex items-center gap-1.5 text-[12.5px] text-muted">
           <Loader2 size={13} className="animate-spin" /> {t.verifying}
         </p>
       )}
       {state.codeError === "wrong_code" && !state.verifying && (
-        <p className="mt-2 text-[0.78rem] text-critical-fg" role="alert">
+        <p className="mt-2 text-[12.5px] text-critical-fg" role="alert">
           {t.wrongCode(state.attemptsLeft)}
         </p>
       )}
       {state.codeError === "code_expired" && !state.verifying && (
-        <p className="mt-2 text-[0.78rem] text-critical-fg" role="alert">
+        <p className="mt-2 text-[12.5px] text-critical-fg" role="alert">
           {t.codeExpired}
         </p>
       )}
@@ -65,7 +73,7 @@ export function CodeStep({
         <button
           type="button"
           onClick={onChangeEmail}
-          className="text-[0.8rem] text-muted hover:text-primary transition"
+          className="text-[12.8px] font-medium text-muted hover:text-primary transition"
         >
           {t.changeEmail}
         </button>
@@ -73,7 +81,7 @@ export function CodeStep({
           type="button"
           onClick={onResend}
           disabled={!canResend}
-          className="text-[0.8rem] font-medium text-primary hover:underline disabled:text-faint disabled:no-underline disabled:cursor-not-allowed transition"
+          className="text-[12.8px] font-medium text-primary hover:underline disabled:text-faint disabled:no-underline disabled:cursor-not-allowed transition"
         >
           {state.resendCooldown > 0 ? t.resendCooldown(state.resendCooldown) : t.resend}
         </button>

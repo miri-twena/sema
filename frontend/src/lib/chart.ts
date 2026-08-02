@@ -5,6 +5,7 @@
 // highlight, and shaping tooltip payloads into label/value/series rows.
 
 import { formatCell } from "./format";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "./tokens";
 
 type Row = Record<string, unknown>;
 
@@ -36,6 +37,17 @@ export function periodSubtitle(rows: Row[], x?: string | null): string | null {
   if (!ISO_DATE.test(first) || !ISO_DATE.test(last) || first === last) return null;
   return `${formatCell(first)} – ${formatCell(last)}`;
 }
+
+/** Vertical shift (px) applied to a bar's value-label text, above the bar
+ * top -- one shared constant so every bar chart (main answer, drill answer)
+ * gets the same breathing room instead of a per-chart tweak. NOTE: this is
+ * applied manually to the label's `y` in the custom LabelList `content`
+ * renderer -- `LabelList`'s own `offset` prop only affects its BUILT-IN label
+ * renderer's position math and is silently ignored once a custom `content`
+ * function is supplied (verified: bumping `offset` alone produced zero
+ * visual change), which is why the bars-glued-to-labels bug survived an
+ * earlier `offset={7}` that looked like it should have fixed it. */
+export const BAR_VALUE_LABEL_OFFSET = 8;
 
 export interface XAxisTickStyle {
   angle: number;
@@ -120,4 +132,68 @@ export function tooltipContent(
 export function prefersReducedMotion(): boolean {
   if (typeof matchMedia !== "function") return false;
   return matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** A "nice" rounded Y-axis domain + evenly-spaced ticks for a single-series
+ * bar chart, leaving headroom above the tallest bar for its value label
+ * (answer-screen redesign: with a 99.4%-tall bar there's no room left for a
+ * label inside the plot box). Standard nice-numbers algorithm: round the raw
+ * per-tick step up to the nearest 1/2/5 x 10^n, e.g. 3,381 -> max 4,000,
+ * ticks [0, 1000, 2000, 3000, 4000]. */
+export function niceAxis(maxValue: number, tickCount = 4): { max: number; ticks: number[] } {
+  if (!(maxValue > 0)) return { max: 0, ticks: [0] };
+  const rawStep = maxValue / tickCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / magnitude;
+  const niceNormalized = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const step = niceNormalized * magnitude;
+  const max = step * tickCount;
+  return { max, ticks: Array.from({ length: tickCount + 1 }, (_, i) => Math.round(i * step)) };
+}
+
+/** True when `value` is the backend's chosen highlight_x, by loose string
+ * equality (mirrors highlightPoint's own matching rule above) -- shared by
+ * the bar chart's per-bar emphasis and DataTable's per-row emphasis, so a
+ * chart and its table below it can never disagree about which entity is
+ * highlighted. Absent/unmatched highlight_x is always silently "no match". */
+export function matchesHighlight(value: unknown, highlightX: unknown): boolean {
+  if (highlightX === undefined || highlightX === null) return false;
+  return String(value) === String(highlightX);
+}
+
+/** In-bar annotation for the category highlight_x points to, dir-keyed like
+ * AssistantResponseCard's own SUMMARY_HEADING (this describes THIS answer's
+ * language, not the chrome's -- see AGENTS.md's answer- vs chrome-language
+ * split). Pre-split into its authored two lines rather than left to wrap:
+ * SVG text has no CSS wrapping, and the mockup's own line break is a
+ * deliberate two-line phrase, not an overflow accident. */
+export const HIGHLIGHT_ANNOTATION: Record<"rtl" | "ltr", readonly [string, string]> = {
+  rtl: ["מה שהתשובה", "מסבירה"],
+  ltr: ["What this answer", "explains"],
+};
+
+export interface BarVisualState {
+  fill: string;
+  categoryColor: string;
+  categoryWeight: number;
+  valueColor: string;
+}
+
+/** All per-bar color/weight decisions for the single-series bar chart's
+ * highlight treatment (answer-screen redesign), as a pure function of two
+ * booleans -- testable without mounting Recharts. `hasHighlight` is whether
+ * highlight_x matched ANY row in the data; `isMatch` is whether THIS row is
+ * the one it matched. No highlight at all -> every bar gets the same
+ * baseline (solid fill, mid-gray labels); a highlight present but this bar
+ * isn't it -> dims to 24% fill and grayed-out labels; this bar IS the
+ * match -> full fill, ink category label, and the chart's text-safe accent
+ * on the value label. */
+export function barVisualState(isMatch: boolean, hasHighlight: boolean): BarVisualState {
+  if (!hasHighlight) {
+    return { fill: CHART_PALETTE[0], categoryColor: "#475569", categoryWeight: 500, valueColor: "#334155" };
+  }
+  if (isMatch) {
+    return { fill: CHART_PALETTE[0], categoryColor: "#1E293B", categoryWeight: 600, valueColor: CHART_PALETTE_TEXT[0] };
+  }
+  return { fill: `${CHART_PALETTE[0]}3D`, categoryColor: "#94A3B8", categoryWeight: 500, valueColor: "#94A3B8" };
 }

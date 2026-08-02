@@ -231,6 +231,10 @@ class ConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     message_count: int = 0
+    # Total drill-down follow-up questions across every thread anchored to
+    # this conversation (sidebar_improvements_prompt.md item 3) -- powers the
+    # sidebar's per-row badge.
+    drill_count: int = 0
 
 
 class TurnFeedback(BaseModel):
@@ -686,6 +690,16 @@ class Health(BaseModel):
     active_client: str
 
 
+class HealthzResponse(BaseModel):
+    """Infra-level health probe (deployment_prep_prompt.md item 5) -- deliberately
+    minimal and separate from Health above, which is the app's own richer
+    (auth'd) status the frontend polls for its connection indicator."""
+
+    status: str
+    db_connected: bool
+    version: str
+
+
 # --- admin: users and permissions (spec §6.1) ------------------------------
 AdminRole = Literal["client_admin", "analyst", "viewer"]
 AdminStatus = Literal["active", "suspended", "invited"]
@@ -729,12 +743,19 @@ class AdminUser(BaseModel):
 
 class AdminUserList(BaseModel):
     """The users screen's payload: the rows plus the two counts the subtitle
-    shows ("N members · N pending invites"). Counts are of the WHOLE org, not
-    the filtered view, so they don't jump around as the admin searches."""
+    shows ("N members · N pending invites"). member_count/pending_count are of
+    the WHOLE org, not the filtered view, so they don't jump around as the
+    admin searches. total/page/page_size drive the pager and ARE of the
+    filtered (search+role) view -- same total-vs-count distinction the audit
+    log's pagination already makes."""
 
     users: list[AdminUser] = []
     member_count: int  # active + suspended (people who have accounts)
     pending_count: int  # invited (not yet accepted)
+    active_admin_count: int  # whole-org count, for the last-admin guard regardless of page/filter
+    total: int  # rows matching the current search/role filter
+    page: int
+    page_size: int
 
 
 class AdminInviteRequest(BaseModel):

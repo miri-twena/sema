@@ -1,8 +1,12 @@
-import { useCallback, useState } from "react";
 import { Info } from "lucide-react";
 import type { AdminDataScope } from "../../lib/api";
-import { useDismiss } from "../../hooks/useDismiss";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { usePopoverMenu } from "../../hooks/usePopoverMenu";
+import { PopoverMenu } from "../PopoverMenu";
+
+const LEGEND_WIDTH = 288; // w-72
+const LEGEND_EST_HEIGHT = 220;
+const EDITOR_WIDTH = 288; // w-72
+const EDITOR_EST_HEIGHT = 280;
 
 /** Minimal shape this module needs from api.ts's DataScopeInfo -- avoids a
  * circular re-export and keeps this file usable with any object shaped like
@@ -78,15 +82,18 @@ function DomainChips({ included, excluded }: { included: string[]; excluded: str
  * GET /api/admin/data-scopes so the copy is never hardcoded here.
  */
 export function DataScopeLegend({ scopes }: { scopes: ScopeInfo[] }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss<HTMLDivElement>(open, close);
+  const { open, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLButtonElement>({
+    width: LEGEND_WIDTH,
+    estHeight: LEGEND_EST_HEIGHT,
+    align: "start",
+  });
 
   return (
-    <span ref={ref} className="relative inline-flex">
+    <span className="relative inline-flex">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="What is data access?"
@@ -95,10 +102,12 @@ export function DataScopeLegend({ scopes }: { scopes: ScopeInfo[] }) {
         <Info size={12} />
       </button>
       {open && (
-        <div
+        <PopoverMenu
+          pos={pos}
+          menuRef={menuRef}
           role="dialog"
-          aria-label="Data access levels"
-          className="absolute top-full mt-1.5 start-0 z-30 w-72 max-w-[85vw] rounded-xl border border-line bg-surface shadow-pop p-3 normal-case tracking-normal"
+          ariaLabel="Data access levels"
+          className="rounded-xl max-w-[85vw] p-3 normal-case tracking-normal"
         >
           <div className="flex flex-col gap-2.5">
             {scopes.map((s) => (
@@ -115,7 +124,7 @@ export function DataScopeLegend({ scopes }: { scopes: ScopeInfo[] }) {
               </div>
             ))}
           </div>
-        </div>
+        </PopoverMenu>
       )}
     </span>
   );
@@ -141,20 +150,22 @@ export function DataScopeControl({
   readOnly: boolean;
   onChange: (scope: AdminDataScope) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss<HTMLDivElement>(open, close);
-  useFocusTrap(ref, open);
+  const { open, close, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLButtonElement>({
+    width: EDITOR_WIDTH,
+    estHeight: EDITOR_EST_HEIGHT,
+    align: "start",
+  });
 
   if (readOnly) {
     return <Pill scopeId={scopeId} scopes={scopes} />;
   }
 
   return (
-    <div ref={ref} className="relative inline-flex">
+    <div className="relative inline-flex">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Data access: ${scopeLabel(scopeId, scopes)}. Change`}
@@ -163,10 +174,12 @@ export function DataScopeControl({
         <Pill scopeId={scopeId} scopes={scopes} />
       </button>
       {open && (
-        <div
+        <PopoverMenu
+          pos={pos}
+          menuRef={menuRef}
           role="dialog"
-          aria-label="Change data access"
-          className="absolute top-full mt-1.5 start-0 z-30 w-72 max-w-[85vw] rounded-xl border border-line bg-surface shadow-pop p-2"
+          ariaLabel="Change data access"
+          className="rounded-xl max-w-[85vw] p-2"
         >
           <div role="radiogroup" aria-label="Data access" className="flex flex-col gap-0.5">
             {scopes.map((s) => {
@@ -209,7 +222,7 @@ export function DataScopeControl({
               );
             })}
           </div>
-        </div>
+        </PopoverMenu>
       )}
     </div>
   );

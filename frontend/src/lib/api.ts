@@ -4,7 +4,13 @@
 import type { ProgressEvent } from "./progress";
 import type { AnalysisStep } from "./evidence";
 
-const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Falls back to localhost:8000 only when VITE_API_URL is truly UNSET (bare
+// `npm run dev` outside docker-compose, which always sets it explicitly) --
+// checked via `!== undefined` rather than truthiness so a deliberately EMPTY
+// value (the production single-service build, where the API serves the
+// built frontend from its own origin) is honored as "same-origin, call
+// relative paths" instead of being coerced back to the dev default.
+const BASE = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : "http://localhost:8000";
 
 /** A server-relative path (e.g. PublicOrgSettings.logo_path, "/api/admin/
  * org-settings/logo/ecommerce") -> a fully-qualified URL an <img> tag can
@@ -165,6 +171,9 @@ export interface ConversationSummary {
   created_at: string;
   updated_at: string;
   message_count: number;
+  /** Total drill-down follow-up questions across every thread anchored to
+   * this conversation -- powers the sidebar's per-row badge. */
+  drill_count: number;
 }
 
 /** A user's thumbs up/down on one answer (answer_feedback_prompt.md), plus an
@@ -575,6 +584,10 @@ export interface AdminUserList {
   users: AdminUser[];
   member_count: number;
   pending_count: number;
+  active_admin_count: number;
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 /** One entry in the role catalog (mirrors api/models.py RoleInfo) -- the
@@ -1080,10 +1093,12 @@ export const api = {
   // throw ApiError (with status + detail) so the UI can show inline messages.
   admin: {
     me: () => getJSON<AdminUser>("/api/admin/me"),
-    users: (q?: string, role?: string) => {
+    users: (opts?: { q?: string; role?: string; page?: number; page_size?: number }) => {
       const params = new URLSearchParams();
-      if (q) params.set("q", q);
-      if (role) params.set("role", role);
+      if (opts?.q) params.set("q", opts.q);
+      if (opts?.role) params.set("role", opts.role);
+      if (opts?.page) params.set("page", String(opts.page));
+      if (opts?.page_size) params.set("page_size", String(opts.page_size));
       const qs = params.toString();
       return getJSON<AdminUserList>(`/api/admin/users${qs ? `?${qs}` : ""}`);
     },

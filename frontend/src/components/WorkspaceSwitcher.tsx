@@ -1,10 +1,13 @@
-import { useCallback, useState } from "react";
 import { Building2, Check, ChevronsUpDown, Settings } from "lucide-react";
 import type { Client } from "../lib/api";
-import { useDismiss } from "../hooks/useDismiss";
+import { usePopoverMenu } from "../hooks/usePopoverMenu";
 import { initials } from "../lib/avatar";
-import { useUiLang } from "../lib/useUiLang";
-import { COMMON, GEAR_MENU } from "../lib/placeholderCopy";
+import { useT } from "../locales";
+import { PopoverMenu } from "./PopoverMenu";
+
+const SWITCHER_EST_HEIGHT = 140;
+const GEAR_MENU_WIDTH = 208; // min-w-[13rem]
+const GEAR_MENU_EST_HEIGHT = 110;
 
 /**
  * The sidebar's bottom block: which workspace (client) you're in, whether its
@@ -34,27 +37,40 @@ export function WorkspaceSwitcher({
   /** Open the client admin panel (spec §6.1). */
   onOpenAdmin?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss<HTMLDivElement>(open, close);
+  const { open, close, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLDivElement>({
+    width: "trigger",
+    estHeight: SWITCHER_EST_HEIGHT,
+    align: "start",
+    placement: "above",
+  });
 
-  const [gearOpen, setGearOpen] = useState(false);
-  const closeGear = useCallback(() => setGearOpen(false), []);
-  const gearRef = useDismiss<HTMLDivElement>(gearOpen, closeGear);
+  const {
+    open: gearOpen,
+    close: closeGear,
+    toggle: toggleGear,
+    triggerRef: gearTriggerRef,
+    menuRef: gearMenuRef,
+    pos: gearPos,
+  } = usePopoverMenu<HTMLButtonElement>({
+    width: GEAR_MENU_WIDTH,
+    estHeight: GEAR_MENU_EST_HEIGHT,
+    placement: "above",
+  });
 
-  const lang = useUiLang();
-  const gearT = GEAR_MENU[lang];
+  const t = useT();
 
   const active = clients.find((c) => c.id === activeId);
-  const label = active?.label ?? "Workspace";
+  const label = active?.label ?? t.workspace.fallbackLabel;
 
   return (
-    <div ref={ref} className="relative shrink-0 border-t border-line p-3">
+    <div ref={triggerRef} className="relative shrink-0 border-t border-line p-3">
       {open && (
-        <div
+        <PopoverMenu
+          pos={pos}
+          menuRef={menuRef}
           role="listbox"
-          aria-label="Switch workspace"
-          className="absolute bottom-[calc(100%-4px)] start-3 end-3 z-30 rounded-xl2 border border-line bg-surface shadow-pop p-1"
+          ariaLabel={t.workspace.switchWorkspace}
+          className="rounded-xl2 p-1"
         >
           {clients.map((c) => (
             <button
@@ -77,17 +93,17 @@ export function WorkspaceSwitcher({
               {c.id === activeId && <Check size={14} className="shrink-0 text-primary" aria-hidden />}
             </button>
           ))}
-        </div>
+        </PopoverMenu>
       )}
 
       {/* Switcher trigger + a gear that enters the admin panel, side by side. */}
       <div className="flex items-center gap-1">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggle}
           aria-haspopup="listbox"
           aria-expanded={open}
-          aria-label={`Workspace: ${label}. Switch workspace`}
+          aria-label={t.workspace.switchWorkspaceLabel(label)}
           className="flex-1 min-w-0 flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
         >
           {logoUrl ? (
@@ -116,19 +132,20 @@ export function WorkspaceSwitcher({
                 aria-hidden
                 className={`w-1.5 h-1.5 rounded-full ${dbConnected ? "bg-emerald-500" : "bg-red-500"}`}
               />
-              {dbConnected ? "Connected" : "Disconnected"}
+              {dbConnected ? t.workspace.connected : t.workspace.disconnected}
             </span>
           </span>
           <ChevronsUpDown size={15} className="shrink-0 text-faint" aria-hidden />
         </button>
 
         {onOpenAdmin && (
-          <div ref={gearRef} className="relative shrink-0">
+          <div className="relative shrink-0">
             {gearOpen && (
-              <div
-                role="menu"
-                aria-label="Admin"
-                className="absolute bottom-[calc(100%+4px)] end-0 z-30 min-w-[13rem] rounded-xl2 border border-line bg-surface shadow-pop p-1"
+              <PopoverMenu
+                pos={gearPos}
+                menuRef={gearMenuRef}
+                ariaLabel={t.workspace.adminMenuAriaLabel}
+                className="rounded-xl2 p-1"
               >
                 <button
                   type="button"
@@ -140,28 +157,29 @@ export function WorkspaceSwitcher({
                   className="w-full text-start flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.85rem] text-ink hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
                 >
                   <Building2 size={15} className="shrink-0 text-muted" />
-                  {gearT.manageOrg}
+                  {t.workspace.gear.manageOrg}
                 </button>
                 <div
                   role="menuitem"
                   aria-disabled="true"
-                  title={COMMON[lang].comingSoon}
+                  title={t.common.comingSoon}
                   className="w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[0.85rem] text-faint cursor-default select-none"
                 >
-                  {gearT.platformConsole}
+                  {t.workspace.gear.platformConsole}
                   <span className="shrink-0 rounded-full bg-surfaceAlt px-1.5 py-0.5 text-[0.6rem] font-medium text-muted">
-                    {COMMON[lang].comingSoon}
+                    {t.common.comingSoon}
                   </span>
                 </div>
-              </div>
+              </PopoverMenu>
             )}
             <button
+              ref={gearTriggerRef}
               type="button"
-              onClick={() => setGearOpen((o) => !o)}
+              onClick={toggleGear}
               aria-haspopup="menu"
               aria-expanded={gearOpen}
-              aria-label="Admin menu"
-              title="Admin menu"
+              aria-label={t.workspace.adminMenuLabel}
+              title={t.workspace.adminMenuLabel}
               className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:bg-surfaceAlt hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
             >
               <Settings size={17} />

@@ -20,6 +20,7 @@ No dependency on the Claude API key.
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -33,6 +34,47 @@ from sema_core.data_sources import stale_source_caveat
 from sema_core.obs import get_logger, log_event
 
 logger = get_logger("agent")
+
+# --- line-vs-bar safety net (trend_line_charts_prompt.md item 3) -----------
+# The system prompt/tool schema ASK the model to pick kind='line' whenever
+# the x-axis is a time/period sequence, but that instruction can't be
+# trusted alone -- this coerces it deterministically at bind time too.
+_DATE_COLUMN_NAME_RE = re.compile(r"^(date|day|week|month|quarter|year)(_|$)", re.IGNORECASE)
+# Matches a bare year, a year-month, or a full ISO date -- covers both a raw
+# ::date/timestamp column (see below) and a TO_CHAR(...)-formatted label
+# like "2026-01" or "2026" (the semantic layer's own SQL sometimes buckets
+# this way rather than returning a real date type).
+_DATE_VALUE_RE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
+# How much of a (potentially large) column to sample when checking value
+# shapes -- cheap and sufficient, since a chart's x-axis is never more than
+# a few dozen distinct points in practice.
+_DATE_SAMPLE_SIZE = 20
+
+
+def _looks_like_date_axis(df: pd.DataFrame, column: str | None) -> bool:
+    """Whether `column` in `df` is a time/period sequence (day, week, month,
+    quarter, year) rather than a categorical dimension. Checks the column
+    NAME first (the semantic layer's own convention: a dimension literally
+    named "month"/"day" is always time), then falls back to the VALUES for a
+    differently-named date column -- either real `datetime.date`/`datetime`
+    objects (how psycopg2 returns a Postgres ::date/timestamp column) or an
+    ISO-shaped string (how a TO_CHAR(...)-formatted label comes back).
+    """
+    if not column or column not in df.columns:
+        return False
+    if _DATE_COLUMN_NAME_RE.match(column):
+        return True
+    series = df[column].dropna()
+    if series.empty:
+        return False
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return True
+    sample = series.iloc[:_DATE_SAMPLE_SIZE]
+    if all(isinstance(v, (date, datetime)) for v in sample):
+        return True
+    if all(isinstance(v, str) and _DATE_VALUE_RE.match(v) for v in sample):
+        return True
+    return False
 
 # The "menu entry" for the finishing tool. Added to the tool list in agent.py.
 PRESENT_ANSWER_TOOL = {
@@ -173,6 +215,21 @@ PRESENT_ANSWER_TOOL = {
                     "kind": {
                         "type": "string",
                         "enum": ["line", "bar", "grouped_bar", "donut"],
+                        "description": "Pick by what the x-axis actually IS, "
+                        "not by whether the question says 'trend': if x is a "
+                        "date/period sequence (day, week, month, quarter, "
+                        "year -- e.g. 'revenue by month'), use 'line', even "
+                        "for a single category ('Accessories revenue by "
+                        "month' is still a line chart, x=month). If x is "
+                        "categorical/entities with no inherent order (by "
+                        "category, product, channel, customer), use 'bar' "
+                        "(single series) or 'grouped_bar' (one series per "
+                        "category via `color`). 'donut' is for a share-of-"
+                        "whole breakdown (names/values), not a comparison. "
+                        "A server-side check enforces the time-axis case "
+                        "regardless of what you pick here, so getting this "
+                        "wrong still renders correctly -- but picking right "
+                        "the first time avoids a silent correction.",
                     },
                     "title": {"type": "string"},
                     "x": {"type": "string", "description": "x column (line/bar)."},
@@ -847,7 +904,19 @@ def build_response(tool_input: dict, tools) -> dict:
     if isinstance(chart, dict) and "result_index" in chart:
         df = _df_at(tools, chart["result_index"])
         if df is not None and not df.empty:
-            spec = {"kind": chart.get("kind", "bar"), "df": df, "title": chart.get("title", "")}
+            kind = chart.get("kind", "bar")
+            x_col = chart.get("x")
+            # Deterministic safety net: a bar/grouped_bar chart whose x-axis
+            # is actually a time/period sequence gets coerced to a line chart
+            # regardless of what the model picked -- see _looks_like_date_axis.
+            # 'donut' is never coerced (it has no x-axis concept at all).
+            if kind in ("bar", "grouped_bar") and _looks_like_date_axis(df, x_col):
+                log_event(
+                    logger, "chart_kind_coerced",
+                    from_kind=kind, to_kind="line", x_column=x_col,
+                )
+                kind = "line"
+            spec = {"kind": kind, "df": df, "title": chart.get("title", "")}
             for key in ("x", "y", "color", "names", "values", "y_format", "highlight_x"):
                 if chart.get(key) is not None:
                     spec[key] = chart[key]

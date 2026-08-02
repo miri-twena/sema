@@ -53,6 +53,40 @@ checked against `wiring.get_response()`'s response dict:
   response mode, e.g. an ambiguous question should `clarification`, not
   guess; a question outside the requester's data-access scope should
   `access_denied`, not a silent answer.
+- `expects_chart_kind: line | bar | grouped_bar | donut` -- the returned
+  chart's `kind` matches exactly (trend_line_charts_prompt.md: a time-axis
+  question -- "revenue by month" -- must render `line`, a categorical one
+  -- "revenue by category" -- `bar`/`grouped_bar`/`donut`). Fails if no
+  chart was rendered at all.
+- `summary_language: he | en` -- the `summary` field's dominant script (crude
+  Hebrew-vs-Latin letter count, not a real language classifier) matches the
+  given language. Meant for `drill` cases (below) where the parent turn and
+  the drill-down's [SEMA-CONTEXT] text may be in a different language than
+  THIS turn's question -- catches the model anchoring the summary to the
+  wrong one.
+
+### Drill-down cases
+
+A case can carry an optional `drill` block to simulate a follow-up asked
+from a drill-down panel, instead of a fresh standalone question:
+
+```yaml
+- id: my_drill_case
+  question: "..."          # the CURRENT turn, asked from the drill panel
+  drill:
+    parent_question: "..."   # the main-chat question that produced the widget
+    parent_answer: "..."     # its answer text (becomes one prior history turn)
+    context_kind: kpi          # kpi | chart | table | action
+    context_title: "..."      # the widget's title, exactly as the UI shows it
+    context_detail: "..."     # the widget's detail text (see build_drill_context)
+  assertions: {...}
+```
+
+The harness turns this into the SAME shape a real drill-down produces: one
+prior history turn (`parent_question`/`parent_answer`, Claude API format) plus
+`internal_context` built via the real `sema_core.agent.prompts.build_drill_context`
+-- never a hand-written free-text context block, so the eval exercises the
+exact code path production uses.
 
 > **Formatting note.** The eval harness grades the *response dict*, so it can
 > only check the data-level side of formatting (a KPI's `format`, a full result

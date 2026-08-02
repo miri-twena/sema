@@ -226,6 +226,10 @@ export function AssistantResponseCard({
             table={response.table}
             dir={dir}
             anchor={anchor}
+            // Same entity the chart above highlights (answer-screen redesign)
+            // -- undefined when there's no chart or no highlight_x, which
+            // DataTable treats as "highlight nothing", never a guess.
+            highlightValue={response.chart?.highlight_x}
             threadCount={tableThreadCount}
             onDrill={onDrill}
           />

@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from sema_core import sqlite_utils
+
 # A chat's title is the first question asked in it, trimmed to something that
 # fits a sidebar row. No LLM call: the first question is already a good label,
 # and users can rename.
@@ -79,7 +81,7 @@ class SqliteConversationStore:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path, timeout=5)
+        return sqlite_utils.connect(self._path)
 
     def _init_schema(self) -> None:
         with closing(self._connect()) as conn, conn:
@@ -281,7 +283,15 @@ class SqliteConversationStore:
         """
         sql = (
             "SELECT c.id, c.title, c.pinned, c.archived, c.created_at, c.updated_at, "
-            "  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count "
+            "  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count, "
+            # Total drill-down follow-up questions asked across EVERY thread
+            # anchored to this conversation (sidebar_improvements_prompt.md
+            # item 3) -- one aggregated subquery, same shape as message_count
+            # above, so listing conversations stays a single query with no
+            # N+1 per-thread lookup.
+            "  (SELECT COUNT(*) FROM thread_messages tm "
+            "   JOIN threads t ON t.id = tm.thread_id "
+            "   WHERE t.conversation_id = c.id AND tm.role = 'user') AS drill_count "
             "FROM conversations c "
             "WHERE c.client_id = ? AND c.deleted_at IS NULL "
             "  AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id) "
@@ -300,6 +310,7 @@ class SqliteConversationStore:
                 "created_at": r[4],
                 "updated_at": r[5] or r[4],
                 "message_count": r[6],
+                "drill_count": r[7],
             }
             for r in rows
         ]

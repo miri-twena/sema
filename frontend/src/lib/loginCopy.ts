@@ -43,7 +43,7 @@ interface LoginCopy {
 
 export const LOGIN_COPY: Record<Lang, LoginCopy> = {
   en: {
-    headline: "Your organization's business advisor",
+    headline: "AI Business Advisor",
     emailLabel: "Email",
     emailPlaceholder: "you@company.com",
     continueButton: "Continue",
@@ -76,7 +76,12 @@ export const LOGIN_COPY: Record<Lang, LoginCopy> = {
     },
   },
   he: {
-    headline: "היועץ העסקי של הארגון שלך",
+    // "AI Business Advisor" -- the English brand phrase, deliberately NOT
+    // translated (spec 0.2), even in the Hebrew half of this dictionary.
+    // Currently dead: LoginPage.tsx hardcodes lang="en" (AGENTS.md: "UI is
+    // English, always"), kept here so the dictionary stays the single
+    // source of truth if per-org login language is ever reinstated.
+    headline: "AI Business Advisor",
     emailLabel: "אימייל",
     emailPlaceholder: "you@company.com",
     continueButton: "המשך",

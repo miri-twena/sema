@@ -171,6 +171,39 @@ def test_role_filter(store):
     assert {u["role"] for u in store.list_users(CID, role="analyst")} == {"analyst"}
 
 
+# --- pagination (users_pagination_prompt.md) --------------------------------
+
+def test_list_users_paging_returns_the_right_slice(store):
+    # 5 analysts, alphabetical within a role (list_users' own ordering) --
+    # name them so alpha order is predictable: A, B, C, D, E.
+    for letter in "ABCDE":
+        store.invite(CID, f"{letter.lower()}@x.com", "analyst", name=f"{letter} User")
+    page1 = store.list_users(CID, page=1, page_size=2)
+    page2 = store.list_users(CID, page=2, page_size=2)
+    page3 = store.list_users(CID, page=3, page_size=2)
+    assert [u["name"] for u in page1] == ["A User", "B User"]
+    assert [u["name"] for u in page2] == ["C User", "D User"]
+    assert [u["name"] for u in page3] == ["E User"]  # partial last page
+
+
+def test_list_users_unpaged_when_page_args_omitted(store):
+    for letter in "ABC":
+        store.invite(CID, f"{letter.lower()}@x.com", "analyst", name=f"{letter} User")
+    assert len(store.list_users(CID)) == 3  # no page/page_size -> everyone, one call
+
+
+def test_count_users_matches_the_same_filters_as_list_users(store):
+    _admin(store, "admin@x.com")
+    store.invite(CID, "noa.berman@x.com", "analyst", name="Noa Berman")
+    store.invite(CID, "yossi@x.com", "analyst", name="Yossi Cohen")
+    assert store.count_users(CID) == 3
+    assert store.count_users(CID, role="analyst") == 2
+    assert store.count_users(CID, q="berman") == 1
+    # The filtered COUNT must agree with the filtered LIST's length -- the
+    # pager's total has to describe the same set list_users actually returns.
+    assert store.count_users(CID, role="analyst") == len(store.list_users(CID, role="analyst"))
+
+
 # --- seed ------------------------------------------------------------------
 
 def test_seed_inserts_ten_users_with_expected_shape(store):
@@ -314,6 +347,42 @@ def test_admin_list_reports_member_and_pending_counts(monkeypatch):
     assert body["pending_count"] == 1
     assert body["member_count"] == 9
     assert len(body["users"]) == 10
+    # 10 seeded < the 25 default page_size -> one page, filtered total == 10.
+    assert body["total"] == 10
+    assert body["page"] == 1
+    assert body["page_size"] == 25
+
+
+def test_admin_list_users_page_2_returns_remaining_slice(monkeypatch):
+    """Filtered total AND page slicing, combined -- page_size below the seed
+    count so there's a real second page to check."""
+    main.org_user_store.seed_demo_users(CID)
+    monkeypatch.setattr(
+        main, "current_identity", lambda: {"client_id": CID, "email": "miri1988@gmail.com"}
+    )
+    client = TestClient(main.app)
+    page1 = client.get("/api/admin/users", params={"page_size": 6}).json()
+    page2 = client.get("/api/admin/users", params={"page": 2, "page_size": 6}).json()
+    assert page1["total"] == page2["total"] == 10
+    assert len(page1["users"]) == 6
+    assert len(page2["users"]) == 4  # remaining 10 - 6
+    # No row appears on both pages.
+    assert {u["id"] for u in page1["users"]}.isdisjoint({u["id"] for u in page2["users"]})
+
+
+def test_admin_list_users_total_reflects_the_current_filter(monkeypatch):
+    """total must be the FILTERED count, not the whole org -- otherwise the
+    pager would offer pages that don't exist under the active filter."""
+    main.org_user_store.seed_demo_users(CID)
+    monkeypatch.setattr(
+        main, "current_identity", lambda: {"client_id": CID, "email": "miri1988@gmail.com"}
+    )
+    client = TestClient(main.app)
+    all_body = client.get("/api/admin/users").json()
+    role_body = client.get("/api/admin/users", params={"role": "viewer"}).json()
+    assert role_body["total"] < all_body["total"]
+    assert role_body["total"] == len(role_body["users"])  # under 25, so total == this page's rows
+    assert all(u["role"] == "viewer" for u in role_body["users"])
 
 
 def test_admin_invite_duplicate_returns_409(monkeypatch):

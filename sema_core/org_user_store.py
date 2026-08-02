@@ -27,6 +27,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sema_core import sqlite_utils
 from sema_core.data_scope import DEFAULT_INVITE_SCOPE, SCOPE_PRESETS
 
 # How long an invite link stays valid. Surfaced in the UI hint ("valid for 7
@@ -107,7 +108,7 @@ class OrgUserStore:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path, timeout=5)
+        return sqlite_utils.connect(self._path)
 
     def _init_schema(self) -> None:
         with closing(self._connect()) as conn, conn:
@@ -212,29 +213,58 @@ class OrgUserStore:
 
     # --- reads -------------------------------------------------------------
 
-    def list_users(
-        self, client_id: str, q: str | None = None, role: str | None = None
-    ) -> list[dict]:
-        """This client's users. Optional case-insensitive search over name+email
-        and an optional exact role filter. Ordered admins-first, then by name,
-        so the table reads sensibly by default."""
-        sql = f"{self._SELECT_SQL} WHERE u.client_id = ?"
+    def _filter_clause(
+        self, client_id: str, q: str | None, role: str | None
+    ) -> tuple[str, list]:
+        clause = "u.client_id = ?"
         params: list = [client_id]
         if q:
-            sql += " AND (LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ?)"
+            clause += " AND (LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ?)"
             like = f"%{q.lower()}%"
             params += [like, like]
         if role:
-            sql += " AND u.role = ?"
+            clause += " AND u.role = ?"
             params.append(role)
-        # Admins first, then analysts, then viewers; alphabetical within a role.
-        sql += (
-            " ORDER BY CASE u.role WHEN 'client_admin' THEN 0 WHEN 'analyst' THEN 1 ELSE 2 END, "
+        return clause, params
+
+    def list_users(
+        self,
+        client_id: str,
+        q: str | None = None,
+        role: str | None = None,
+        *,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> list[dict]:
+        """This client's users. Optional case-insensitive search over name+email
+        and an optional exact role filter. Ordered admins-first, then by name,
+        so the table reads sensibly by default. Pass BOTH page and page_size to
+        get one page (1-indexed); omit both for every matching row (unpaged --
+        several callers, e.g. the last-active-admin count, need the whole set)."""
+        where, params = self._filter_clause(client_id, q, role)
+        sql = (
+            f"{self._SELECT_SQL} WHERE {where} "
+            "ORDER BY CASE u.role WHEN 'client_admin' THEN 0 WHEN 'analyst' THEN 1 ELSE 2 END, "
             "LOWER(COALESCE(u.name, u.email))"
         )
+        if page is not None and page_size is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params = [*params, page_size, (max(1, page) - 1) * page_size]
         with closing(self._connect()) as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def count_users(
+        self, client_id: str, q: str | None = None, role: str | None = None
+    ) -> int:
+        """Count of users matching the same filters as list_users -- the
+        FILTERED total pagination needs, not the whole org's count."""
+        where, params = self._filter_clause(client_id, q, role)
+        with closing(self._connect()) as conn:
+            (n,) = conn.execute(
+                f"SELECT COUNT(*) FROM org_users u WHERE {where}", params
+            ).fetchone()
+        return n
 
     def get_user(self, client_id: str, user_id: str) -> dict:
         with closing(self._connect()) as conn:

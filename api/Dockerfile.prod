@@ -1,0 +1,73 @@
+# SEMA REST API -- PRODUCTION image.
+#
+# Multi-stage: builds the React frontend first, then serves BOTH the API and
+# the built static frontend from this ONE container (api/main.py's SPA
+# catch-all route) -- the "API-served" deployment option docs/deployment.md
+# picks as the default for a single-service pilot (fewer moving parts, no
+# CORS to configure between two origins). The frontend-builder stage's
+# node_modules/build tooling never reaches the final image.
+#
+# No --reload, no bind-mounted source, no dev servers -- everything is
+# COPYed in and fixed at build time. State lives on volumes (docker-compose.
+# prod.yml), never in the image itself.
+
+# ---- Stage 1: build the frontend ----
+FROM node:24-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+# Separate layer: dependencies only reinstall when the lockfile changes.
+# Deliberately NOT setting NODE_ENV=production before this install: npm
+# treats that as "skip devDependencies", which is exactly where `vite` and
+# `typescript` (tsc) live -- the build would fail with "tsc: not found"
+# with no dev tools installed to run it. `vite build` already produces a
+# production build regardless of NODE_ENV.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+
+# VITE_API_URL is intentionally left UNSET here: lib/api.ts treats an unset
+# value as "call the API via relative paths", which is exactly right when
+# the API serves the frontend from its own origin (no separate frontend
+# origin to point at). No source-map flag needed -- Vite's build.sourcemap
+# already defaults to false.
+RUN npm run build
+
+# ---- Stage 2: the API, serving the built frontend ----
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Dependencies in their own layer, before the source is copied, so editing
+# code doesn't invalidate the pip cache.
+COPY requirements.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
+
+COPY pyproject.toml ./
+COPY sema_core ./sema_core
+COPY api ./api
+COPY sql ./sql
+COPY config ./config
+RUN pip install --no-cache-dir -e . --no-deps
+
+# Empty on purpose: SEMA_CONVERSATION_DB's directory just needs to exist so
+# SQLite can create its file inside it on first boot. The real, persisted
+# content lives on the mounted volume (docker-compose.prod.yml), never
+# baked into the image.
+RUN mkdir -p var
+
+# The built frontend from stage 1 -- api/main.py serves this directory and
+# falls back to its index.html for any client-side route.
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+EXPOSE 8000
+
+# --host 0.0.0.0 so the port is reachable from outside the container. A
+# single uvicorn worker is enough for a first pilot deployment -- scale by
+# running more container instances behind the platform's own load balancer
+# rather than multiple workers inside one container.
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

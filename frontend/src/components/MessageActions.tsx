@@ -2,9 +2,13 @@ import { useState } from "react";
 import { Copy, Check, RotateCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { copyText } from "../lib/clipboard";
 import { useUiLang } from "../lib/useUiLang";
-import { useDismiss } from "../hooks/useDismiss";
-import { FEEDBACK_COPY } from "../lib/feedbackCopy";
+import { usePopoverMenu } from "../hooks/usePopoverMenu";
+import { useT } from "../locales";
+import { PopoverMenu } from "./PopoverMenu";
 import { api, type TurnFeedback } from "../lib/api";
+
+const COMMENT_POPOVER_WIDTH = 288; // w-72
+const COMMENT_POPOVER_EST_HEIGHT = 180;
 
 /**
  * Action row shown under a completed answer. This is the "copy the WHOLE
@@ -42,11 +46,22 @@ export function MessageActions({
   const [failed, setFailed] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(feedback?.rating ?? null);
   const [comment, setComment] = useState<string | null>(feedback?.comment ?? null);
-  const [commentOpen, setCommentOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const lang = useUiLang();
-  const ft = FEEDBACK_COPY[lang];
-  const popoverRef = useDismiss<HTMLDivElement>(commentOpen, () => setCommentOpen(false));
+  const t = useT();
+  const ft = t.messageActions.feedback;
+  const {
+    open: commentOpen,
+    close: closeComment,
+    openNow: openComment,
+    triggerRef,
+    menuRef,
+    pos,
+  } = usePopoverMenu<HTMLDivElement>({
+    width: COMMENT_POPOVER_WIDTH,
+    estHeight: COMMENT_POPOVER_EST_HEIGHT,
+    align: "start",
+  });
 
   const canPersist = conversationId !== undefined && turnIndex !== undefined && clientId !== undefined;
 
@@ -97,9 +112,9 @@ export function MessageActions({
     onFeedbackChange?.(nextVote ? { rating: nextVote, comment: nextComment } : null);
     if (nextVote === "down") {
       setCommentDraft("");
-      setCommentOpen(true);
+      openComment();
     } else {
-      setCommentOpen(false);
+      closeComment();
     }
     void post(nextVote, nextComment, previous);
   };
@@ -107,7 +122,7 @@ export function MessageActions({
   const sendComment = () => {
     const trimmed = commentDraft.trim();
     const previous = { rating: vote, comment };
-    setCommentOpen(false);
+    closeComment();
     if (!trimmed || vote !== "down") return;
     setComment(trimmed);
     onFeedbackChange?.({ rating: "down", comment: trimmed });
@@ -118,15 +133,15 @@ export function MessageActions({
     "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-surfaceAlt hover:text-ink transition";
 
   return (
-    <div dir="ltr" className="relative mt-3 pt-2.5 border-t border-line flex items-center gap-1">
-      <button onClick={copyAll} className={btn} title="Copy the entire answer" aria-label="Copy entire answer">
+    <div ref={triggerRef} dir="ltr" className="relative mt-3 pt-2.5 border-t border-line flex items-center gap-1">
+      <button onClick={copyAll} className={btn} title={t.messageActions.copyEntireAnswerTitle} aria-label={t.messageActions.copyEntireAnswerAriaLabel}>
         {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-        {copied ? "Copied" : "Copy answer"}
+        {copied ? t.messageActions.copied : t.messageActions.copyAnswer}
       </button>
 
       {onRetry && (
-        <button onClick={onRetry} className={btn} title="Ask this question again" aria-label="Retry question">
-          <RotateCw size={14} /> Retry
+        <button onClick={onRetry} className={btn} title={t.messageActions.retryTitle} aria-label={t.messageActions.retryAriaLabel}>
+          <RotateCw size={14} /> {t.messageActions.retry}
         </button>
       )}
 
@@ -151,14 +166,15 @@ export function MessageActions({
         <ThumbsDown size={14} className={vote === "down" ? "text-primary" : undefined} fill={vote === "down" ? "currentColor" : "none"} />
       </button>
 
-      {failed && <span className="text-xs text-muted ms-1">Copy failed</span>}
+      {failed && <span className="text-xs text-muted ms-1">{t.messageActions.copyFailed}</span>}
 
       {commentOpen && (
-        <div
-          ref={popoverRef}
+        <PopoverMenu
+          pos={pos}
+          menuRef={menuRef}
           role="dialog"
           dir={lang === "he" ? "rtl" : "ltr"}
-          className="absolute top-[calc(100%+4px)] start-0 z-30 w-72 rounded-xl2 border border-line bg-surface shadow-pop p-3"
+          className="rounded-xl2 p-3"
         >
           <p className="text-[0.78rem] font-medium text-ink mb-1.5">{ft.commentPrompt}</p>
           <input
@@ -173,7 +189,7 @@ export function MessageActions({
           <div className="flex items-center justify-end gap-2 mt-2">
             <button
               type="button"
-              onClick={() => setCommentOpen(false)}
+              onClick={closeComment}
               className="text-[0.75rem] text-muted hover:text-ink px-2 py-1"
             >
               {ft.skip}
@@ -186,7 +202,7 @@ export function MessageActions({
               {ft.send}
             </button>
           </div>
-        </div>
+        </PopoverMenu>
       )}
     </div>
   );

@@ -70,6 +70,25 @@ def test_has_component():
     assert not run_evals._has_component(_resp(table=pd.DataFrame()), "table")  # empty df
 
 
+# --- chart kind (trend_line_charts_prompt.md) -------------------------------
+def test_expects_chart_kind_passes_on_match():
+    resp = _resp(charts=[{"kind": "line"}])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_chart_kind": "line"}))
+    assert checks["expects_chart_kind"]
+
+
+def test_expects_chart_kind_fails_on_mismatch():
+    resp = _resp(charts=[{"kind": "bar"}])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_chart_kind": "line"}))
+    assert not checks["expects_chart_kind"]
+
+
+def test_expects_chart_kind_fails_when_no_chart_at_all():
+    resp = _resp(charts=[])
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_chart_kind": "line"}))
+    assert not checks["expects_chart_kind"]
+
+
 # --- kpi format guard -------------------------------------------------------
 def test_kpi_format_ok():
     resp = _resp(kpis=[{"label": "Customer ID", "value": "10234", "format": "text"}])
@@ -130,6 +149,33 @@ def test_expects_no_sql_fails_when_a_query_ran():
     resp = _resp(sql_used="SELECT 1")
     checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"expects_no_sql": True}))
     assert not checks["expects_no_sql"]
+
+
+# --- drill-down summary language (bugfix_batch_prompt.md bug 2) ------------
+def test_text_language_detects_hebrew():
+    assert run_evals._text_language("למה זה עלה?") == "he"
+
+
+def test_text_language_detects_english():
+    assert run_evals._text_language("Why did it go up?") == "en"
+
+
+def test_text_language_unknown_for_no_letters():
+    assert run_evals._text_language("612,203 (4.4%)") == "unknown"
+
+
+def test_summary_language_assertion_passes_for_hebrew_summary():
+    resp = _resp(summary="ההכנסות עלו בגלל עלייה בהזמנות.")
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"summary_language": "he"}))
+    assert checks["summary_language"]
+
+
+def test_summary_language_assertion_fails_when_summary_is_english():
+    # The bug this guards: a Hebrew drill question whose summary field
+    # drifted back to English, pulled by the (English) context/parent turn.
+    resp = _resp(summary="Revenue increased due to a rise in orders.")
+    checks = dict((n, ok) for n, ok, _ in run_evals._score(resp, {"summary_language": "he"}))
+    assert not checks["summary_language"]
 
 
 # --- run-to-run diff --------------------------------------------------------

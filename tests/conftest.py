@@ -138,6 +138,17 @@ def _isolated_feedback_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_query_limit_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway daily-query-limit store
+    (backend_qa_prompt.md item 5), same isolation as the other admin-panel
+    stores above."""
+    import api.main as main
+    from sema_core.query_limit_store import QueryLimitStore
+
+    monkeypatch.setattr(main, "query_limit_store", QueryLimitStore(tmp_path / "test_query_limit.db"))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_secrets_key(monkeypatch):
     """A fixed, valid Fernet key for every test -- SEMA_SECRETS_KEY must
     never depend on whatever happens to be in the developer's real .env."""

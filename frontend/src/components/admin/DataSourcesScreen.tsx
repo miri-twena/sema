@@ -4,6 +4,21 @@ import { api, ApiError, type DataSource, type DataSourceStatus } from "../../lib
 import { timeAgo } from "../../lib/time";
 import { AddDataSourceModal } from "./AddDataSourceModal";
 import { useToast } from "./toast-context";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../../lib/tokens";
+
+/** Status -> identity hue index. `paused` has no palette hue (a paused source
+ * isn't broken or busy, so it stays neutral) -- see RULE_COLOR/TILE_STYLE
+ * below, which fall back to the line color/neutral tile for it. */
+const STATUS_HUE: Partial<Record<DataSourceStatus, number>> = { healthy: 1, syncing: 2, error: 3 };
+
+/** The card's 3px top rule: carries the status hue, or the neutral line color
+ * for `paused` (redundant with StatusPill, never the only signal). */
+const RULE_COLOR: Record<DataSourceStatus, string> = {
+  healthy: CHART_PALETTE[STATUS_HUE.healthy!],
+  syncing: CHART_PALETTE[STATUS_HUE.syncing!],
+  error: CHART_PALETTE[STATUS_HUE.error!],
+  paused: "#E8EDF3",
+};
 
 const REQUEST_STEPS = ["requested", "configuring", "testing", "active"] as const;
 const REQUEST_STEP_LABEL: Record<(typeof REQUEST_STEPS)[number], string> = {
@@ -66,7 +81,7 @@ function formatAge(days: number | null): string {
 
 function SkeletonCard() {
   return (
-    <div aria-busy="true" className="rounded-xl2 border border-line bg-surface p-5">
+    <div aria-busy="true" className="rounded-xl border border-line bg-surface p-5">
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-surfaceAlt animate-pulse" />
         <div className="flex-1">
@@ -115,11 +130,21 @@ function SourceCard({ source, onChanged }: { source: DataSource; onChanged: () =
 
   const entityCount = source.entities.length;
   const isRequest = source.origin === "request";
+  const hueIdx = STATUS_HUE[source.status];
+  const tileStyle =
+    hueIdx !== undefined
+      ? { background: `${CHART_PALETTE[hueIdx]}2E`, color: CHART_PALETTE_TEXT[hueIdx] }
+      : undefined;
 
   return (
-    <div className="rounded-xl2 border border-line bg-surface p-5">
+    <div className="rounded-xl border border-line bg-surface overflow-hidden">
+      <span className="block h-[3px] w-full" style={{ background: RULE_COLOR[source.status] }} aria-hidden />
+      <div className="p-5">
       <div className="flex items-start gap-3">
-        <span className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
+        <span
+          className={`shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg ${tileStyle ? "" : "bg-primary/10 text-primary"}`}
+          style={tileStyle}
+        >
           <Database size={18} />
         </span>
         <div className="flex-1 min-w-0">
@@ -258,6 +283,7 @@ function SourceCard({ source, onChanged }: { source: DataSource; onChanged: () =
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -287,7 +313,7 @@ export function DataSourcesScreen({ clientLabel }: { clientLabel: string }) {
   }, [reloadKey]);
 
   return (
-    <div className="max-w-4xl mx-auto px-8 py-8">
+    <div className="max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto px-8 py-8">
       <div className="text-[0.75rem] text-muted mb-2" dir="auto">
         {clientLabel || "Workspace"} <span className="text-faint">›</span> Organization admin
       </div>

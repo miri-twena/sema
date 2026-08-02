@@ -5,7 +5,7 @@ import { useDismiss } from "../../hooks/useDismiss";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { initials, pastelFor } from "../../lib/avatar";
 import { timeAgo } from "../../lib/time";
-import { ROLE_LABEL } from "./roleLabels";
+import { useT, type TranslationKeys } from "../../locales";
 import { RoleTooltip, type RoleCatalog } from "./RoleTooltip";
 import { DataScopeControl, type ScopeInfo } from "./DataScopeControl";
 
@@ -19,17 +19,17 @@ function formatDate(iso: string): string {
 /** "Invited by" per spec: the resolved inviter name; "Founding member" when
  * there was no inviter at all; "—" when there WAS one but they no longer
  * resolve (e.g. since removed from the org). */
-function invitedByLabel(user: AdminUser): string {
-  if (!user.invited_by) return "Founding member";
-  return user.invited_by_name ?? "—";
+function invitedByLabel(user: AdminUser, t: TranslationKeys): string {
+  if (!user.invited_by) return t.admin.users.detail.foundingMember;
+  return user.invited_by_name ?? t.admin.users.detail.unknownDash;
 }
 
 /** "Joined on" per spec: formatted joined_at, or -- for a still-pending
  * invite -- "Not joined yet · invited {relative}". */
-function joinedOnLabel(user: AdminUser): string {
+function joinedOnLabel(user: AdminUser, t: TranslationKeys): string {
   if (user.joined_at) return formatDate(user.joined_at);
-  if (user.status === "invited") return `Not joined yet · invited ${timeAgo(user.invited_at)}`;
-  return "—";
+  if (user.status === "invited") return t.admin.users.detail.notJoinedYet(timeAgo(user.invited_at));
+  return t.admin.users.detail.unknownDash;
 }
 
 /**
@@ -60,6 +60,7 @@ export function UserDetailDrawer({
   onSuspend: (id: string) => void;
   onReactivate: (id: string) => void;
 }) {
+  const t = useT();
   const ref = useDismiss<HTMLElement>(true, onClose);
   useFocusTrap(ref, true);
 
@@ -90,11 +91,11 @@ export function UserDetailDrawer({
       >
         <header className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line bg-surface shrink-0">
           <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">
-            User profile
+            {t.admin.users.detail.heading}
           </div>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t.admin.users.detail.close}
             className="shrink-0 w-8 h-8 rounded-lg text-muted hover:bg-surfaceAlt hover:text-ink flex items-center justify-center transition"
           >
             <X size={18} />
@@ -113,7 +114,9 @@ export function UserDetailDrawer({
             <div className="min-w-0">
               <div id="user-detail-name" className="text-base font-semibold text-ink truncate" dir="auto">
                 {displayName}
-                {user.is_self && <span className="ms-1.5 text-muted font-normal">(you)</span>}
+                {user.is_self && (
+                  <span className="ms-1.5 text-muted font-normal">{t.admin.users.youSuffix}</span>
+                )}
               </div>
               {user.title && (
                 <div className="text-[0.8rem] text-muted truncate" dir="auto">
@@ -130,24 +133,24 @@ export function UserDetailDrawer({
           <dl className="mt-5 flex flex-col gap-4">
             <div>
               <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                Role
+                {t.admin.users.detail.role}
               </dt>
               <dd>
                 {user.is_self ? (
-                  <span className="text-[0.85rem] text-ink">{ROLE_LABEL[user.role]}</span>
+                  <span className="text-[0.85rem] text-ink">{t.common.roles[user.role]}</span>
                 ) : (
                   <RoleTooltip id="user-detail-role-desc" role={user.role} roles={roles}>
                     <select
                       value={user.role}
-                      aria-label={`Role for ${displayName}`}
+                      aria-label={t.admin.users.roleForLabel(displayName)}
                       aria-describedby="user-detail-role-desc"
                       disabled={isLastActiveAdmin}
                       onChange={(e) => onChangeRole(user.id, e.target.value as AdminRole)}
                       className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[0.85rem] text-ink outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >
-                      <option value="client_admin">Admin</option>
-                      <option value="analyst">Analyst</option>
-                      <option value="viewer">Viewer</option>
+                      <option value="client_admin">{t.common.roles.client_admin}</option>
+                      <option value="analyst">{t.common.roles.analyst}</option>
+                      <option value="viewer">{t.common.roles.viewer}</option>
                     </select>
                   </RoleTooltip>
                 )}
@@ -156,7 +159,7 @@ export function UserDetailDrawer({
 
             <div>
               <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                Data access
+                {t.admin.users.detail.dataAccess}
               </dt>
               <dd>
                 <DataScopeControl
@@ -170,17 +173,19 @@ export function UserDetailDrawer({
 
             <div>
               <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                Status
+                {t.admin.users.detail.status}
               </dt>
               <dd className="flex items-center gap-2.5">
                 {invited ? (
                   <span className="inline-flex items-center rounded-full bg-warning-bg px-2 py-0.5 text-[0.7rem] font-semibold text-warning-fg">
-                    Pending
+                    {t.admin.users.pending}
                   </span>
                 ) : suspended ? (
-                  <span className="text-[0.85rem] font-medium text-warning-fg">Suspended</span>
+                  <span className="text-[0.85rem] font-medium text-warning-fg">
+                    {t.admin.users.suspendedStatus}
+                  </span>
                 ) : (
-                  <span className="text-[0.85rem] text-ink">Active</span>
+                  <span className="text-[0.85rem] text-ink">{t.admin.users.detail.active}</span>
                 )}
                 {!invited && !user.is_self && (
                   <button
@@ -190,12 +195,12 @@ export function UserDetailDrawer({
                     disabled={!suspended && isLastActiveAdmin}
                     title={
                       !suspended && isLastActiveAdmin
-                        ? "The last active admin can't be suspended."
+                        ? t.admin.users.lastAdminSuspendLocked
                         : undefined
                     }
                     className="text-[0.78rem] font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline transition"
                   >
-                    {suspended ? "Reactivate" : "Suspend"}
+                    {suspended ? t.admin.users.detail.reactivate : t.admin.users.detail.suspend}
                   </button>
                 )}
               </dd>
@@ -204,7 +209,7 @@ export function UserDetailDrawer({
             {!invited && (
               <div>
                 <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                  Last active
+                  {t.admin.users.detail.lastActive}
                 </dt>
                 <dd className="text-[0.85rem] text-ink">{timeAgo(user.last_active_at)}</dd>
               </div>
@@ -212,25 +217,24 @@ export function UserDetailDrawer({
 
             <div>
               <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                Invited by
+                {t.admin.users.detail.invitedBy}
               </dt>
               <dd className="text-[0.85rem] text-ink" dir="auto">
-                {invitedByLabel(user)}
+                {invitedByLabel(user, t)}
               </dd>
             </div>
 
             <div>
               <dt className="text-[0.68rem] font-semibold uppercase tracking-wide text-faint mb-1">
-                Joined on
+                {t.admin.users.detail.joinedOn}
               </dt>
-              <dd className="text-[0.85rem] text-ink">{joinedOnLabel(user)}</dd>
+              <dd className="text-[0.85rem] text-ink">{joinedOnLabel(user, t)}</dd>
             </div>
           </dl>
 
           {isLastActiveAdmin && (
             <p className="mt-5 text-[0.72rem] text-muted">
-              This is the organization's last active admin, so their role and status can't be
-              changed here.
+              {t.admin.users.detail.lastAdminLockedNotice}
             </p>
           )}
         </div>

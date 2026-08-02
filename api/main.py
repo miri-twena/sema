@@ -17,6 +17,7 @@ import asyncio
 import csv
 import io
 import json
+import os
 import queue
 import re
 import secrets
@@ -26,7 +27,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
@@ -36,6 +37,7 @@ from sema_core import client_registry
 from sema_core.agent import agent
 from sema_core.agent.agent import generate_title
 from sema_core.agent.prompts import (
+    _question_script_hint,
     build_drill_context,
     build_pulse_context,
     build_scope_context,
@@ -66,6 +68,7 @@ from sema_core.org_settings_store import (
 )
 from sema_core import retention
 from sema_core.retention_store import RetentionRunStore
+from sema_core.query_limit_store import QueryLimitStore, today as query_limit_today
 from sema_core import data_sources
 from sema_core import connector_catalog
 from sema_core import db_probe
@@ -106,7 +109,7 @@ from sema_core.home_config_store import HomeConfigNotFoundError, HomeConfigStore
 from sema_core.daily_brief import build_daily_brief
 from sema_core.daily_brief import filter_for_scope as daily_brief_filter_for_scope
 from sema_core.overview import build_overview
-from sema_core.settings import settings
+from sema_core.settings import settings, validate_for_production
 from sema_core.wiring import get_response
 
 from api.models import (
@@ -174,6 +177,7 @@ from api.models import (
     ConversationSummary,
     ConversationUpdate,
     Health,
+    HealthzResponse,
     Kpi,
     Overview,
     PopularQuestion,
@@ -184,6 +188,33 @@ from api.models import (
 from api.serialize import build_schema, to_chat_response
 
 logger = get_logger("api")
+
+# Fail-fast startup validation (deployment_prep_prompt.md item 2): a
+# misconfigured production deploy should crash on boot with every problem
+# listed at once, not serve traffic with auth silently disabled or a
+# hard-coded dev DB password. Never runs under SEMA_ENV=dev (every test and
+# local docker-compose run), so this can never abort an existing test suite.
+if settings.env == "production":
+    _startup_problems = validate_for_production(settings)
+    if _startup_problems:
+        raise RuntimeError(
+            "SEMA_ENV=production but startup checks failed:\n- "
+            + "\n- ".join(_startup_problems)
+        )
+    # Loud, impossible-to-miss reminder: there is no real authentication yet
+    # (sema_core.current_user.current_identity() always resolves to the same
+    # hard-coded mock identity, backing every /api/admin/* route and every
+    # data-scoped route). Deliberately left ACTIVE in production for now
+    # (auth_login_prompt.md Parts A+B are blocked on hosting existing at all,
+    # and this deployment is meant to be usable before that lands) -- so this
+    # warning is the safeguard against that risk being silently forgotten,
+    # not a substitute for shipping real auth as soon as it's unblocked.
+    logger.warning(
+        "SEMA_ENV=production with NO real authentication: every admin and "
+        "data-scoped route resolves identity via a hard-coded mock user "
+        "(sema_core.current_user). Treat this deployment as a controlled/"
+        "private pilot until auth_login_prompt.md Parts A+B ship."
+    )
 
 # The app's own conversation metadata store (SQLite) -- separate from the
 # tenant analytics databases in db.py. Module-level singleton; tests
@@ -241,14 +272,29 @@ org_alerts_store = OrgAlertsStore(settings.conversation_db_path)
 # same as the stores above.
 feedback_store = TurnFeedbackStore(settings.conversation_db_path)
 
+# Per-user daily LLM query soft cap (backend_qa_prompt.md item 5) -- same
+# SQLite metadata DB, separate table. Module-level singleton; tests
+# monkeypatch this attribute with an isolated store pointed at a temp file,
+# same as the stores above.
+query_limit_store = QueryLimitStore(settings.conversation_db_path)
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+
+def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
     """Auth scaffold: every route requires X-API-Key matching SEMA_API_KEY.
 
     Empty SEMA_API_KEY = auth disabled (local dev). Structured as a FastAPI
     dependency so swapping in real auth (JWT, per-tenant keys) later means
     replacing this one function. compare_digest avoids timing side-channels.
+
+    /healthz is exempt: it's the infra platform's own liveness/readiness probe
+    (Railway/Render, etc.), which cannot be expected to send an API key, and
+    deployment_prep_prompt.md explicitly specs it as "no auth". This is the
+    ONLY app-level dependency (applied to every route below via `FastAPI(
+    dependencies=...)`), so excluding one path has to happen inside it rather
+    than via a per-route override.
     """
+    if request.url.path == "/healthz":
+        return
     if not settings.api_key:
         return
     if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
@@ -368,10 +414,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for local React dev (origins configurable via SEMA_CORS_ORIGINS).
+# CORS: SEMA_CORS_ORIGINS is the explicit allowlist (defaults to the local
+# Vite dev server); SEMA_PUBLIC_URL -- this deployment's own externally-
+# reachable origin -- is folded in automatically so a deployer doesn't have
+# to repeat the same value in two env vars. `dict.fromkeys` dedupes while
+# preserving order (a plain set would make the allowlist's order test-
+# unstable and log output non-deterministic).
+_cors_origins = list(
+    dict.fromkeys(settings.cors_origins + ([settings.public_url] if settings.public_url else []))
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -536,6 +590,44 @@ def _internal_context(req: ChatRequest, client_id: str, scope_id: str) -> str | 
     return "\n\n".join(parts)
 
 
+_QUOTA_MESSAGE = {
+    "Hebrew": "הגעת למכסת השאלות היומית שלך. פני/ה למנהל/ת המערכת שלך להעלאת המכסה.",
+    "English": "You've reached your daily question limit. Contact your admin to raise it.",
+}
+
+
+def _check_daily_query_limit(cid: str, me: dict, question: str) -> dict | None:
+    """Cost guardrail (backend_qa_prompt.md item 5): a generous per-(client,
+    org_user) soft cap on chat calls per UTC calendar day. Returns a plain
+    response dict (same contract as sema_core.wiring.get_response) when the
+    cap is hit -- callers do `_check_daily_query_limit(...) or get_response(
+    ...)`, so a blocked question flows through the EXACT SAME persistence/
+    title-generation/streaming code every other answer does, no special
+    casing needed at either call site. Returns None (fall through to a real
+    answer) when under the cap, the cap is disabled (limit <= 0), or the
+    identity doesn't resolve to a real org_user -- there's no one to count
+    against (same "unscoped = unrestricted" rule current_org_user's own
+    _UNSCOPED_USER fallback already applies everywhere else).
+    """
+    limit = settings.daily_query_limit
+    if limit <= 0 or me.get("id") is None:
+        return None
+    day = query_limit_today()
+    count = query_limit_store.increment_and_get(cid, me["id"], day)
+    if count <= limit:
+        return None
+    # Over the cap -- log the audit event ONCE per user per day, not once
+    # per over-the-cap request (a capped user will keep asking).
+    if query_limit_store.mark_notified_once(cid, me["id"], day):
+        _audit(
+            "usage_limit_reached", client_id=cid, actor=me, action="usage.limit_reached",
+            target_type="query_limit", target_label=f"{limit}/day",
+            after={"count": count, "limit": limit, "day": day},
+        )
+    lang = _question_script_hint(question) or "English"
+    return agent.quota_exceeded_response(_QUOTA_MESSAGE[lang])
+
+
 # Best-effort keyword classifier for /api/popular-questions -- unlike chat
 # (which the agent pipeline enforces deterministically) a past question's
 # TEXT has no metric binding to check, so this is a heuristic, not a hard
@@ -561,16 +653,50 @@ def _question_is_blocked(question: str, metrics: list[dict], scope_id: str) -> b
     return matched_any
 
 
+def _client_static_suggested_questions(client_cfg: dict, lang: str) -> list[str]:
+    """The default (non-admin-overridden) suggested-question list for a
+    client (home_ask_bar_top_prompt.md's cycling placeholder is one of its
+    consumers, alongside the home screen's discovery cards). config/clients.
+    yaml's `suggested_questions` is the language-agnostic default;
+    `suggested_questions_he` is an optional Hebrew variant, picked when the
+    org's chrome language is Hebrew (org_settings.default_language) -- the
+    SAME org-language source every other piece of chrome copy already reads,
+    per home_hebrew_polish_prompt.md item 4. Falls back to the English list
+    when no Hebrew variant is configured for this client, so an
+    unconfigured client degrades exactly like before this existed."""
+    if lang == "he":
+        he_list = client_cfg.get("suggested_questions_he")
+        if he_list:
+            return he_list
+    return client_cfg.get("suggested_questions", [])
+
+
 def _client_model(c: dict) -> Client:
     cfg, _warnings = _effective_home_config(c["id"])
     override = cfg["suggested_questions"]["questions"]
+    lang = org_settings_store.get_or_create(c["id"], default_name=c.get("label", c["id"]))["default_language"]
     return Client(
         id=c["id"],
         label=c["label"],
         semantic_dir=c.get("semantic_dir", ""),
         # An empty override means "nothing published yet" -- keep the
         # client's static config/clients.yaml list unchanged.
-        suggested_questions=override or c.get("suggested_questions", []),
+        suggested_questions=override or _client_static_suggested_questions(c, lang),
+    )
+
+
+@app.get("/healthz", response_model=HealthzResponse, include_in_schema=False)
+def healthz() -> HealthzResponse:
+    """Platform liveness/readiness probe target (Railway/Render/etc.) --
+    root-level path (not /api), no auth (see require_api_key's exemption),
+    minimal payload. `version` comes from SEMA_VERSION (a deploy-time env var
+    the platform/CI can set to a commit SHA or tag); "unknown" when unset,
+    which is the expected value for local dev."""
+    cid = client_registry.DEFAULT_CLIENT_ID
+    return HealthzResponse(
+        status="ok",
+        db_connected=check_connection(cid),
+        version=os.environ.get("SEMA_VERSION", "unknown"),
     )
 
 
@@ -630,12 +756,13 @@ def chat(req: ChatRequest) -> ChatResponse:
     # 404 on a bad conversation_id, whether resolving the main chat or a
     # drill-down thread's parent.
     target_id, history, is_thread = _resolve_persist_target(cid, req)
-    scope_id = current_org_user(cid)["data_scope"]
+    me = current_org_user(cid)
+    scope_id = me["data_scope"]
     # Point the whole agent run (db + semantic) at this request's client.
     client_registry.set_active_client_override(cid)
     started = time.perf_counter()
     try:
-        resp = get_response(
+        resp = _check_daily_query_limit(cid, me, req.question) or get_response(
             req.question,
             history=history,
             request_id=request_id,
@@ -710,7 +837,8 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
     # 404 on a bad conversation_id, whether resolving the main chat or a
     # drill-down thread's parent.
     target_id, history, is_thread = _resolve_persist_target(cid, req)
-    scope_id = current_org_user(cid)["data_scope"]
+    me = current_org_user(cid)
+    scope_id = me["data_scope"]
 
     def worker(q: "queue.Queue") -> None:
         # The ContextVar override is set INSIDE this worker thread -- a new
@@ -720,7 +848,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
         client_registry.set_active_client_override(cid)
         started = time.perf_counter()
         try:
-            resp = get_response(
+            resp = _check_daily_query_limit(cid, me, req.question) or get_response(
                 req.question,
                 history=history,
                 request_id=request_id,
@@ -1036,23 +1164,38 @@ def admin_data_scopes(me: dict = Depends(require_client_admin)) -> list[DataScop
     return [DataScopeInfo(**d) for d in data_scope.catalog()]
 
 
+USERS_PAGE_SIZE = 25
+
+
 @app.get("/api/admin/users", response_model=AdminUserList)
 def admin_list_users(
     q: str | None = None,
     role: str | None = None,
+    page: int = 1,
+    page_size: int = USERS_PAGE_SIZE,
     me: dict = Depends(require_client_admin),
 ) -> AdminUserList:
-    """This org's users, with optional search (name/email) and role filter.
-    The two counts are of the whole org, not the filtered view, so the subtitle
-    stays stable while searching."""
+    """This org's users, with optional search (name/email) and role filter,
+    combined server-side with paging (25/page by default -- denser rows than
+    the audit log's 50, spec §8; `page_size` is overridable for callers that
+    want the whole roster in one call, e.g. the audit log's actor-filter
+    dropdown). member_count/pending_count are of the whole org, not the
+    filtered view, so the subtitle stays stable while searching; total is the
+    FILTERED count, for the pager."""
     cid = me["client_id"]
-    rows = org_user_store.list_users(cid, q=q, role=role)
+    page = max(1, page)
+    rows = org_user_store.list_users(cid, q=q, role=role, page=page, page_size=page_size)
+    total = org_user_store.count_users(cid, q=q, role=role)
     everyone = org_user_store.list_users(cid)
     pending = sum(1 for u in everyone if u["status"] == "invited")
     return AdminUserList(
         users=[_admin_user(r, me) for r in rows],
         member_count=len(everyone) - pending,
         pending_count=pending,
+        active_admin_count=org_user_store.count_active_admins(cid),
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -1738,7 +1881,7 @@ def admin_alerts_catalog(me: dict = Depends(require_client_admin)) -> list[Alert
 
 
 @app.get("/api/admin/alerts/templates", response_model=list[AlertTemplateCatalogItem])
-def admin_alert_templates() -> list[AlertTemplateCatalogItem]:
+def admin_alert_templates(me: dict = Depends(require_client_admin)) -> list[AlertTemplateCatalogItem]:
     """The 4 template types + their param keys -- server-driven so the
     builder's radio cards never hardcode what only sema_core.alert_templates
     should own, same pattern as the data-source connector catalog."""
@@ -1749,7 +1892,7 @@ def admin_alert_templates() -> list[AlertTemplateCatalogItem]:
 
 
 @app.get("/api/admin/alerts/metrics", response_model=list[AlertMetricCatalogItem])
-def admin_alert_metrics() -> list[AlertMetricCatalogItem]:
+def admin_alert_metrics(me: dict = Depends(require_client_admin)) -> list[AlertMetricCatalogItem]:
     """The fixed KPI_CATALOG metrics a template-based alert may target."""
     from sema_core.home_config import KPI_CATALOG
 
@@ -2009,7 +2152,8 @@ def admin_preview_home_config(body: HomeConfig, me: dict = Depends(require_clien
         client_registry.set_active_client_override(None)
 
     client_cfg = client_registry.get_client_by_id(cid)
-    suggested = cfg["suggested_questions"]["questions"] or client_cfg.get("suggested_questions", [])
+    preview_lang = org_settings_store.get_or_create(cid, default_name=client_cfg.get("label", cid))["default_language"]
+    suggested = cfg["suggested_questions"]["questions"] or _client_static_suggested_questions(client_cfg, preview_lang)
 
     return HomeConfigPreview(
         overview=Overview(
@@ -2512,3 +2656,28 @@ def schema(client_id: str | None = None) -> SchemaResponse:
             status_code=500,
             detail=f"Could not load the schema. Reference: {request_id}",
         ) from None
+
+
+# --- production static frontend (deployment_prep_prompt.md item 1) ---------
+# Registered LAST and only a catch-all path route, so every specific /api/*
+# and /healthz route above still matches first -- FastAPI/Starlette match
+# routes in registration order, and only a request nothing above matched
+# falls through to this one. Present only when `frontend/dist` actually
+# exists (the prod Docker build's `npm run build` output, copied in by
+# api/Dockerfile.prod) -- local dev's docker-compose.yml runs the separate
+# Vite dev server instead and never has this directory, so this block is
+# simply absent there, not merely inactive.
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _FRONTEND_DIST.is_dir():
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_static_or_index(full_path: str) -> FileResponse:
+        """Serves a real built asset (JS/CSS/favicon/etc.) by exact path, or
+        falls back to index.html for any client-side route (e.g. /login) so
+        the SPA's own router handles it -- the standard single-service SPA
+        hosting pattern. FileResponse (not a raw read) gets us correct
+        Content-Type + conditional/range-request support for free, so a
+        dedicated StaticFiles mount isn't needed for this one directory."""
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")

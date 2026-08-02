@@ -25,6 +25,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sema_core import sqlite_utils
+
 PAGE_SIZE = 50
 EXPORT_ROW_CAP = 10_000
 
@@ -47,7 +49,7 @@ class AuditStore:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path, timeout=5)
+        return sqlite_utils.connect(self._path)
 
     def _init_schema(self) -> None:
         with closing(self._connect()) as conn, conn:

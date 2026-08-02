@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConversationSummary } from "../lib/api";
-import {
-  GROUP_LABELS,
-  bucketConversations,
-  filterByTitle,
-  previewSplit,
-} from "../lib/conversations";
-import { NEW_CONVERSATION } from "../lib/chatCopy";
-import { useUiLang } from "../lib/useUiLang";
+import { bucketConversations, filterByTitle, previewSplit } from "../lib/conversations";
+import { useT } from "../locales";
 import { ConversationItem, type ConversationActions } from "./ConversationItem";
 import { SidebarSection } from "./SidebarSection";
 
@@ -57,6 +51,7 @@ function CollapsibleGroup({
   activeId: string | null;
   actions: ConversationActions;
 }) {
+  const t = useT();
   const [open, setOpen] = useState<boolean>(() => loadCollapsed()[id] ?? DEFAULT_OPEN[id] ?? true);
 
   useEffect(() => {
@@ -70,7 +65,12 @@ function CollapsibleGroup({
   }, [id, open]);
 
   return (
-    <SidebarSection title={GROUP_LABELS[id]} count={items.length} open={open} onToggle={() => setOpen((o) => !o)}>
+    <SidebarSection
+      title={t.sidebar.groups[id]}
+      count={items.length}
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+    >
       <Rows items={items} activeId={activeId} actions={actions} />
     </SidebarSection>
   );
@@ -89,11 +89,18 @@ function PreviewGroup({
   activeId: string | null;
   actions: ConversationActions;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const { shown, remaining } = previewSplit(items, expanded);
 
   return (
-    <SidebarSection title={GROUP_LABELS.week} count={items.length} open onToggle={() => {}} collapsible={false}>
+    <SidebarSection
+      title={t.sidebar.groups.week}
+      count={items.length}
+      open
+      onToggle={() => {}}
+      collapsible={false}
+    >
       <Rows items={shown} activeId={activeId} actions={actions} />
       {remaining > 0 && (
         <button
@@ -101,7 +108,7 @@ function PreviewGroup({
           onClick={() => setExpanded(true)}
           className="w-full text-left px-2.5 py-1.5 text-[0.78rem] font-medium text-primary hover:text-primary-dark transition"
         >
-          Show all {items.length} →
+          {t.sidebar.showAll(items.length)}
         </button>
       )}
     </SidebarSection>
@@ -134,9 +141,9 @@ export function ConversationList({
   /** When non-empty, show a flat list of title matches instead of groups. */
   search?: string;
 }) {
-  const lang = useUiLang();
+  const t = useT();
   if (error) {
-    return <div className="px-1 py-2 text-[0.78rem] text-muted">Couldn't load chat history.</div>;
+    return <div className="px-1 py-2 text-[0.78rem] text-muted">{t.sidebar.couldNotLoadHistory}</div>;
   }
   if (loading && conversations.length === 0) {
     return (
@@ -155,7 +162,7 @@ export function ConversationList({
     if (matches.length === 0) {
       return (
         <div className="px-2 py-2 text-[0.78rem] text-muted leading-relaxed">
-          No chats match “{search.trim()}”.
+          {t.sidebar.noChatsMatch(search.trim())}
         </div>
       );
     }
@@ -165,9 +172,9 @@ export function ConversationList({
   if (conversations.length === 0) {
     return (
       <div className="px-2 py-2 text-[0.78rem] text-faint leading-relaxed">
-        No conversations yet. Start one with{" "}
+        {t.sidebar.noConversationsYetPrefix}{" "}
         <span className="font-medium text-ink" dir="auto">
-          {NEW_CONVERSATION[lang]}
+          {t.sidebar.newConversation}
         </span>
         .
       </div>
@@ -181,7 +188,7 @@ export function ConversationList({
     <div>
       {buckets.pinned.length > 0 && (
         <SidebarSection
-          title={GROUP_LABELS.pinned}
+          title={t.sidebar.groups.pinned}
           count={buckets.pinned.length}
           open
           onToggle={() => {}}
@@ -192,12 +199,14 @@ export function ConversationList({
       )}
 
       {hasRecent && (
-        <div className="px-1 pb-1 text-[0.72rem] font-semibold uppercase tracking-wide text-faint">Recent</div>
+        <div className="px-1 pb-1 text-[0.72rem] font-semibold uppercase tracking-wide text-faint">
+          {t.sidebar.groups.recent}
+        </div>
       )}
 
       {buckets.today.length > 0 && (
         <SidebarSection
-          title={GROUP_LABELS.today}
+          title={t.sidebar.groups.today}
           count={buckets.today.length}
           open
           onToggle={() => {}}

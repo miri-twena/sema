@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { LogOut, MoreHorizontal } from "lucide-react";
 import { api, type AdminUser } from "../lib/api";
-import { useDismiss } from "../hooks/useDismiss";
+import { usePopoverMenu } from "../hooks/usePopoverMenu";
 import { initials, pastelFor } from "../lib/avatar";
-import { useUiLang } from "../lib/useUiLang";
-import { COMMON, ROLE_LABEL, USER_MENU } from "../lib/placeholderCopy";
+import { useT } from "../locales";
+import { PopoverMenu } from "./PopoverMenu";
+
+const MENU_EST_HEIGHT = 110;
 
 /**
  * Sidebar footer's second row (login spec v1.4 §4, approved mockup): who's
@@ -17,11 +19,13 @@ import { COMMON, ROLE_LABEL, USER_MENU } from "../lib/placeholderCopy";
  */
 export function UserFooter() {
   const [me, setMe] = useState<AdminUser | null>(null);
-  const [open, setOpen] = useState(false);
-  const lang = useUiLang();
-  const t = USER_MENU[lang];
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss<HTMLDivElement>(open, close);
+  const t = useT();
+  const { open, toggle, triggerRef, menuRef, pos } = usePopoverMenu<HTMLDivElement>({
+    width: "trigger",
+    estHeight: MENU_EST_HEIGHT,
+    align: "start",
+    placement: "above",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -37,25 +41,22 @@ export function UserFooter() {
   if (!me) return null;
 
   const name = me.name || me.email;
-  const role = ROLE_LABEL[me.role]?.[lang] ?? me.role;
+  const role = t.common.roles[me.role] ?? me.role;
   const [bg, fg] = pastelFor(me.email);
 
   return (
-    <div ref={ref} className="relative shrink-0 border-t border-line p-3">
+    <div ref={triggerRef} className="relative shrink-0 border-t border-line p-3">
       {open && (
-        <div
-          role="menu"
-          className="absolute bottom-[calc(100%-4px)] start-3 end-3 z-30 rounded-xl2 border border-line bg-surface shadow-pop p-1"
-        >
+        <PopoverMenu pos={pos} menuRef={menuRef} className="rounded-xl2 p-1">
           <div
             role="menuitem"
             aria-disabled="true"
-            title={COMMON[lang].comingSoon}
+            title={t.common.comingSoon}
             className="w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[0.85rem] text-faint cursor-default select-none"
           >
-            {t.personalSettings}
+            {t.userMenu.personalSettings}
             <span className="shrink-0 rounded-full bg-surfaceAlt px-1.5 py-0.5 text-[0.6rem] font-medium text-muted">
-              {COMMON[lang].comingSoon}
+              {t.common.comingSoon}
             </span>
           </div>
           <div className="my-1 border-t border-lineSoft" />
@@ -68,14 +69,14 @@ export function UserFooter() {
             className="w-full text-start flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.85rem] text-critical-fg hover:bg-critical-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
           >
             <LogOut size={15} className="shrink-0" />
-            {t.logOut}
+            {t.userMenu.logOut}
           </button>
-        </div>
+        </PopoverMenu>
       )}
 
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`${name}. ${role}`}

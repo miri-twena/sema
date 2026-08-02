@@ -27,7 +27,7 @@ export function EmailStep({
   };
 
   return (
-    <div className="w-full max-w-sm">
+    <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
       {orgContext && (
         <div className="flex flex-col items-center mb-6">
           {orgContext.logoUrl ? (
@@ -37,17 +37,19 @@ export function EmailStep({
         </div>
       )}
 
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">SEMA</h1>
-        <p className="text-sm text-muted mt-1.5">{t.headline}</p>
+      <div className="flex flex-col items-center mb-7">
+        <div className="flex items-center justify-center gap-[9px]">
+          <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
+          <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
+        </div>
+        <p className="text-[13.5px] text-muted mt-2">{t.headline}</p>
       </div>
 
       <form onSubmit={handleSubmit} noValidate>
-        <label htmlFor="login-email" className="block text-[0.78rem] font-medium text-ink mb-1">
+        <label htmlFor="login-email" className="block text-[12.5px] font-medium text-ink mb-[5px]">
           {t.emailLabel}
         </label>
         <div className="relative">
-          <Mail size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-faint" />
           <input
             id="login-email"
             type="email"
@@ -59,14 +61,18 @@ export function EmailStep({
             value={email}
             disabled={submitting}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-line bg-surface ps-9 pe-3 py-2.5 text-sm text-ink outline-none focus:border-primary disabled:opacity-60 transition"
+            className="peer w-full h-[42px] rounded-control border border-line bg-surface ps-9 pe-3 text-sm text-ink outline-none focus:border-[1.5px] focus:border-primary focus:ring focus:ring-primaryRing disabled:opacity-60 transition"
+          />
+          <Mail
+            size={15}
+            className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-faint peer-focus:text-primary transition"
           />
         </div>
 
         <button
           type="submit"
           disabled={!valid || submitting}
-          className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          className="mt-3 w-full h-[42px] inline-flex items-center justify-center gap-2 rounded-control bg-primary text-sm font-medium text-white shadow-loginCta hover:bg-primary/90 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed transition"
         >
           {submitting ? (
             <>
@@ -80,7 +86,7 @@ export function EmailStep({
 
       <div className="flex items-center gap-3 my-5">
         <div className="flex-1 h-px bg-line" />
-        <span className="text-[0.75rem] text-faint">{t.divider}</span>
+        <span className="text-xs text-muted">{t.divider}</span>
         <div className="flex-1 h-px bg-line" />
       </div>
 
@@ -90,7 +96,7 @@ export function EmailStep({
       </div>
 
       <div className="text-center mt-6">
-        <a href={troubleHref} className="text-[0.8rem] text-muted hover:text-primary transition">
+        <a href={troubleHref} className="text-[12.8px] text-muted hover:text-primary transition">
           {t.troubleLink}
         </a>
       </div>

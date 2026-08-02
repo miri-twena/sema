@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, resolveApiUrl } from "../../lib/api";
-import { detectBrowserLang, dirFor, LOGIN_COPY, type Lang } from "../../lib/loginCopy";
+import { dirFor, LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import { useLoginFlow } from "../../hooks/useLoginFlow";
 import { EmailStep } from "./EmailStep";
 import { CodeStep } from "./CodeStep";
@@ -40,7 +40,11 @@ function useInviteOrgContext(): OrgContext {
  * app itself stays reachable with today's mock identity, unaffected.
  */
 export function LoginPage() {
-  const [lang] = useState<Lang>(() => detectBrowserLang(navigator.language));
+  // Always English/LTR (AGENTS.md: "UI is English, always" -- supersedes Part
+  // 0's original browser-language detection). LOGIN_COPY.he and
+  // detectBrowserLang stay in lib/loginCopy.ts, unused here for now, in case
+  // per-org login language is reinstated later.
+  const lang: Lang = "en";
   const dir = dirFor(lang);
   const t = LOGIN_COPY[lang];
   const orgContext = useInviteOrgContext();

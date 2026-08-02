@@ -12,6 +12,7 @@ import { AccordionSection } from "./AccordionSection";
 import { HomeDashboard } from "../HomeDashboard";
 import { timeAgo } from "../../lib/time";
 import { AlertBuilder } from "./AlertBuilder";
+import { CHART_PALETTE } from "../../lib/tokens";
 
 const KPI_LABELS: Record<HomeConfigKpiId, string> = {
   revenue: "Revenue",
@@ -185,6 +186,14 @@ function OverviewAccordion({ config, update }: { config: HomeConfig; update: Upd
                 <ArrowDown size={13} />
               </button>
             </div>
+            {/* Same hue this KPI will get in the live preview (KpiCards cycles
+             * CHART_PALETTE positionally) -- what you configure looks like
+             * what you get. */}
+            <span
+              className="shrink-0 inline-block w-[7px] h-[7px] rounded-full"
+              style={{ background: CHART_PALETTE[i % CHART_PALETTE.length] }}
+              aria-hidden
+            />
             <span className="flex-1 text-[0.82rem] text-ink">{KPI_LABELS[id]}</span>
             {KPI_SUPPORTS_DELTA[id] && (
               <label className="flex items-center gap-1.5 text-[0.72rem] text-muted cursor-pointer">
@@ -444,14 +453,14 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto px-8 py-8">
+      <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-screen-2xl mx-auto px-8 py-8">
         <div className="h-8 w-64 rounded bg-surfaceAlt animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-8 py-8">
+    <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-screen-2xl mx-auto px-8 py-8">
       <div className="text-[0.75rem] text-muted mb-2" dir="auto">
         {clientLabel || "Workspace"} <span className="text-faint">›</span> Organization admin
       </div>
@@ -506,6 +515,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
             subtitle="Layers and sensitivity"
             open={openSection === "brief"}
             onToggle={() => openAndScroll("brief")}
+            hue={CHART_PALETTE[1]}
           >
             <DailyBriefAccordion config={draft} update={update} />
           </AccordionSection>
@@ -516,6 +526,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
             subtitle="KPIs, order, and period"
             open={openSection === "overview"}
             onToggle={() => openAndScroll("overview")}
+            hue={CHART_PALETTE[0]}
           >
             <OverviewAccordion config={draft} update={update} />
           </AccordionSection>
@@ -526,6 +537,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
             subtitle="Starters and trending"
             open={openSection === "questions"}
             onToggle={() => openAndScroll("questions")}
+            hue={CHART_PALETTE[2]}
           >
             <SuggestedQuestionsAccordion config={draft} update={update} />
           </AccordionSection>
@@ -536,6 +548,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
             subtitle="Per-alert threshold"
             open={openSection === "alerts"}
             onToggle={() => openAndScroll("alerts")}
+            hue={CHART_PALETTE[4]}
           >
             <AlertBuilder />
             <div className="my-3 border-t border-lineSoft" />
@@ -560,6 +573,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
               >
                 <HomeDashboard
                   clientLabel={clientLabel}
+                  userName={null}
                   suggested={preview.suggested_questions}
                   alerts={preview.alerts}
                   overview={preview.overview}
@@ -568,6 +582,7 @@ export function HomeConfigScreen({ clientLabel }: { clientLabel: string }) {
                   dbConnected
                   agentConfigured
                   onPick={() => {}}
+                  onAsk={() => {}}
                 />
               </div>
             ) : (

@@ -55,6 +55,14 @@ clients:
       - "Who are our most valuable customers?"
       - "Why did revenue drop in March 2026?"
       - "Which campaign performs best?"
+    # Shown instead of the list above when this org's chrome language
+    # (org_settings.default_language) is Hebrew -- see
+    # api/main.py's _client_static_suggested_questions.
+    suggested_questions_he:
+      - "הראי מגמת הכנסות לפי חודש."
+      - "מי הלקוחות הכי משתלמים שלנו?"
+      - "למה ההכנסות ירדו במרץ 2026?"
+      - "איזה קמפיין מניב הכי טוב?"
     # This client runs on the calendar year (no fiscal_calendar), counts plain
     # calendar days (no business_days), and uses the semantic layer's canonical
     # Revenue -- so SEMA does NOT clarify any of those. Only a timezone is set,
@@ -78,6 +86,11 @@ clients:
       - "Which coverage type is least profitable?"
       - "Show policies in force by region."
       - "Which channel retains customers best?"
+    suggested_questions_he:
+      - "מה יחס ההפסדים שלנו?"
+      - "איזה סוג כיסוי הכי פחות רווחי?"
+      - "הראי פוליסות בתוקף לפי אזור."
+      - "איזה ערוץ שומר הכי טוב על לקוחות?"
     data_sources:
       - id: postgres_main
         type: postgres

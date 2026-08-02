@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import type { BriefInsight, DailyBrief as DailyBriefResponse, PulseMetric } from "../lib/api";
 import { formatValue } from "../lib/format";
+import { useT } from "../locales";
+import { useUiLang } from "../lib/useUiLang";
 
 const STATUS_COLOR = {
   above: "#1B7A5E", // success
@@ -93,6 +95,7 @@ const INSIGHT_ICON: Record<BriefInsight["icon"], { Icon: ComponentType<{ size?: 
 };
 
 function InsightRow({ insight, onAsk }: { insight: BriefInsight; onAsk: (question: string) => void }) {
+  const t = useT();
   const { Icon, color } = INSIGHT_ICON[insight.icon];
   return (
     <div className="flex items-start gap-3 rounded-xl border border-line bg-surface p-3">
@@ -108,7 +111,7 @@ function InsightRow({ insight, onAsk }: { insight: BriefInsight; onAsk: (questio
           onClick={() => onAsk(insight.follow_up_question)}
           className="group mt-1.5 inline-flex items-center gap-1.5 text-[0.78rem] font-medium text-primary hover:underline"
         >
-          Tell me more
+          {t.home.tellMeMore}
           <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
         </button>
       </div>
@@ -119,10 +122,11 @@ function InsightRow({ insight, onAsk }: { insight: BriefInsight; onAsk: (questio
 /** The quiet-day state: insights is empty, which is the NORMAL case on most
  * days, not a degraded one -- a single calm line, never a filler card. */
 function AllNormalRow() {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5">
       <CheckCircle2 size={16} className="shrink-0" style={{ color: STATUS_COLOR.above }} />
-      <span className="text-sm text-ink">All metrics in their normal range today</span>
+      <span className="text-sm text-ink">{t.home.allNormal}</span>
     </div>
   );
 }
@@ -151,11 +155,13 @@ export function DailyBrief({
   brief: DailyBriefResponse | null; // null while loading
   onAsk: (question: string) => void;
 }) {
+  const t = useT();
+  const dir = useUiLang() === "he" ? "rtl" : "ltr";
   if (brief === null) {
     return (
       <section className="mt-8" aria-busy="true">
-        <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted mb-2">
-          Daily brief
+        <div dir={dir} className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted mb-2">
+          {t.home.dailyBrief}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[0, 1, 2].map((i) => (
@@ -170,14 +176,19 @@ export function DailyBrief({
 
   return (
     <section className="mt-8">
-      <div className="flex items-center justify-between gap-2 mb-2">
+      {/* `dir` on the row (not just the label span) so the whole header
+          mirrors in Hebrew -- icon+label to the right, the "as of" date to
+          the left -- per direct user feedback on the live result. */}
+      <div dir={dir} className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5">
           <Sparkles size={13} className="text-primary" />
-          <span className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">Daily brief</span>
+          <span className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">
+            {t.home.dailyBrief}
+          </span>
         </div>
         {brief.as_of && (
           <span className="text-[0.7rem] text-muted shrink-0" dir="ltr">
-            As of {formatAsOf(brief.as_of)}
+            {t.home.asOf(formatAsOf(brief.as_of))}
           </span>
         )}
       </div>

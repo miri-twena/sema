@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ApiError, type AdminDataScope, type AdminRole } from "../../lib/api";
 import { useDismiss } from "../../hooks/useDismiss";
+import { useT } from "../../locales";
 
 // Mirrors the server's pragmatic check (api/main.py _EMAIL_RE): one @, a dotted
 // domain. Catches typos client-side; the server validates again regardless.
@@ -22,6 +23,7 @@ export function InviteModal({
    * successful invite (the caller closes the modal). */
   onInvite: (email: string, role: AdminRole, dataScope: AdminDataScope) => Promise<unknown>;
 }) {
+  const t = useT();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AdminRole>("analyst");
   // Defaults to the safer non-financial preset (spec item 11) -- matches the
@@ -48,7 +50,7 @@ export function InviteModal({
       e.preventDefault();
       const value = email.trim();
       if (!EMAIL_RE.test(value)) {
-        setError("Enter a valid email address.");
+        setError(t.admin.users.invite.invalidEmail);
         return;
       }
       setSubmitting(true);
@@ -57,11 +59,11 @@ export function InviteModal({
         await onInvite(value, role, isAdmin ? "full" : dataScope);
         onClose(); // success is silent -- the new row just appears
       } catch (err) {
-        setError(err instanceof ApiError ? err.detail : "Couldn't send the invite.");
+        setError(err instanceof ApiError ? err.detail : t.admin.users.invite.couldNotSend);
         setSubmitting(false);
       }
     },
-    [email, role, dataScope, isAdmin, onInvite, onClose],
+    [email, role, dataScope, isAdmin, onInvite, onClose, t],
   );
 
   return (
@@ -81,13 +83,13 @@ export function InviteModal({
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h2 id="invite-title" className="text-base font-semibold text-ink">
-              Invite user
+              {t.admin.users.invite.title}
             </h2>
-            <p className="text-[0.8rem] text-muted mt-0.5">Invite link is valid for 7 days.</p>
+            <p className="text-[0.8rem] text-muted mt-0.5">{t.admin.users.invite.validitySubtitle}</p>
           </div>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t.admin.users.invite.close}
             className="shrink-0 w-8 h-8 -me-1 -mt-1 rounded-lg flex items-center justify-center text-muted hover:bg-surfaceAlt hover:text-ink transition"
           >
             <X size={18} />
@@ -96,7 +98,7 @@ export function InviteModal({
 
         <form onSubmit={submit}>
           <label className="block text-[0.78rem] font-medium text-ink mb-1" htmlFor="invite-email">
-            Email address
+            {t.admin.users.invite.emailLabel}
           </label>
           <input
             id="invite-email"
@@ -108,14 +110,14 @@ export function InviteModal({
               setEmail(e.target.value);
               if (error) setError(null);
             }}
-            placeholder="name@company.com"
+            placeholder={t.admin.users.invite.emailPlaceholder}
             className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary transition"
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? "invite-error" : undefined}
           />
 
           <label className="block text-[0.78rem] font-medium text-ink mt-3 mb-1" htmlFor="invite-role">
-            Role
+            {t.admin.users.invite.roleLabel}
           </label>
           <select
             id="invite-role"
@@ -123,13 +125,13 @@ export function InviteModal({
             onChange={(e) => setRole(e.target.value as AdminRole)}
             className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary transition"
           >
-            <option value="analyst">Analyst</option>
-            <option value="viewer">Viewer</option>
-            <option value="client_admin">Admin</option>
+            <option value="analyst">{t.common.roles.analyst}</option>
+            <option value="viewer">{t.common.roles.viewer}</option>
+            <option value="client_admin">{t.common.roles.client_admin}</option>
           </select>
 
           <label className="block text-[0.78rem] font-medium text-ink mt-3 mb-1" htmlFor="invite-data-scope">
-            Data access
+            {t.admin.users.invite.dataAccessLabel}
           </label>
           <select
             id="invite-data-scope"
@@ -138,12 +140,12 @@ export function InviteModal({
             onChange={(e) => setDataScope(e.target.value as AdminDataScope)}
             className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed transition"
           >
-            <option value="no_financials">No financials</option>
-            <option value="sales_only">Sales only</option>
-            <option value="full">Full access</option>
+            <option value="no_financials">{t.admin.users.invite.scopeNoFinancials}</option>
+            <option value="sales_only">{t.admin.users.invite.scopeSalesOnly}</option>
+            <option value="full">{t.admin.users.invite.scopeFullAccess}</option>
           </select>
           {isAdmin && (
-            <p className="mt-1 text-[0.72rem] text-muted">Admins always have full data access.</p>
+            <p className="mt-1 text-[0.72rem] text-muted">{t.admin.users.invite.adminAlwaysFullAccess}</p>
           )}
 
           {error && (
@@ -158,14 +160,14 @@ export function InviteModal({
               onClick={onClose}
               className="rounded-xl border border-line px-3.5 py-2 text-sm text-muted hover:text-ink hover:bg-surfaceAlt transition"
             >
-              Cancel
+              {t.admin.users.invite.cancel}
             </button>
             <button
               type="submit"
               disabled={submitting}
               className="rounded-xl bg-primary text-white text-sm font-medium px-4 py-2 shadow-bubble hover:bg-primary/90 disabled:opacity-60 transition"
             >
-              {submitting ? "Sending…" : "Send invite"}
+              {submitting ? t.admin.users.invite.sending : t.admin.users.invite.sendInvite}
             </button>
           </div>
         </form>

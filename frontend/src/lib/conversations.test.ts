@@ -3,6 +3,7 @@ import type { ChatResponse, ConversationDetail, ConversationSummary } from "./ap
 import {
   bucketConversations,
   filterByTitle,
+  firstUserMessage,
   groupOf,
   previewSplit,
   startOfToday,
@@ -135,6 +136,27 @@ describe("turnsFromDetail", () => {
   });
 });
 
+describe("firstUserMessage (rerun_conversation_prompt.md)", () => {
+  it("returns the FIRST user question, not a later one", () => {
+    const q = firstUserMessage(
+      detail([
+        { role: "user", content: "q1", payload: null },
+        { role: "assistant", content: "a1", payload: null },
+        { role: "user", content: "q2", payload: null },
+        { role: "assistant", content: "a2", payload: null },
+      ]),
+    );
+    expect(q).toBe("q1");
+  });
+
+  it("is undefined for an empty/broken conversation with no user message", () => {
+    expect(firstUserMessage(detail([]))).toBeUndefined();
+    expect(
+      firstUserMessage(detail([{ role: "assistant", content: "orphaned answer", payload: null }])),
+    ).toBeUndefined();
+  });
+});
+
 describe("time grouping", () => {
   const dayStart = startOfToday(new Date("2026-07-21T09:00:00"));
   const hoursAgo = (h: number) => new Date(dayStart + 9 * 3600_000 - h * 3600_000).toISOString();
@@ -148,6 +170,7 @@ describe("time grouping", () => {
       created_at: hoursAgo(1),
       updated_at: hoursAgo(1),
       message_count: 2,
+      drill_count: 0,
       ...over,
     };
   }
@@ -222,6 +245,7 @@ describe("filterByTitle (sidebar search)", () => {
       created_at: "2026-07-01T00:00:00Z",
       updated_at: "2026-07-01T00:00:00Z",
       message_count: 1,
+      drill_count: 0,
     };
   }
 

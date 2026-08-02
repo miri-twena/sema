@@ -2,32 +2,18 @@
 // every discussed-but-not-yet-built surface gets a real entry point now, with
 // consistent "coming soon" feedback. Read via lib/useUiLang.ts. Same
 // Record<Lang, {...}> shape as lib/loginCopy.ts's LOGIN_COPY.
+//
+// COMMON/USER_MENU/ROLE_LABEL/GEAR_MENU used to live here too; they moved
+// into the central locale files (locales/en.ts + he.ts, useT()) when
+// i18n_language_files_prompt.md replaced every scattered copy dict with one
+// mechanism. DATA_SOURCE_GALLERY (the Data sources "Add a source" gallery)
+// is deliberately NOT migrated in that pass -- AddDataSourceModal.tsx reads
+// only its `.en` half by design (a prior, still-current decision to keep
+// that one flow English-only regardless of org language, documented in the
+// modal itself), so moving it into the org-language-aware locale files would
+// misrepresent it as something that should follow the org setting.
 
 export type Lang = "he" | "en";
-
-export const COMMON = {
-  en: { comingSoon: "Coming soon" },
-  he: { comingSoon: "בקרוב" },
-} as const;
-
-export const USER_MENU = {
-  en: { personalSettings: "Personal settings", logOut: "Log out" },
-  he: { personalSettings: "הגדרות אישיות", logOut: "התנתקות" },
-} as const;
-
-// Bilingual role label for the sidebar user row -- small enough to keep
-// local rather than exporting auditSentences.ts's private (unrelated-scope)
-// copy of the same three entries.
-export const ROLE_LABEL: Record<string, { en: string; he: string }> = {
-  client_admin: { en: "Admin", he: "מנהל/ת" },
-  analyst: { en: "Analyst", he: "אנליסט/ית" },
-  viewer: { en: "Viewer", he: "צופה" },
-};
-
-export const GEAR_MENU = {
-  en: { manageOrg: "Manage organization", platformConsole: "Platform console" },
-  he: { manageOrg: "ניהול הארגון", platformConsole: "קונסולת פלטפורמה" },
-} as const;
 
 export const DATA_SOURCE_GALLERY = {
   en: {

@@ -1,0 +1,17 @@
+# Task: Home screen (Hebrew org) — ordering + alignment + guidance line fixes
+
+User review of the new top ask bar (`home_ask_bar_top_prompt.md`) with org language = Hebrew. Four fixes:
+
+1. **Section order:** the line "הנה מה שדורש את תשומת לבך היום" (the brief's intro sentence) must sit BELOW the ask input and ABOVE the daily brief — final order: greeting → guidance line (see 3) → ask input → "הנה מה שדורש את תשומת לבך היום" → daily brief → business overview. Same relative order in English.
+2. **Hebrew heading alignment:** when the org language is Hebrew, all HEADINGS/section titles on the home screen (greeting, section labels like DAILY BRIEF/BUSINESS OVERVIEW equivalents, the attention line) are right-aligned with RTL direction. The page layout stays anchored (no dir flip on the shell, cards/grid order unchanged) — this is text alignment of the heading elements only. English stays left-aligned.
+3. **Guidance line above the input:** one short sentence between the greeting and the ask input that tells a first-time user what to do. Hebrew: "שאלי את SEMA כל שאלה על העסק — בשפה חופשית." — NO: address the user neutrally: "אפשר לשאול את SEMA כל שאלה על העסק, בשפה חופשית." English: "Ask SEMA anything about your business — in plain language." Muted secondary style, locale files per AGENTS.md.
+4. **Placeholder in Hebrew:** the cycling placeholder inside the input must render the Hebrew example questions when org language is Hebrew (Hebrew suggested-questions source, `dir="rtl"` on the placeholder text, digits/metric names LTR-safe). If it currently shows English despite org=he — that's the bug; route it through the same locale/org-language source as the rest.
+
+5. **New-conversation empty state — content moves to the TOP (screenshot):** the intro block ("התחלת שיחה" header, the guidance sentence, and the suggested-question cards) currently sits low, hugging the bottom input. Move the whole block to the TOP of the pane (normal reading position under the header area), with the input staying where it is — the user reads "here's what you can ask" first, then acts. Same order in English.
+6. **RTL punctuation bug (visible in the screenshot):** the guidance line renders as ":אפשר לשאול..." — the colon jumps to the wrong end because the line isn't properly `dir="rtl"`. Fix the direction on these Hebrew text elements so punctuation sits at the sentence END. Check the same for every Hebrew line added in this task.
+7. Suggested-question cards: render whatever the org's suggested-questions config holds (mixed languages are fine — each card takes `dir="auto"`); no forced translation of the questions themselves.
+8. **Home is the app's anchor:** (a) entering the app always lands on the HOME screen first (fresh load/login — never auto-opens a previous conversation; the sidebar is how you return to one); (b) clicking the SEMA logo or the "SEMA / AI Business Advisor" wordmark at the top-left ALWAYS navigates back to home, from anywhere — mid-conversation (the conversation stays in the sidebar, nothing is lost), drill view, or the admin panel ("Back to SEMA" behavior aligns with this). The logo gets `cursor: pointer` + an aria-label ("Home"); keyboard accessible.
+
+Verify live in BOTH languages (English unchanged and still left-aligned). `npm run lint`, `npm run build`, vitest green; locale parity test still green.
+
+Accept: [ ] Hebrew home reads: ברכה ← משפט הנחיה ← שדה שאלה (placeholder עברי מתחלף) ← "הנה מה שדורש את תשומת לבך היום" ← brief ← overview, כל הכותרות מיושרות לימין; English layout unchanged.

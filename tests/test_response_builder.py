@@ -5,9 +5,11 @@ by result_index, out-of-range indices, and missing optional fields.
 
 from __future__ import annotations
 
+import datetime
+
 import pandas as pd
 
-from sema_core.agent.response import build_response
+from sema_core.agent.response import _looks_like_date_axis, build_response
 
 
 class FakeTools:
@@ -33,6 +35,115 @@ def test_chart_bound_by_result_index():
     )
     assert len(resp["charts"]) == 1
     assert len(resp["charts"][0]["df"]) == 5  # bound to the SECOND result
+    assert resp["charts"][0]["kind"] == "line"
+
+
+# --- line-vs-bar safety net (trend_line_charts_prompt.md item 3) -----------
+def test_looks_like_date_axis_by_column_name():
+    df = pd.DataFrame({"month": ["not even a date shape at all"], "revenue": [1]})
+    assert _looks_like_date_axis(df, "month") is True
+
+
+def test_looks_like_date_axis_by_real_date_objects():
+    # A Postgres ::date column comes back from psycopg2 as dtype "object"
+    # holding real datetime.date instances, not datetime64 -- the case a
+    # naive dtype-only check would miss.
+    df = pd.DataFrame({"order_month": [datetime.date(2026, 1, 1), datetime.date(2026, 2, 1)], "revenue": [1, 2]})
+    assert _looks_like_date_axis(df, "order_month") is True
+
+
+def test_looks_like_date_axis_by_iso_string_values():
+    df = pd.DataFrame({"period": ["2026-01", "2026-02", "2026-03"], "revenue": [1, 2, 3]})
+    assert _looks_like_date_axis(df, "period") is True
+
+
+def test_looks_like_date_axis_false_for_categorical_values():
+    df = pd.DataFrame({"category": ["Electronics", "Apparel"], "revenue": [1, 2]})
+    assert _looks_like_date_axis(df, "category") is False
+
+
+def test_looks_like_date_axis_false_for_missing_or_none_column():
+    df = pd.DataFrame({"category": ["Electronics"]})
+    assert _looks_like_date_axis(df, None) is False
+    assert _looks_like_date_axis(df, "nonexistent") is False
+
+
+def _category_df(n: int = 3) -> pd.DataFrame:
+    cats = ["Electronics", "Apparel", "Accessories", "Home & Kitchen", "Beauty"]
+    return pd.DataFrame({"category": cats[:n], "revenue": range(n)})
+
+
+def test_bar_over_a_date_column_is_coerced_to_line(caplog):
+    import logging
+
+    tools = FakeTools([_df(4)])  # x="month" column, values like "2026-01"
+    with caplog.at_level(logging.INFO, logger="sema.agent"):
+        resp = build_response(
+            {
+                "insight_text": "t",
+                "recommended_actions": [],
+                "chart": {"result_index": 0, "kind": "bar", "title": "Accessories by month", "x": "month", "y": "revenue"},
+            },
+            tools,
+        )
+    assert resp["charts"][0]["kind"] == "line"
+    assert any("chart_kind_coerced" in r.message for r in caplog.records)
+
+
+def test_grouped_bar_over_a_date_column_is_also_coerced_to_line():
+    tools = FakeTools([_df(4)])
+    resp = build_response(
+        {
+            "insight_text": "t",
+            "recommended_actions": [],
+            "chart": {
+                "result_index": 0, "kind": "grouped_bar", "title": "By month",
+                "x": "month", "y": "revenue", "color": "channel",
+            },
+        },
+        tools,
+    )
+    assert resp["charts"][0]["kind"] == "line"
+
+
+def test_bar_over_a_categorical_column_is_not_coerced():
+    tools = FakeTools([_category_df(3)])
+    resp = build_response(
+        {
+            "insight_text": "t",
+            "recommended_actions": [],
+            "chart": {"result_index": 0, "kind": "bar", "title": "By category", "x": "category", "y": "revenue"},
+        },
+        tools,
+    )
+    assert resp["charts"][0]["kind"] == "bar"
+
+
+def test_donut_is_never_coerced_even_with_a_date_like_names_column():
+    tools = FakeTools([_df(4)])
+    resp = build_response(
+        {
+            "insight_text": "t",
+            "recommended_actions": [],
+            "chart": {"result_index": 0, "kind": "donut", "title": "Share", "names": "month", "values": "revenue"},
+        },
+        tools,
+    )
+    assert resp["charts"][0]["kind"] == "donut"
+
+
+def test_line_over_a_date_column_is_left_alone():
+    """The model already got it right -- no coercion, no log line, same as
+    the pre-existing test_chart_bound_by_result_index above."""
+    tools = FakeTools([_df(4)])
+    resp = build_response(
+        {
+            "insight_text": "t",
+            "recommended_actions": [],
+            "chart": {"result_index": 0, "kind": "line", "title": "Trend", "x": "month", "y": "revenue"},
+        },
+        tools,
+    )
     assert resp["charts"][0]["kind"] == "line"
 
 

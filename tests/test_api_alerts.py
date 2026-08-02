@@ -56,17 +56,28 @@ def _create(client, **overrides) -> dict:
 
 
 # --- templates/metrics catalog ------------------------------------------------
-def test_templates_catalog_lists_all_four():
-    client = TestClient(main.app)
+def test_templates_catalog_lists_all_four(monkeypatch):
+    client = _client_as_miri(monkeypatch)
     resp = client.get("/api/admin/alerts/templates")
     assert resp.status_code == 200
     assert {t["template"] for t in resp.json()} == {"pct_change", "absolute_threshold", "anomaly", "streak"}
 
 
-def test_metrics_catalog_matches_the_fixed_kpi_set():
-    client = TestClient(main.app)
+def test_metrics_catalog_matches_the_fixed_kpi_set(monkeypatch):
+    client = _client_as_miri(monkeypatch)
     resp = client.get("/api/admin/alerts/metrics")
     assert {m["metric"] for m in resp.json()} == {"revenue", "orders", "aov", "churn_risk"}
+
+
+def test_templates_catalog_rejects_non_admin(monkeypatch):
+    """Regression guard (backend_qa_prompt.md item 1's authz matrix): these
+    two catalog routes were previously missing Depends(require_client_admin)
+    entirely -- reachable by anyone with just the API key."""
+    main.org_user_store.seed_demo_users(CID)
+    monkeypatch.setattr(main, "current_identity", lambda: {"client_id": CID, "email": "avi.peretz@ecommerce-demo.com"})
+    client = TestClient(main.app)
+    assert client.get("/api/admin/alerts/templates").status_code == 403
+    assert client.get("/api/admin/alerts/metrics").status_code == 403
 
 
 # --- dry-run test endpoint -----------------------------------------------------

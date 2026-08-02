@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronsLeft, X } from "lucide-react";
 import { useChat } from "../hooks/useChat";
 import { useChatScroll } from "../hooks/useChatScroll";
-import { drillPlaceholder } from "../lib/chatCopy";
-import { useUiLang } from "../lib/useUiLang";
+import { useT } from "../locales";
 import { ChatInput } from "./ChatInput";
 import { ScrollToLatest } from "./ScrollToLatest";
 import { TurnView } from "./TurnView";
@@ -24,6 +23,11 @@ export interface DrillContext {
    * follow-ups, labels) uses -- a Hebrew question should get a Hebrew
    * follow-up panel, not just Hebrew-rendered answer text. */
   dir?: "rtl" | "ltr";
+  /** Identity hue of the widget that opened this panel (e.g. a KPI card's own
+   * rule color), tethering the panel visually to its source -- a 7x7px dot
+   * before the header label. Omitted for a widget with no hue of its own (an
+   * action drill), which renders no dot rather than defaulting to one. */
+  hue?: string;
   /** Anchor for a PERSISTED thread: which conversation + turn this widget's
    * answer belongs to. Set by the leaf widget (KpiCards/ChartRenderer/
    * DataTable/RecommendedActions) from the anchor it was handed; undefined
@@ -112,7 +116,7 @@ export function DrillChat({
   // The input's ghost placeholder follows the ORG's language (same source as
   // the main chat input) -- distinct from `dir` above, which mirrors the
   // ORIGINAL question's language for the rest of this panel's static UI.
-  const lang = useUiLang();
+  const t = useT();
   const { scrollRef, lastAnswerRef, onScroll, showScrollToLatest, scrollToLatest, reattach } =
     useChatScroll(chat.turns);
 
@@ -202,7 +206,12 @@ export function DrillChat({
       >
         <header className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line bg-surface shrink-0">
           <div className="min-w-0">
-            <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-muted">Drill-down</div>
+            <div className="flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-muted">
+              {widget.hue && (
+                <span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: widget.hue }} aria-hidden />
+              )}
+              Drill-down
+            </div>
             {/* No truncation: the full action/widget title wraps to 2-3 lines.
              * The header is shrink-0 in a flex column, so the panel below just
              * shifts down. */}
@@ -305,7 +314,7 @@ export function DrillChat({
             // Ghost text, not a pre-filled value -- a pre-filled input blocked
             // the user from just typing their own question.
             suggestion={widget.initialInput}
-            placeholder={drillPlaceholder(lang, shortTitle)}
+            placeholder={t.chat.drillPlaceholder(shortTitle)}
           />
         </div>
       </aside>

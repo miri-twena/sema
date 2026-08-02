@@ -31,8 +31,10 @@ export function SqlBlock({ sql }: { sql: string }) {
         </div>
       </div>
 
-      {/* code -- horizontal scroll only when a line is too wide to fit */}
-      <div className="overflow-x-auto sema-scroll">
+      {/* code -- capped to a reasonable window with its own scroll (both axes),
+          so a long query scrolls in place instead of stretching the whole
+          answer card. */}
+      <div className="max-h-80 overflow-auto sema-scroll">
         <table className="border-collapse font-mono text-[0.75rem] leading-relaxed">
           <tbody>
             {lines.map((line, i) => (

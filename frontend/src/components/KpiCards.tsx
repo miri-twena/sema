@@ -1,7 +1,7 @@
 import type { Kpi } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { formatValue, followUpsLabel } from "../lib/format";
-import { KPI_TINTS } from "../lib/tokens";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../lib/tokens";
 import { CopyButton } from "./CopyButton";
 import { copyText } from "../lib/clipboard";
 import { ThreadBadge } from "./ThreadBadge";
@@ -48,7 +48,12 @@ export function KpiCards({
   return (
     <div className={`grid gap-3 ${cols} ${cols2xl}`}>
       {kpis.map((kpi, i) => {
-        const [bg, labelColor] = KPI_TINTS[i % KPI_TINTS.length];
+        // Positional cycling through the chart's own palette -- true "same
+        // entity, same hue across the chart/table below" would need a
+        // category/entity id on Kpi, which the contract doesn't have and
+        // this pass adds no new API fields for (see PROMPT_QUEUE.md evidence).
+        const ruleColor = CHART_PALETTE[i % CHART_PALETTE.length];
+        const labelColor = CHART_PALETTE_TEXT[i % CHART_PALETTE_TEXT.length];
         const hasDelta = kpi.delta !== undefined && kpi.delta !== null;
         const up = (kpi.delta ?? 0) >= 0;
         const valueText = formatValue(kpi.value, kpi.format);
@@ -64,6 +69,7 @@ export function KpiCards({
                 title: kpi.label,
                 detail: `current value ${valueText}${deltaText}`,
                 dir,
+                hue: ruleColor,
                 ...anchor,
               })
           : undefined;
@@ -85,13 +91,13 @@ export function KpiCards({
             role={drill ? "button" : undefined}
             tabIndex={drill ? 0 : undefined}
             aria-label={drill ? `Ask about ${kpi.label}${followUpsLabel(badge)}` : undefined}
-            className={`sema-copy-host rounded-xl p-4 flex flex-col justify-between transition ${
+            className={`sema-copy-host rounded-xl border border-line bg-surface overflow-hidden flex flex-col transition ${
               drill
                 ? "cursor-pointer hover:ring-2 hover:ring-primary/40 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 : ""
             }`}
-            style={{ background: bg }}
           >
+            <span className="block h-[3px] w-full shrink-0" style={{ background: ruleColor }} aria-hidden />
             {/* CopyButton stops click/keydown propagation so copying a card
              * never opens its drill-down. */}
             <div className="sema-copy-affordance absolute top-1 end-1 z-20">
@@ -100,22 +106,29 @@ export function KpiCards({
                 actions={[{ label: "Copy KPI", run: () => copyText(`${kpi.label}: ${valueText}`) }]}
               />
             </div>
-            <div className="text-[0.68rem] font-semibold uppercase tracking-wide leading-tight min-h-[2.2em] pe-8" style={{ color: labelColor }}>
-              {kpi.label}
-            </div>
-            <div className="mt-1 text-2xl font-semibold text-ink whitespace-nowrap">{valueText}</div>
-            {(hasDelta || typeof badge === "number") && (
-              <div className="mt-1 flex items-center justify-between gap-2">
-                {hasDelta ? (
-                  <div className={`text-sm font-medium ${up ? "text-emerald-600" : "text-orange-700"}`}>
-                    {up ? "▲" : "▼"} {Math.abs(kpi.delta as number).toFixed(1)}% {kpi.delta_label ?? ""}
-                  </div>
-                ) : (
-                  <span />
-                )}
-                {typeof badge === "number" && <ThreadBadge count={badge} />}
+            <div className="flex-1 flex flex-col gap-1 px-[15px] pt-3 pb-3.5">
+              <div
+                className="text-[11px] font-semibold uppercase tracking-[.03em] leading-[1.25] min-h-[2.1em] pe-8"
+                style={{ color: labelColor }}
+              >
+                {kpi.label}
               </div>
-            )}
+              <div className="text-[22px] font-semibold tracking-[-.02em] tabular-nums text-ink whitespace-nowrap overflow-hidden text-ellipsis">
+                {valueText}
+              </div>
+              {(hasDelta || typeof badge === "number") && (
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                  {hasDelta ? (
+                    <div className={`text-sm font-medium ${up ? "text-emerald-600" : "text-orange-700"}`}>
+                      {up ? "▲" : "▼"} {Math.abs(kpi.delta as number).toFixed(1)}% {kpi.delta_label ?? ""}
+                    </div>
+                  ) : (
+                    <span />
+                  )}
+                  {typeof badge === "number" && <ThreadBadge count={badge} />}
+                </div>
+              )}
+            </div>
           </div>
         );
       })}

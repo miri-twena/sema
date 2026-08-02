@@ -1,9 +1,9 @@
 """
 SEMA synthetic ecommerce data generator.
 
-This script creates a realistic-looking 13-month ecommerce dataset
-(2025-06-01 .. 2026-06-30) and writes it to CSV files in data/output/. The
-CSVs are then loaded into PostgreSQL by data/load_data.py.
+This script creates a realistic-looking 13-month ecommerce dataset, ending
+on the last COMPLETE calendar month before today, and writes it to CSV files
+in data/output/. The CSVs are then loaded into PostgreSQL by data/load_data.py.
 
 Why generate data instead of using a real dataset?
 - No real customer data is needed or used (privacy, simplicity).
@@ -12,7 +12,8 @@ Why generate data instead of using a real dataset?
   whether SEMA's answers match the "ground truth" we built in here.
 
 How to run:
-    python data/generate_data.py
+    python data/generate_data.py                    # ends on the last complete month before today
+    python data/generate_data.py --end-date 2026-06-30   # pinned, reproducible (e.g. for tests)
 
 Output:
     data/output/customers.csv
@@ -25,6 +26,7 @@ Output:
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from datetime import date, datetime, timedelta
@@ -58,11 +60,13 @@ N_PRODUCTS = 100
 # Summer Sale adds ~490 incremental orders on top (see SUMMER_SALE_*).
 N_ORDERS = 21_633
 
-# 13 months of history, ending the last COMPLETE month before "today" in this
-# project (today = 2026-07-16). Deliberately not date.today()-derived: the
-# documented ground truth below (and evals/golden/) is verified against this
-# exact window, so reproducibility beats auto-freshness. A partial month is
-# never generated -- it would poison every month-over-month comparison.
+# 13 months of history, ending the last COMPLETE calendar month before today
+# -- so the demo never looks stale. A partial month is never generated: it
+# would poison every month-over-month comparison. Overridable via
+# --end-date/SEMA_DATA_END_DATE for reproducible, pinned test fixtures (same
+# end date + SEED -> same data, always). See _configure() below: these two
+# are placeholders, reassigned there before any generation runs.
+WINDOW_MONTHS = 13
 START_DATE = date(2025, 6, 1)
 END_DATE = date(2026, 6, 30)
 
@@ -144,7 +148,12 @@ MONTH_SEASONALITY = {
 # A "Meta Retarget - Electronics" campaign runs in March with normal spend
 # but (because of the two effects above) few attributed orders -- a
 # "campaign ROI tanked" story SEMA can find via campaign performance.
-MARCH_DIP_MONTH = date(2026, 3, 1)
+# MARCH_DIP_MONTH must stay pinned to the real calendar month of March (set
+# in _configure() below by scanning the window for month == 3), NOT "N
+# months before END_DATE" -- MONTH_SEASONALITY's dip multiplier is keyed by
+# calendar month number and recurs every year, so a relative offset would
+# decouple this story from that multiplier the moment END_DATE moves.
+MARCH_DIP_MONTH = date(2026, 3, 1)  # placeholder; see _configure()
 MARCH_DIP_CATEGORY = "Electronics"
 MARCH_DIP_CATEGORY_FACTOR = 0.75   # relative category weight in March (-25%)
 MARCH_DIP_CHANNEL = "Meta"
@@ -189,7 +198,9 @@ CHURN_DECLINE_START = CHURN_CUTOFF_DATE - timedelta(days=60)  # gradual decline 
 # Note this is a DATE-specific multiplier, not a MONTH_SEASONALITY change:
 # that dict is keyed by month NUMBER, so raising month 6 would also alter
 # June 2025 and break the existing documented ground truth.
-SUMMER_SALE_MONTH = date(2026, 6, 1)
+# Always the window's LAST month (set in _configure() below), so it tracks
+# END_DATE automatically.
+SUMMER_SALE_MONTH = date(2026, 6, 1)  # placeholder; see _configure()
 SUMMER_SALE_VOLUME_FACTOR = 1.30       # +30% orders vs a normal June
 SUMMER_SALE_DISCOUNT_PROB = 0.45       # vs 0.15 baseline
 SUMMER_SALE_DISCOUNT_RANGE = (0.15, 0.35)  # vs (0.05, 0.20) baseline
@@ -214,7 +225,7 @@ SUMMER_SALE_SPEND = 9_000.00
 # Historical order_items keep the price they were sold at; products.unit_price
 # is bumped to the new list price at the end of the run (unit_cost is left
 # alone, so the margin widens -- part of the same story).
-PRICE_INCREASE_MONTH = date(2026, 6, 1)
+PRICE_INCREASE_MONTH = date(2026, 6, 1)  # placeholder; see _configure() -- always the window's last month
 PRICE_INCREASE_CATEGORY = "Electronics"
 PRICE_INCREASE_FACTOR = 1.07        # +7% list price from June 1 2026
 # Relative category weight (elasticity). This has to be strong enough to
@@ -235,7 +246,7 @@ PRICE_INCREASE_DEMAND_FACTOR = 0.65
 # normally third, behind Direct and Organic). Modelled by placing fewer
 # NON-converting Email sessions in June -- converting sessions follow orders,
 # so cutting the denominator is what raises the rate.
-EMAIL_LIFT_MONTH = date(2026, 6, 1)
+EMAIL_LIFT_MONTH = date(2026, 6, 1)  # placeholder; see _configure() -- always the window's last month
 EMAIL_LIFT_SOURCE = "Email"
 EMAIL_LIFT_SESSION_FACTOR = 0.60  # relative weight of June for non-converting Email sessions
 
@@ -257,6 +268,13 @@ def month_range(start: date, end: date) -> list[date]:
     return months
 
 
+def month_end(month_start: date) -> date:
+    """Return the last day of the calendar month containing `month_start`."""
+    if month_start.month == 12:
+        return date(month_start.year, 12, 31)
+    return date(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
+
+
 def random_datetime_in_month(rng: np.random.Generator, month_start: date) -> datetime:
     """Pick a random timestamp within the given calendar month."""
     if month_start.month == 12:
@@ -269,6 +287,53 @@ def random_datetime_in_month(rng: np.random.Generator, month_start: date) -> dat
     return datetime(month_start.year, month_start.month, 1) + timedelta(
         days=day_offset, seconds=seconds_offset
     )
+
+
+def _last_complete_month_end(today: date) -> date:
+    """The last day of the last fully-complete calendar month before `today`."""
+    return today.replace(day=1) - timedelta(days=1)
+
+
+def _shift_months(month_start: date, delta_months: int) -> date:
+    """Return the first-of-month date `delta_months` away from `month_start`."""
+    total = month_start.month - 1 + delta_months
+    return date(month_start.year + total // 12, total % 12 + 1, 1)
+
+
+def _configure(end_date_override: date | None = None) -> None:
+    """
+    (Re)derive every date that's relative to END_DATE. Called once at import
+    (env-var/default resolution only) and again in main() after CLI parsing
+    if --end-date was passed -- kept as a re-callable function rather than
+    parsing argv at import time, which would break under pytest or any other
+    importer.
+    """
+    global START_DATE, END_DATE
+    global MARCH_DIP_MONTH, SUMMER_SALE_MONTH, PRICE_INCREASE_MONTH, EMAIL_LIFT_MONTH
+    global CHURN_CUTOFF_DATE, CHURN_DECLINE_START
+
+    if end_date_override is not None and (end_date_override + timedelta(days=1)).day != 1:
+        raise ValueError(
+            f"--end-date must be the last day of a month, got {end_date_override.isoformat()}"
+        )
+    END_DATE = end_date_override or _last_complete_month_end(date.today())
+    START_DATE = _shift_months(date(END_DATE.year, END_DATE.month, 1), -(WINDOW_MONTHS - 1))
+
+    months = month_range(START_DATE, END_DATE)
+    # MARCH_DIP_MONTH stays pinned to the real calendar month (see the note
+    # by its placeholder above); the other three story months always track
+    # the window's last month.
+    MARCH_DIP_MONTH = next((m for m in reversed(months) if m.month == 3), months[0])
+    SUMMER_SALE_MONTH = months[-1]
+    PRICE_INCREASE_MONTH = months[-1]
+    EMAIL_LIFT_MONTH = months[-1]
+
+    CHURN_CUTOFF_DATE = END_DATE - timedelta(days=90)
+    CHURN_DECLINE_START = CHURN_CUTOFF_DATE - timedelta(days=60)
+
+
+_env_end_date = os.environ.get("SEMA_DATA_END_DATE")
+_configure(date.fromisoformat(_env_end_date) if _env_end_date else None)
 
 
 # ---------------------------------------------------------------------------
@@ -375,13 +440,11 @@ def generate_campaigns(rng: np.random.Generator) -> pd.DataFrame:
     # generate_orders_and_items) -- but they're deeply discounted, so the
     # revenue it buys per dollar spent is unremarkable. This is the
     # "we grew, but we bought the growth" story.
-    sale_end = date(
-        SUMMER_SALE_MONTH.year, SUMMER_SALE_MONTH.month + 1, 1
-    ) - timedelta(days=1)
+    sale_end = month_end(SUMMER_SALE_MONTH)
     rows.append(
         {
             "campaign_id": campaign_id,
-            "campaign_name": "Summer Sale 2026",
+            "campaign_name": f"Summer Sale {SUMMER_SALE_MONTH.year}",
             "channel": SUMMER_SALE_CHANNEL,
             "start_date": SUMMER_SALE_MONTH.isoformat(),
             "end_date": sale_end.isoformat(),
@@ -906,7 +969,23 @@ def generate_website_sessions(
 # Main
 # ---------------------------------------------------------------------------
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--end-date",
+        type=date.fromisoformat,
+        default=None,
+        help="Pin the dataset's last day (YYYY-MM-DD, must be a month-end) instead of "
+        "using the last complete month before today. Also settable via SEMA_DATA_END_DATE.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    if args.end_date is not None:
+        _configure(args.end_date)
+
     rng = np.random.default_rng(SEED)
     fake = Faker()
     Faker.seed(SEED)
@@ -967,15 +1046,19 @@ def main() -> None:
     print(f"  order_items:        {len(order_items):,}")
     print(f"  website_sessions:   {len(sessions):,}")
 
+    march_label = MARCH_DIP_MONTH.strftime("%B %Y")
+    sale_label = SUMMER_SALE_MONTH.strftime("%B %Y")
+
     print()
+    print(f"Window: {START_DATE.isoformat()} .. {END_DATE.isoformat()}")
     print("Business stories injected:")
-    print("  ✓ Revenue dip (March 2026: Electronics, Meta, returning customers)")
+    print(f"  ✓ Revenue dip ({march_label}: Electronics, Meta, returning customers)")
     print("  ✓ VIP customers (Pareto: top 5% ~ 40% of revenue)")
     print("  ✓ Seasonality (Nov/Dec up, Jan/Feb down, Mar dip)")
     print("  ✓ Churn risk (~10% of customers inactive in last 90 days)")
-    print("  ✓ Summer Sale (June 2026: orders up, AOV down, mediocre campaign ROI)")
-    print("  ✓ Electronics price increase (June 2026: +7% price, units down, revenue flat)")
-    print("  ✓ Email conversion lift (June 2026: best-converting channel that month)")
+    print(f"  ✓ Summer Sale ({sale_label}: orders up, AOV down, mediocre campaign ROI)")
+    print(f"  ✓ Electronics price increase ({sale_label}: +7% price, units down, revenue flat)")
+    print(f"  ✓ Email conversion lift ({sale_label}: best-converting channel that month)")
 
 
 if __name__ == "__main__":

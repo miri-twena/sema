@@ -53,7 +53,7 @@ export function SSOButton({
       disabled
       title={tooltip}
       aria-label={`${label} (${tooltip})`}
-      className="w-full inline-flex items-center justify-center gap-2.5 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-ink opacity-60 cursor-not-allowed"
+      className="w-full h-[42px] inline-flex items-center justify-center gap-2.5 rounded-control border border-line bg-surface px-4 text-sm font-medium text-ink opacity-60 cursor-not-allowed"
     >
       {provider === "google" ? <GoogleIcon /> : <MicrosoftIcon />}
       <span dir="ltr">{label}</span>

@@ -25,20 +25,23 @@ export function ErrorScreen({
 
   return (
     <div className="w-full max-w-sm text-center">
-      <h1 className="text-2xl font-semibold tracking-tight text-ink mb-6">SEMA</h1>
+      <div className="flex items-center justify-center gap-[9px] mb-6">
+        <img src="/favicon.svg" alt="" aria-hidden className="h-[26px] w-auto" />
+        <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">SEMA</h1>
+      </div>
       <div
         role="alert"
-        className="flex flex-col items-center gap-3 rounded-xl border border-critical-fg/25 bg-critical-bg px-5 py-6"
+        className="flex flex-col items-center gap-3 rounded-xl border border-critical-fg/25 bg-critical-bg px-5 py-[22px]"
       >
         <AlertTriangle size={22} className="text-critical-fg" />
-        <p className="text-sm text-ink" style={{ unicodeBidi: "plaintext" }}>
+        <p className="text-[13.5px] leading-[1.55] text-ink" style={{ unicodeBidi: "plaintext" }}>
           {message}
         </p>
         {retryable ? (
           <button
             type="button"
             onClick={onRetry}
-            className="mt-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition"
+            className="mt-1 rounded-control bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition"
           >
             {t.tryAgain}
           </button>

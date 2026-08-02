@@ -31,38 +31,48 @@
 - name: "Checkout outage"
   type: incident
   date_range:
-    start: "2025-07-20"
-    end: "2025-07-20"
+    start: "2025-08-12"
+    end: "2025-08-12"
   description: >
-    A plausible one-day checkout-outage: 2025-07-20 recorded only 33
-    completed orders (~$21.8K revenue), the lowest single day in an
+    A plausible one-day checkout-outage: 2025-08-12 recorded only 30
+    completed orders (~$24.8K revenue), the lowest single day in an
     otherwise stable, non-holiday stretch of the dataset -- well below the
-    ~45-50 orders/day norm for that period.
+    ~49 orders/day norm for that period. This is a coincidental artifact of
+    the random seed, not an engineered generator effect, so its date shifts
+    whenever the demo data is regenerated -- re-detect the lowest-orders day
+    in a stable stretch (see data/README.md's regeneration notes) rather
+    than assuming this date still holds.
   affects: [revenue, conversion_rate]
 
 - name: "Marketing pixel misfire"
   type: incident
   date_range:
-    start: "2025-08-11"
-    end: "2025-08-17"
+    start: "2025-09-08"
+    end: "2025-09-14"
   description: >
     A plausible one-week tracking-pixel misfire during Google Campaign 3's
-    run (Google channel, active 2025-08-01 to 2025-08-31). Orders placed in
+    run (Google channel, active 2025-09-01 to 2025-09-30). Orders placed in
     this window that the campaign actually influenced may be missing their
     campaign_id, undercounting that week's attributed_revenue and roi for
-    the campaign.
+    the campaign. Like the checkout outage above, this is a coincidental
+    RNG artifact with no corresponding generator constant -- re-pick a
+    campaign window after any regeneration rather than assuming this one
+    still applies.
   affects: [campaign_roi]
 
 - name: "Electronics price increase"
   type: note
   date_range:
-    start: "2026-06-01"
-    end: "2026-06-01"
+    start: "2026-07-01"
+    end: "2026-07-01"
   description: >
-    Electronics list prices rose +7% on 2026-06-01 (historical order_items
+    Electronics list prices rose +7% on 2026-07-01 (historical order_items
     keep the price sold at; products.unit_price reflects the new list
-    price, unit_cost unchanged). Verified effect: average Electronics unit
-    price +4.1% ($409.68 -> $426.34) with units sold -6.3%, leaving category
-    revenue essentially flat (-2.2%) even while every other category was
-    lifted by that same month's Summer Sale volume surge.
+    price, unit_cost unchanged). This note tracks PRICE_INCREASE_MONTH in
+    data/generate_data.py, which is always the dataset's LAST month -- its
+    date moves forward on every regeneration. Verified effect (this
+    regeneration): average Electronics unit price +4.6% ($409.60 ->
+    $428.31) with units sold -9.5%, leaving category revenue down -4.8%
+    even while every other category was lifted by that same month's Summer
+    Sale volume surge.
   affects: [aov, gross_margin]

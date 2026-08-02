@@ -1,10 +1,10 @@
 """
 SEMA synthetic AUTO INSURANCE data generator.
 
-Creates a realistic ~2.5-year motor-insurance dataset (2024-01-01 .. losses
-through 2026-06-30) and writes it to CSV files in data/insurance/output/,
-matching sql/insurance/schema.sql. It is the insurance equivalent of
-data/generate_data.py (ecommerce).
+Creates a realistic ~2.5-year motor-insurance dataset (losses through the
+last COMPLETE calendar month before today) and writes it to CSV files in
+data/insurance/output/, matching sql/insurance/schema.sql. It is the
+insurance equivalent of data/generate_data.py (ecommerce).
 
 Why generate data: no real policyholder data is used, and we can bake in
 *known* business patterns so we can later check whether SEMA's answers match
@@ -28,11 +28,13 @@ Ground-truth stories injected (see constants + the summary printed at the end):
   - A severity tail: a few Theft / total-loss claims carry a big share of cost.
 
 How to run:
-    python data/insurance/generate_data.py
+    python data/insurance/generate_data.py                  # ends on the last complete month before today
+    python data/insurance/generate_data.py --end-date 2026-06-30  # pinned, reproducible (e.g. for tests)
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from datetime import date, datetime, timedelta
@@ -66,10 +68,12 @@ N_AGENTS = 40
 #   - TODAY is the STATUS reference: which term is currently in force, which
 #     premium instalments have been billed, and which claims have had time to
 #     settle. Those are genuinely "as of now" facts, so they run to the real
-#     current date.
-# Both are explicit constants rather than date.today(): the ground truth in
-# the docstring above is verified against this exact window, so reproducibility
-# beats auto-freshness.
+#     current date -- UNLESS --end-date pins the run for a reproducible test
+#     fixture, in which case TODAY is derived from it (see _configure()) so
+#     the same pinned end date always produces the same data.
+# These three are placeholders, reassigned by _configure() below before any
+# generation runs.
+WINDOW_MONTHS = 30  # ~2.5 years
 START_DATE = date(2024, 1, 1)
 END_DATE = date(2026, 6, 30)
 TODAY = date(2026, 7, 16)
@@ -127,7 +131,11 @@ WINTER_FREQ_MULT = 1.6
 
 # The Jan-2026 weather event: extra Weather claims for North-region policies
 # active that month -> a discoverable loss-ratio spike.
-EVENT_MONTH = date(2026, 1, 1)
+# EVENT_MONTH must stay pinned to the real calendar month of January (set in
+# _configure() below, mirroring ecommerce's MARCH_DIP_MONTH) -- WINTER_MONTHS
+# is keyed by calendar month number and recurs every year, so a relative
+# offset would decouple this story from the winter-seasonality multiplier.
+EVENT_MONTH = date(2026, 1, 1)  # placeholder; see _configure()
 EVENT_REGION = "North"
 EVENT_EXTRA_WEATHER_LAMBDA = 0.45  # extra Weather claims (Poisson) per active North policy
 
@@ -153,7 +161,7 @@ EVENT_EXTRA_WEATHER_LAMBDA = 0.45  # extra Weather claims (Poisson) per active N
 # documented "Comprehensive is the least profitable tier" story would invert.
 # Verified: coverage-blind gave TPFT 84.6% vs Comprehensive 84.5% (inverted);
 # coverage-aware restores Comprehensive to the top of the table.
-HEATWAVE_MONTH = date(2026, 6, 1)
+HEATWAVE_MONTH = date(2026, 6, 1)  # placeholder; see _configure() -- always the window's last month
 HEATWAVE_REGION = "South"
 HEATWAVE_EXTRA_LAMBDA = 0.10  # extra claims (Poisson) per active, covered South policy
 HEATWAVE_COVERED_TYPES = {"Comprehensive", "TPFT"}
@@ -165,7 +173,7 @@ HEATWAVE_TYPE_WEIGHTS = [0.75, 0.25]  # Comprehensive only; TPFT gets Fire by de
 # costs some retention: the renewing cohort whose term expires on/after that
 # date renews less often. Sets up the trade-off question -- "did the rate
 # increase help the loss ratio, and what did it cost us in retention?"
-RATE_ACTION_DATE = date(2026, 6, 1)
+RATE_ACTION_DATE = date(2026, 6, 1)  # placeholder; see _configure() -- always the window's last month
 RATE_ACTION_PREMIUM_FACTOR = 1.05    # +5% on renewal premiums from that date
 RATE_ACTION_RETENTION_DROP = 0.08    # renewal probability -8pp for terms expiring on/after it
 
@@ -205,6 +213,69 @@ def random_date_between(rng: np.random.Generator, start: date, end: date) -> dat
     if span <= 0:
         return start
     return start + timedelta(days=int(rng.integers(0, span + 1)))
+
+
+def days_in_month(year: int, month: int) -> int:
+    next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return (next_month - date(year, month, 1)).days
+
+
+def _last_complete_month_end(today: date) -> date:
+    """The last day of the last fully-complete calendar month before `today`."""
+    return today.replace(day=1) - timedelta(days=1)
+
+
+def _shift_months(month_start: date, delta_months: int) -> date:
+    """Return the first-of-month date `delta_months` away from `month_start`."""
+    total = month_start.month - 1 + delta_months
+    return date(month_start.year + total // 12, total % 12 + 1, 1)
+
+
+def _most_recent_calendar_month(end_date: date, month: int) -> date:
+    """The most recent first-of-`month` date at or before `end_date`."""
+    candidate = date(end_date.year, month, 1)
+    if candidate > end_date:
+        candidate = date(end_date.year - 1, month, 1)
+    return candidate
+
+
+# First-ever policy inceptions land in the first ~18 months of history, so
+# even the earliest policies have had time to go through a couple of renewal
+# cycles by END_DATE. Kept relative to START_DATE (not a hardcoded date) so
+# it tracks the window instead of drifting into "renewal chains with no room
+# to renew" as the window slides forward.
+FIRST_INCEPTION_MONTHS = 17
+FIRST_INCEPTION_END = date(2025, 6, 1)  # placeholder; see _configure()
+
+
+def _configure(end_date_override: date | None = None) -> None:
+    """
+    (Re)derive every date that's relative to END_DATE/TODAY. Called once at
+    import (env-var/default resolution only) and again in main() after CLI
+    parsing if --end-date was passed.
+    """
+    global START_DATE, END_DATE, TODAY
+    global EVENT_MONTH, HEATWAVE_MONTH, RATE_ACTION_DATE, FIRST_INCEPTION_END
+
+    if end_date_override is not None and (end_date_override + timedelta(days=1)).day != 1:
+        raise ValueError(
+            f"--end-date must be the last day of a month, got {end_date_override.isoformat()}"
+        )
+    END_DATE = end_date_override or _last_complete_month_end(date.today())
+    START_DATE = _shift_months(date(END_DATE.year, END_DATE.month, 1), -(WINDOW_MONTHS - 1))
+    # TODAY only needs to be pinned (rather than the real current date) when
+    # END_DATE itself is pinned, so a fixed --end-date always reproduces the
+    # same data -- otherwise TODAY genuinely means "right now".
+    TODAY = (END_DATE + timedelta(days=16)) if end_date_override else date.today()
+
+    EVENT_MONTH = _most_recent_calendar_month(END_DATE, 1)
+    HEATWAVE_MONTH = date(END_DATE.year, END_DATE.month, 1)
+    RATE_ACTION_DATE = date(END_DATE.year, END_DATE.month, 1)
+    FIRST_INCEPTION_END = _shift_months(START_DATE, FIRST_INCEPTION_MONTHS)
+
+
+_env_end_date = os.environ.get("SEMA_DATA_END_DATE")
+_configure(date.fromisoformat(_env_end_date) if _env_end_date else None)
 
 
 def lognormal_amount(rng: np.random.Generator, mean: float) -> float:
@@ -403,7 +474,7 @@ def generate_policies(
         prior_accidents = 0  # reflected via premium noise; kept simple here
 
         # First inception: anywhere in the first ~18 months of history.
-        current_start = random_date_between(rng, START_DATE, date(2025, 6, 1))
+        current_start = random_date_between(rng, START_DATE, FIRST_INCEPTION_END)
         business_type = "New Business"
         previous_policy_id = None
         first_policy_date = current_start
@@ -630,10 +701,16 @@ def generate_claims(rng: np.random.Generator, policies: pd.DataFrame) -> pd.Data
                     claim_type = "Fire"
                 else:
                     claim_type = rng.choice(HEATWAVE_CLAIM_TYPES, p=HEATWAVE_TYPE_WEIGHTS)
-                claim_date = date(2026, 6, int(rng.integers(1, 31)))  # June has 30 days
+                claim_date = date(
+                    HEATWAVE_MONTH.year, HEATWAVE_MONTH.month,
+                    int(rng.integers(1, days_in_month(HEATWAVE_MONTH.year, HEATWAVE_MONTH.month) + 1)),
+                )
             elif is_event:
                 claim_type = "Weather"
-                claim_date = date(2026, 1, int(rng.integers(1, 29)))
+                claim_date = date(
+                    EVENT_MONTH.year, EVENT_MONTH.month,
+                    int(rng.integers(1, days_in_month(EVENT_MONTH.year, EVENT_MONTH.month) + 1)),
+                )
             else:
                 # Winter tilts the mix toward Collision/Weather; North toward Theft.
                 w = type_weights.copy()
@@ -688,7 +765,23 @@ def generate_claims(rng: np.random.Generator, policies: pd.DataFrame) -> pd.Data
 # Main
 # ---------------------------------------------------------------------------
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--end-date",
+        type=date.fromisoformat,
+        default=None,
+        help="Pin the dataset's last day (YYYY-MM-DD, must be a month-end) instead of "
+        "using the last complete month before today. Also settable via SEMA_DATA_END_DATE.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    if args.end_date is not None:
+        _configure(args.end_date)
+
     rng = np.random.default_rng(SEED)
     fake = Faker()
     Faker.seed(SEED)
@@ -750,11 +843,16 @@ def main() -> None:
     print(f"  incurred claims:   {incurred:,.0f}")
     print(f"  overall loss ratio (vs written): {overall_lr:.1f}%")
 
-    print("\nBusiness stories injected:")
+    event_label = EVENT_MONTH.strftime("%b %Y")
+    heatwave_label = HEATWAVE_MONTH.strftime("%b %Y")
+    rate_action_label = RATE_ACTION_DATE.strftime("%b %Y")
+
+    print(f"\nWindow: {START_DATE.isoformat()} .. {END_DATE.isoformat()} (as of {TODAY.isoformat()})")
+    print("Business stories injected:")
     print("  ✓ Claims seasonality (winter Dec-Feb higher frequency)")
-    print("  ✓ Loss-ratio spike Jan 2026 (North region weather event)")
-    print("  ✓ Heatwave Jun 2026 (South region, Weather/Fire -- smaller than Jan)")
-    print("  ✓ Rate action Jun 2026 (+5% on renewals, retention dip in that cohort)")
+    print(f"  ✓ Loss-ratio spike {event_label} (North region weather event)")
+    print(f"  ✓ Heatwave {heatwave_label} (South region, Weather/Fire -- smaller than {event_label})")
+    print(f"  ✓ Rate action {rate_action_label} (+5% on renewals, retention dip in that cohort)")
     print("  ✓ Young drivers (<25) higher claim frequency")
     print("  ✓ Comprehensive least profitable; Liability most profitable")
     print("  ✓ Retention by channel (Tied Agent best, Direct-Online worst)")

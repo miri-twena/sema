@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image as ImageIcon, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { api, ApiError, resolveApiUrl, type CurrencyInfo, type OrgSettings, type RetentionPolicy } from "../../lib/api";
 import { configureFormatting } from "../../lib/format";
 import { timeAgo } from "../../lib/time";
 import { useToast } from "./toast-context";
+import { CHART_PALETTE } from "../../lib/tokens";
 
 const RETENTION_LABEL: Record<RetentionPolicy, string> = {
   forever: "Keep forever",
@@ -43,12 +45,17 @@ function RetentionStatusLine({ settings }: { settings: OrgSettings }) {
   );
 }
 
-/** One field group's section header -- small uppercase label, same style the
- * sidebar uses for "Organization admin". */
-function SectionHeader({ children }: { children: string }) {
+/** One field group as a ruled card -- the 3px top rule carries the group's
+ * identity hue, same device as the KPI/table/accordion cards elsewhere in
+ * the redesign. */
+function SettingsCard({ title, hue, children }: { title: string; hue: string; children: ReactNode }) {
   return (
-    <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-faint mb-3 mt-8 first:mt-0">
-      {children}
+    <div className="rounded-xl border border-line bg-surface overflow-hidden">
+      <span className="block h-[3px] w-full" style={{ background: hue }} aria-hidden />
+      <div className="p-5">
+        <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-faint mb-3">{title}</div>
+        {children}
+      </div>
     </div>
   );
 }
@@ -218,11 +225,11 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
 
   if (loading || !settings) {
     return (
-      <div className="max-w-3xl mx-auto px-8 py-8">
+      <div className="max-w-4xl 2xl:max-w-5xl mx-auto px-8 py-8">
         <div className="h-6 w-48 rounded bg-surfaceAlt animate-pulse mb-6" />
-        <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-10 rounded-lg bg-surfaceAlt animate-pulse" />
+            <div key={i} className="h-32 rounded-xl bg-surfaceAlt animate-pulse" />
           ))}
         </div>
       </div>
@@ -231,8 +238,12 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
 
   const logoUrl = resolveApiUrl(settings.logo_path);
 
+  // Form-heavy screen -- a smaller bump than the table screens (Users/Audit
+  // log get the full xl/2xl staged width): individual fields already cap at
+  // max-w-sm, so extra room here only gives the two-column card grid a bit
+  // more breathing room at 2xl, never stretches a label or hint line.
   return (
-    <div className="max-w-3xl mx-auto px-8 py-8">
+    <div className="max-w-4xl 2xl:max-w-5xl mx-auto px-8 py-8">
       <div className="text-[0.75rem] text-muted mb-2" dir="auto">
         {clientLabel || "Workspace"} <span className="text-faint">›</span> Organization admin
       </div>
@@ -241,211 +252,209 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
         Changes save automatically as you edit each field.
       </p>
 
-      {/* --- Identity --- */}
-      <SectionHeader>Identity</SectionHeader>
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+        <SettingsCard title="Identity" hue={CHART_PALETTE[0]}>
+          <Field label="Organization name" htmlFor="org-name" error={nameError}>
+            <input
+              id="org-name"
+              value={nameDraft}
+              dir="auto"
+              onChange={(e) => {
+                setNameDraft(e.target.value);
+                if (nameError) setNameError(null);
+              }}
+              onBlur={saveName}
+              className={inputClass}
+            />
+          </Field>
 
-      <Field label="Organization name" htmlFor="org-name" error={nameError}>
-        <input
-          id="org-name"
-          value={nameDraft}
-          dir="auto"
-          onChange={(e) => {
-            setNameDraft(e.target.value);
-            if (nameError) setNameError(null);
-          }}
-          onBlur={saveName}
-          className={inputClass}
-        />
-      </Field>
-
-      <Field label="Logo" htmlFor="org-logo" error={logoError} hint="PNG or SVG, 1MB max.">
-        <div className="flex items-center gap-3">
-          <span className="shrink-0 w-14 h-14 rounded-lg border border-line bg-surfaceAlt flex items-center justify-center overflow-hidden">
-            {logoUrl ? (
-              <img src={logoUrl} alt="" className="w-full h-full object-contain" />
-            ) : (
-              <ImageIcon size={20} className="text-faint" aria-hidden />
-            )}
-          </span>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingLogo}
-            className="rounded-xl border border-line px-3.5 py-2 text-sm text-ink hover:bg-surfaceAlt disabled:opacity-60 transition"
-          >
-            {uploadingLogo ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 size={14} className="animate-spin" /> Uploading…
+          <Field label="Logo" htmlFor="org-logo" error={logoError} hint="PNG or SVG, 1MB max.">
+            <div className="flex items-center gap-3">
+              <span className="shrink-0 w-14 h-14 rounded-lg border border-line bg-surfaceAlt flex items-center justify-center overflow-hidden">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="" className="w-full h-full object-contain" />
+                ) : (
+                  <ImageIcon size={20} className="text-faint" aria-hidden />
+                )}
               </span>
-            ) : logoUrl ? (
-              "Replace logo"
-            ) : (
-              "Upload logo"
-            )}
-          </button>
-          <input
-            ref={fileInputRef}
-            id="org-logo"
-            type="file"
-            accept=".png,.svg,image/png,image/svg+xml"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleLogoSelect(file);
-              e.target.value = ""; // allow re-selecting the same file next time
-            }}
-          />
-        </div>
-      </Field>
-
-      {/* --- Time and region --- */}
-      <SectionHeader>Time and region</SectionHeader>
-
-      <Field
-        label="Timezone"
-        htmlFor="org-timezone"
-        hint="Affects day boundaries in reports and the agent's answers, going forward only -- past data is never recalculated."
-      >
-        <select
-          id="org-timezone"
-          value={pendingTimezone ?? settings.timezone}
-          onChange={(e) => setPendingTimezone(e.target.value)}
-          className={inputClass}
-        >
-          {timezones.map((tz) => (
-            <option key={tz} value={tz}>
-              {tz}
-            </option>
-          ))}
-        </select>
-        {pendingTimezone && pendingTimezone !== settings.timezone && (
-          <div className="mt-2 rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
-            Changing the timezone shifts "day" boundaries in every report and answer from now on --
-            nothing is recalculated retroactively.
-            <div className="mt-2 flex gap-2">
               <button
                 type="button"
-                onClick={confirmTimezoneChange}
-                className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 transition"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingLogo}
+                className="rounded-xl border border-line px-3.5 py-2 text-sm text-ink hover:bg-surfaceAlt disabled:opacity-60 transition"
               >
-                Apply going forward
+                {uploadingLogo ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 size={14} className="animate-spin" /> Uploading…
+                  </span>
+                ) : logoUrl ? (
+                  "Replace logo"
+                ) : (
+                  "Upload logo"
+                )}
               </button>
-              <button
-                type="button"
-                onClick={() => setPendingTimezone(null)}
-                className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </Field>
-
-      {/* --- Display --- */}
-      <SectionHeader>Display</SectionHeader>
-
-      <Field label="Currency" htmlFor="org-currency" hint="Display only -- SEMA never converts between currencies.">
-        <select
-          id="org-currency"
-          value={settings.currency}
-          onChange={(e) => saveField({ currency: e.target.value })}
-          className={inputClass}
-        >
-          {currencies.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.code} ({c.symbol})
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <Field label="Number format" htmlFor="org-number-format">
-        <select
-          id="org-number-format"
-          value={settings.number_format}
-          onChange={(e) => saveField({ number_format: e.target.value })}
-          className={inputClass}
-        >
-          {Object.entries(NUMBER_FORMAT_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <Field
-        label="Default language"
-        htmlFor="org-language"
-        hint="Applies to new users; an existing user's own language preference wins."
-      >
-        <select
-          id="org-language"
-          value={settings.default_language}
-          onChange={(e) => saveField({ default_language: e.target.value })}
-          className={inputClass}
-        >
-          {Object.entries(LANGUAGE_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {/* --- Data --- */}
-      <SectionHeader>Data</SectionHeader>
-
-      <Field label="Conversation retention" htmlFor="org-retention">
-        <select
-          id="org-retention"
-          value={pendingRetention ?? settings.retention_policy}
-          onChange={(e) => startRetentionChange(e.target.value as RetentionPolicy)}
-          className={inputClass}
-        >
-          {(Object.keys(RETENTION_LABEL) as RetentionPolicy[]).map((policy) => (
-            <option key={policy} value={policy}>
-              {RETENTION_LABEL[policy]}
-            </option>
-          ))}
-        </select>
-        <RetentionStatusLine settings={settings} />
-        {pendingRetention && pendingRetention !== settings.retention_policy && (
-          <div className="mt-2 rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
-            {retentionPreviewCount === null ? (
-              "Checking how many conversations this affects…"
-            ) : retentionPreviewCount > 0 ? (
-              <>
-                {retentionPreviewCount} conversation{retentionPreviewCount === 1 ? "" : "s"} will be
-                deleted on the next retention run.
-              </>
-            ) : (
-              "No conversations are old enough to be affected right now."
-            )}
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                onClick={confirmRetentionChange}
-                disabled={retentionPreviewCount === null}
-                className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 disabled:opacity-60 transition"
-              >
-                Confirm
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingRetention(null);
-                  setRetentionPreviewCount(null);
+              <input
+                ref={fileInputRef}
+                id="org-logo"
+                type="file"
+                accept=".png,.svg,image/png,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleLogoSelect(file);
+                  e.target.value = ""; // allow re-selecting the same file next time
                 }}
-                className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
-              >
-                Cancel
-              </button>
+              />
             </div>
-          </div>
-        )}
-      </Field>
+          </Field>
+        </SettingsCard>
+
+        <SettingsCard title="Time and region" hue={CHART_PALETTE[2]}>
+          <Field
+            label="Timezone"
+            htmlFor="org-timezone"
+            hint="Affects day boundaries in reports and the agent's answers, going forward only -- past data is never recalculated."
+          >
+            <select
+              id="org-timezone"
+              value={pendingTimezone ?? settings.timezone}
+              onChange={(e) => setPendingTimezone(e.target.value)}
+              className={inputClass}
+            >
+              {timezones.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+            {pendingTimezone && pendingTimezone !== settings.timezone && (
+              <div className="mt-2 rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
+                Changing the timezone shifts "day" boundaries in every report and answer from now on --
+                nothing is recalculated retroactively.
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={confirmTimezoneChange}
+                    className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 transition"
+                  >
+                    Apply going forward
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingTimezone(null)}
+                    className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </Field>
+        </SettingsCard>
+
+        <SettingsCard title="Display" hue={CHART_PALETTE[1]}>
+          <Field label="Currency" htmlFor="org-currency" hint="Display only -- SEMA never converts between currencies.">
+            <select
+              id="org-currency"
+              value={settings.currency}
+              onChange={(e) => saveField({ currency: e.target.value })}
+              className={inputClass}
+            >
+              {currencies.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} ({c.symbol})
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Number format" htmlFor="org-number-format">
+            <select
+              id="org-number-format"
+              value={settings.number_format}
+              onChange={(e) => saveField({ number_format: e.target.value })}
+              className={inputClass}
+            >
+              {Object.entries(NUMBER_FORMAT_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field
+            label="Default language"
+            htmlFor="org-language"
+            hint="Applies to new users; an existing user's own language preference wins."
+          >
+            <select
+              id="org-language"
+              value={settings.default_language}
+              onChange={(e) => saveField({ default_language: e.target.value })}
+              className={inputClass}
+            >
+              {Object.entries(LANGUAGE_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </SettingsCard>
+
+        <SettingsCard title="Data" hue={CHART_PALETTE[4]}>
+          <Field label="Conversation retention" htmlFor="org-retention">
+            <select
+              id="org-retention"
+              value={pendingRetention ?? settings.retention_policy}
+              onChange={(e) => startRetentionChange(e.target.value as RetentionPolicy)}
+              className={inputClass}
+            >
+              {(Object.keys(RETENTION_LABEL) as RetentionPolicy[]).map((policy) => (
+                <option key={policy} value={policy}>
+                  {RETENTION_LABEL[policy]}
+                </option>
+              ))}
+            </select>
+            <RetentionStatusLine settings={settings} />
+            {pendingRetention && pendingRetention !== settings.retention_policy && (
+              <div className="mt-2 rounded-lg border border-lineSoft bg-warning-bg/40 px-3 py-2.5 text-[0.78rem] text-ink">
+                {retentionPreviewCount === null ? (
+                  "Checking how many conversations this affects…"
+                ) : retentionPreviewCount > 0 ? (
+                  <>
+                    {retentionPreviewCount} conversation{retentionPreviewCount === 1 ? "" : "s"} will be
+                    deleted on the next retention run.
+                  </>
+                ) : (
+                  "No conversations are old enough to be affected right now."
+                )}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={confirmRetentionChange}
+                    disabled={retentionPreviewCount === null}
+                    className="rounded-lg bg-primary text-white text-[0.78rem] font-medium px-3 py-1.5 hover:bg-primary/90 disabled:opacity-60 transition"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingRetention(null);
+                      setRetentionPreviewCount(null);
+                    }}
+                    className="rounded-lg border border-line text-[0.78rem] text-muted px-3 py-1.5 hover:bg-surfaceAlt transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </Field>
+        </SettingsCard>
+      </div>
     </div>
   );
 }

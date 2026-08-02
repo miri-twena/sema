@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import type { SemanticMetricItem, SemanticModelResponse } from "../../../lib/api";
 import type { SemanticModelHook } from "../../../hooks/useSemanticModel";
 import { MetricEditor } from "./MetricEditor";
+import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../../../lib/tokens";
 
 const STATUS_DOT: Record<string, string> = {
   certified: "bg-emerald-500",
@@ -55,35 +56,41 @@ export function MetricsTab({
             className="w-full rounded-lg border border-line bg-surface ps-8 pe-3 py-1.5 text-[0.8rem] text-ink outline-none focus:border-primary transition"
           />
         </div>
-        <div className="flex flex-col gap-0.5">
-          {filtered.map((m) => (
-            <button
-              key={m.name}
-              onClick={() => setSelected(m.name)}
-              aria-current={selected === m.name ? "page" : undefined}
-              className={`w-full text-start flex items-center gap-2 rounded-lg px-2.5 py-2 text-[0.82rem] transition ${
-                selected === m.name
-                  ? "bg-primary/10 text-primary-dark font-medium"
-                  : "text-ink hover:bg-surfaceAlt"
-              }`}
-            >
-              {m.is_draft && (
+        <div className="rounded-xl border border-line bg-surface overflow-hidden">
+          <span className="block h-[3px] w-full" style={{ background: CHART_PALETTE[5] }} aria-hidden />
+          <div className="flex flex-col gap-0.5 p-1.5">
+            {filtered.map((m) => (
+              <button
+                key={m.name}
+                onClick={() => setSelected(m.name)}
+                aria-current={selected === m.name ? "page" : undefined}
+                className={`w-full text-start flex items-center gap-2 rounded-lg px-2.5 py-2 text-[0.82rem] transition ${
+                  selected === m.name
+                    ? "bg-primary/10 text-primary-dark font-medium"
+                    : "text-ink hover:bg-surfaceAlt"
+                }`}
+              >
                 <span
-                  className="shrink-0 w-1.5 h-1.5 rounded-full bg-primary"
-                  aria-label="Has unpublished draft"
-                  title="Has unpublished draft"
+                  className={`shrink-0 w-1.5 h-1.5 rounded-full ${STATUS_DOT[m.status] ?? "bg-faint"}`}
+                  aria-hidden
                 />
-              )}
-              <span
-                className={`shrink-0 w-1.5 h-1.5 rounded-full ${STATUS_DOT[m.status] ?? "bg-faint"}`}
-                aria-hidden
-              />
-              <span className="truncate flex-1">{m.label}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="px-2.5 py-4 text-[0.78rem] text-muted">No metrics match your search.</p>
-          )}
+                <span className="truncate flex-1">{m.label}</span>
+                {m.is_draft && (
+                  <span
+                    className="shrink-0 rounded-full px-1.5 py-0.5 text-[0.62rem] font-semibold"
+                    style={{ background: `${CHART_PALETTE[4]}2E`, color: CHART_PALETTE_TEXT[4] }}
+                    aria-label="Has unpublished draft"
+                    title="Has unpublished draft"
+                  >
+                    Draft
+                  </span>
+                )}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="px-2.5 py-4 text-[0.78rem] text-muted">No metrics match your search.</p>
+            )}
+          </div>
         </div>
       </div>
 

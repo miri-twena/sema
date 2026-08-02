@@ -135,12 +135,17 @@ off-topic policy, or the `recommended_actions` guidance.
   phrase "AI Business Advisor" (kept in English even in Hebrew UI).
   When touching existing Hebrew copy, fix masculine references to SEMA
   on sight.
-- **The UI is English, always (MVP decision, July 2026).** Default and
-  seeded org language is English for every client. If an org explicitly
-  opts into Hebrew, EXACTLY two strings change: the chat input ghost
-  placeholder and the "New conversation" label — nothing else. Sidebar,
-  navigation, admin panel, buttons, labels stay English. Full i18n is
-  out of MVP scope.
+- **UI language (updated decision, August 2026).** English is the default
+  for every org. When an org explicitly opts into Hebrew, the UI CHROME is
+  fully translated — sidebar sections and menus (Rename/Pin/Archive/Delete),
+  workspace switcher ("Connected"), user menu, toasts, screen labels —
+  via CENTRAL language files (`frontend/src/locales/`), never scattered
+  inline dicts. Exceptions that stay English always: the login page,
+  brand terms (SEMA, "AI Business Advisor"), and technical identifiers
+  (SQL, YAML, metric ids). Agent answers still follow the QUESTION's
+  language, never the org setting. New UI strings must be added to the
+  locale files (both languages) — hardcoded user-facing strings are a
+  review failure.
 - **Layout is anchored — the sidebar is ALWAYS on the left.** Never set
   `dir="rtl"` on the app shell/body, never mirror the layout. Agent
   answers carry their own direction (`dir="auto"` per message) — Hebrew

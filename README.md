@@ -123,7 +123,8 @@ usage) — catches prompt/model regressions `pytest`'s fakes can't. Needs a
 live database and API key; see [`evals/README.md`](evals/README.md).
 
 ### `docs/`
-Project vision, MVP scope, and architecture docs.
+Project vision, MVP scope, architecture docs, and
+[`deployment.md`](docs/deployment.md) (production deployment steps).
 
 ## Project Phases
 
@@ -240,6 +241,15 @@ below are PowerShell (Windows).
 Environment variables are read at startup, so **restart the backend or
 Streamlit after editing `.env`**. See [`docs/project_vision.md`](docs/project_vision.md)
 and [`docs/architecture.md`](docs/architecture.md) for the full design.
+
+## Deployment
+
+`docker-compose.yml` above is local dev only (bind-mounted source, `--reload`,
+no auth by default). For a real deployment — a single container serving both
+the API and the built frontend, environment validation, health checks, and
+what needs a persistent volume — see [`docs/deployment.md`](docs/deployment.md).
+**Read its warning about authentication before deploying anywhere reachable
+by anyone but you.**
 
 ## Multi-client
 
