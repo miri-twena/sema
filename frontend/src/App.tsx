@@ -581,7 +581,16 @@ export default function App() {
             widget={drill}
             clientId={activeId}
             onClose={() => setDrill(null)}
-            onThreadUpdated={threads.refresh}
+            onThreadUpdated={() => {
+              // A drill turn only refreshed the in-chart ThreadBadge
+              // (threads.refresh) -- the sidebar's own drill_count badge
+              // (ConversationItem) reads from the separate `conversations`
+              // list, which nothing was telling to refresh, so it stayed
+              // stale until something else happened to refetch it (a
+              // top-level message, navigating home, a reload).
+              threads.refresh();
+              conversations.refresh();
+            }}
           />
         </Suspense>
       )}
