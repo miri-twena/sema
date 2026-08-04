@@ -456,35 +456,21 @@ export default function App() {
       )}
 
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Title block only. The active client and its connection status now
-            live in the sidebar's bottom workspace switcher, so identity sits
-            with navigation instead of being split across two corners. */}
-        <header className="px-5 md:px-8 py-5 border-b border-line bg-bg/80 backdrop-blur">
-          <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto flex items-center gap-3">
-            <button
-              onClick={() => setDrawerOpen((o) => !o)}
-              aria-label="Toggle chat history"
-              className="md:hidden w-9 h-9 -ms-1 rounded-lg flex items-center justify-center text-ink hover:bg-surfaceAlt transition"
-            >
-              {drawerOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
-            {/* The wordmark is also a "go home" control (home_hebrew_polish_
-                prompt.md item 8) -- the SAME goHome action the sidebar's own
-                brand button already uses, so it's reachable from the main
-                pane's header even on mobile (where the sidebar itself is
-                tucked away behind the drawer toggle until opened). */}
-            <button
-              type="button"
-              onClick={goHome}
-              aria-label="Home"
-              title="Home"
-              className="text-start rounded-lg -mx-1 px-1 hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
-            >
-              <h1 className="text-2xl font-semibold tracking-tight">SEMA</h1>
-              <p className="text-sm text-muted">Ask your business anything.</p>
-            </button>
-          </div>
-        </header>
+        {/* Mobile-only drawer toggle. The title bar (SEMA heading + tagline)
+            that used to live here is gone -- identity/navigation already
+            live in the sidebar's brand button and bottom workspace switcher,
+            and the bar was pure vertical space above the fold. No bar
+            styling (border/backdrop) on purpose: this row shouldn't read as
+            a header on mobile, just a floating control. */}
+        <div className="md:hidden px-5 py-3">
+          <button
+            onClick={() => setDrawerOpen((o) => !o)}
+            aria-label="Toggle chat history"
+            className="w-9 h-9 -ms-1 rounded-lg flex items-center justify-center text-ink hover:bg-surfaceAlt transition"
+          >
+            {drawerOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
 
         {/* relative: anchors the floating "back to latest" button. */}
         <div
