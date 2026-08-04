@@ -333,16 +333,24 @@ export function DataTable({
         </div>
       </div>
 
+      {/* Always-visible truncation notice (table_cap_notice_prompt.md) --
+          deterministic UI, independent of whatever the agent's own prose
+          says. `loaded` (not a hardcoded 1000) is the display cap actually
+          applied: when `truncated`, the server returns exactly the capped
+          row count, so the client already has the real number without a
+          new API field. Replaces the old subtle "(capped)" hover marker --
+          never both at once. */}
+      {table.truncated && (
+        <div className="mt-1.5 text-xs font-medium text-warning-fg">
+          {t.table.cappedNotice(loaded, total)}
+        </div>
+      )}
+
       <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted">
         <div>
           Showing <span className="font-medium text-ink">{first.toLocaleString()}</span>–
           <span className="font-medium text-ink">{last.toLocaleString()}</span> of{" "}
           <span className="font-medium text-ink">{total.toLocaleString()}</span>
-          {table.truncated && (
-            <span className="ms-1 text-orange-700" title={`The query returned more rows than the ${total.toLocaleString()}-row safety cap.`}>
-              (capped)
-            </span>
-          )}
         </div>
 
         {pageCount > 1 && (

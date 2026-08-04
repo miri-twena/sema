@@ -40,6 +40,12 @@ export const en = {
     exportFailed: "Export failed. Please try again.",
     exportCeilingHit: (ceiling: number) =>
       `This result is larger than the ${ceiling.toLocaleString()}-row export limit. Downloaded the first ${ceiling.toLocaleString()} rows.`,
+    // table_cap_notice_prompt.md: always-visible truncation notice (replaces
+    // the old subtle "(capped)" hover marker) -- `cap` is the display cap
+    // actually applied (derived client-side from the loaded row count, never
+    // hardcoded 1000), `total` is the server-computed true total.
+    cappedNotice: (cap: number, total: number) =>
+      `Showing the first ${cap.toLocaleString()} rows of ${total.toLocaleString()} — the display is capped; Export downloads everything.`,
   },
 
   sidebar: {

@@ -65,18 +65,23 @@ describe("locale parity (en <-> he)", () => {
   });
 
   it("every interpolating function produces non-empty, distinct output for both languages", () => {
-    // Every current function-valued key takes either a number or a string --
-    // probe with one of each and keep whichever produces a longer output
-    // (covers count-based pluralization branches like criticalAlert(1) vs (2)).
+    // Every current function-valued key takes one or more args, each either
+    // a number or a string -- probe with one of each, repeated to match the
+    // function's own declared arity (Function.length), so a 2-arg function
+    // like table.cappedNotice(cap, total) gets two real values instead of
+    // (arg, undefined) (covers count-based pluralization branches like
+    // criticalAlert(1) vs (2) for single-arg functions, same as before).
     for (const [path, kind] of Object.entries(enPaths)) {
       if (kind !== "function") continue;
       const enFn = path.split(".").reduce<any>((o, k) => o[k], en);
       const heFn = path.split(".").reduce<any>((o, k) => o[k], he);
+      const arity = Math.max(enFn.length, heFn.length, 1);
       for (const arg of [1, 5, "X"]) {
-        const enOut = enFn(arg);
-        const heOut = heFn(arg);
-        expect(enOut.length, `${path}(${JSON.stringify(arg)}) (en) should be non-empty`).toBeGreaterThan(0);
-        expect(heOut.length, `${path}(${JSON.stringify(arg)}) (he) should be non-empty`).toBeGreaterThan(0);
+        const args = Array(arity).fill(arg);
+        const enOut = enFn(...args);
+        const heOut = heFn(...args);
+        expect(enOut.length, `${path}(${args.map((a) => JSON.stringify(a)).join(", ")}) (en) should be non-empty`).toBeGreaterThan(0);
+        expect(heOut.length, `${path}(${args.map((a) => JSON.stringify(a)).join(", ")}) (he) should be non-empty`).toBeGreaterThan(0);
       }
     }
   });

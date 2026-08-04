@@ -37,6 +37,8 @@ export const he: TranslationKeys = {
     exportFailed: "הייצוא נכשל. נסו שוב.",
     exportCeilingHit: (ceiling: number) =>
       `התוצאה גדולה ממגבלת הייצוא של ${ceiling.toLocaleString()} שורות. הורדנו את ${ceiling.toLocaleString()} השורות הראשונות.`,
+    cappedNotice: (cap: number, total: number) =>
+      `מוצגות ${cap.toLocaleString()} השורות הראשונות מתוך ${total.toLocaleString()} — התצוגה מוגבלת; הייצוא מוריד את הכל.`,
   },
 
   sidebar: {
