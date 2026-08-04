@@ -49,11 +49,14 @@ function wordmarkColor(variant: LogoVariant): string {
 function Mark({ variant, size, markOnly }: { variant: LogoVariant; size: number; markOnly: boolean }) {
   return (
     <svg
-      height={size}
-      width="auto"
       viewBox="0 0 219 185"
       fill="none"
-      style={{ flexShrink: 0 }}
+      // `width="auto"` (the SVG attribute) does NOT derive width from the
+      // viewBox aspect ratio here -- Chromium treats it as a plain block box
+      // and stretches it to fill the available width instead. CSS
+      // `aspect-ratio` + a definite `height` is the combination that's
+      // actually spec-honored, so height/width live in `style`, not attrs.
+      style={{ height: size, width: "auto", aspectRatio: "219 / 185", flexShrink: 0, display: "block" }}
       {...(markOnly ? { role: "img", "aria-label": "SEMA" } : { "aria-hidden": true, focusable: false })}
     >
       {MARK_FACETS.map((f, i) =>
