@@ -24,7 +24,7 @@ export function CodeStep({
   return (
     <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
       <div className="flex flex-col items-center mb-[26px]">
-        <Logo size={52} stacked tagline />
+        <Logo size={64} stacked tagline />
         <p className="text-[13.5px] text-muted mt-2" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
           {t.codeSentTo(state.email)}
         </p>

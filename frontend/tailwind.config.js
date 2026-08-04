@@ -51,7 +51,7 @@ export default {
         // class (no build-time SVGR/JSX-className wiring needed for it), but
         // the token is declared here too so any future Tailwind usage stays
         // on the same family name instead of a second hardcoded string.
-        display: ["Syne", "system-ui", "sans-serif"],
+        display: ["Montserrat", "system-ui", "sans-serif"],
       },
       boxShadow: {
         card: "0 6px 24px rgba(30,41,59,0.05)",

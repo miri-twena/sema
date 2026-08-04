@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Syne 700 (Logo.tsx wordmark) and Manrope 600 (Logo.tsx tagline) are
+/* Montserrat 800 (Logo.tsx wordmark) and Manrope 600 (Logo.tsx tagline) are
  * self-hosted via @fontsource, imported as JS side-effects from main.tsx
  * rather than a CSS @import here -- this dev server's postcss-import
  * resolver 500s on the bare `@fontsource/...` package specifier (Vite 8/

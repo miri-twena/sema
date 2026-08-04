@@ -172,7 +172,7 @@ export function Sidebar({
           title="Home"
           className="flex items-center gap-2.5 mb-1 rounded-lg -mx-1 px-1 py-0.5 hover:bg-surfaceAlt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
         >
-          <Logo size={24} />
+          <Logo size={26} />
         </button>
         <div className="text-xs text-muted mb-4 ps-1">AI Business Advisor</div>
 

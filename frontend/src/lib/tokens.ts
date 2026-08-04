@@ -34,6 +34,8 @@ export const BRAND = {
   lavender400: "#949CFF",
   lavender200: "#C7CDFF",
   lavender700: "#5B62C4",
+  lavender600: "#4E56D6",
   coral: "#F2887C",
+  yellow: "#F2C94C",
   ink: "#15161C",
 } as const;

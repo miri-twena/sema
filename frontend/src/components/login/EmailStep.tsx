@@ -39,7 +39,7 @@ export function EmailStep({
       )}
 
       <div className="flex flex-col items-center mb-7">
-        <Logo size={52} stacked tagline />
+        <Logo size={64} stacked tagline />
         <p className="text-[13.5px] text-muted mt-2">{t.headline}</p>
       </div>
 

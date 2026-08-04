@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 48 48" fill="none">
-  <!-- Simplified for 16px: nodes dropped, stroke thickened (3.6 -> 7) so the
-       path survives rasterizing this small -- see Logo.tsx's comment on the
-       15px wordmark cutoff for the same "small sizes lose detail" reasoning. -->
-  <rect width="48" height="48" rx="10" fill="#6C74F0"/>
-  <path d="M7 37L19 26l9 5L40 13" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

@@ -27,7 +27,7 @@ export function ErrorScreen({
   return (
     <div className="w-full max-w-sm text-center">
       <div className="flex items-center justify-center mb-6">
-        <Logo size={40} stacked />
+        <Logo size={44} stacked />
       </div>
       <div
         role="alert"

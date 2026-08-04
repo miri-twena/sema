@@ -56,11 +56,20 @@ export function AdminPanel({
             >
               <ArrowLeft size={15} /> Back to SEMA
             </button>
-            <div className="mt-3">
-              <Logo size={22} />
-            </div>
-            <div className="mt-1.5 text-[0.7rem] font-semibold uppercase tracking-wide text-faint">
-              Organization admin
+            <div className="mt-3 flex items-center gap-2">
+              <Logo size={20} markOnly />
+              <span
+                style={{
+                  fontFamily: "'Montserrat', system-ui, sans-serif",
+                  fontWeight: 800,
+                  fontSize: 12.5,
+                  letterSpacing: "0.11em",
+                  color: "#6C74F0",
+                }}
+              >
+                SEMA
+              </span>
+              <span className="text-[0.7rem] font-semibold uppercase tracking-wide text-faint">Admin</span>
             </div>
           </div>
 
