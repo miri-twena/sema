@@ -1148,7 +1148,12 @@ def export_table(req: TableExportRequest) -> StreamingResponse:
         wrote_header = False
         for columns, rows in stream_sql_readonly(export_sql, client_id=cid):
             if not wrote_header:
-                yield _csv_row(columns)
+                # Same UTF-8 BOM convention as the client-side export
+                # (DataTable.tsx's downloadCsv) -- without it, Excel opening
+                # this file directly mis-renders any non-ASCII value (Hebrew
+                # names, accented characters) as mojibake despite the bytes
+                # themselves being valid UTF-8.
+                yield "﻿" + _csv_row(columns)
                 wrote_header = True
             for row in rows:
                 yield _csv_row(row)

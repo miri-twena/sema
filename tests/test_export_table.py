@@ -114,11 +114,30 @@ def test_export_returns_more_rows_than_the_capped_display(monkeypatch, client):
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
-    lines = resp.text.strip("\r\n").split("\r\n")
+    # Leading UTF-8 BOM (same convention as the client-side export) --
+    # stripped here the same way a real CSV consumer (Excel, Python's
+    # utf-8-sig codec) would, not treated as part of the header text.
+    lines = resp.text.lstrip("﻿").strip("\r\n").split("\r\n")
     assert lines[0] == "id,total_amount"
     assert len(lines) - 1 == 2500  # every DB row, not the 3-row capped preview
     assert lines[1] == "1,10.0"
     assert lines[-1] == "2500,25000.0"
+
+
+def test_export_includes_a_utf8_bom_like_the_client_side_export(monkeypatch, client):
+    """Without the BOM, Excel opening the CSV directly mis-renders any
+    non-ASCII value (Hebrew customer names, accented characters) as
+    mojibake even though the bytes are valid UTF-8 -- caught during
+    csv_export_verification_prompt.md's live check, where the real export
+    endpoint's bytes didn't start with the BOM the client-side exportCsv
+    (DataTable.tsx) has always included."""
+    conv_id = _seed_chat(monkeypatch)
+    _as_user(monkeypatch)
+    monkeypatch.setattr(main, "stream_sql_readonly", _fake_db_stream(["id"], [(1,)]))
+
+    resp = client.post("/api/exports/table", json={"conversation_id": conv_id, "turn_index": 0})
+
+    assert resp.content.startswith(b"\xef\xbb\xbf")
 
 
 def test_export_filename_includes_question_and_date(monkeypatch, client):
@@ -305,7 +324,7 @@ def test_response_is_a_generator_not_a_materialized_list(monkeypatch, client):
     resp = client.post("/api/exports/table", json={"conversation_id": conv_id, "turn_index": 0})
 
     assert resp.status_code == 200
-    lines = resp.text.strip("\r\n").split("\r\n")
+    lines = resp.text.lstrip("﻿").strip("\r\n").split("\r\n")
     assert lines == ["id", "0", "1", "2", "3", "4"]
 
 
