@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/manrope/800.css';
+@import '@fontsource/heebo/400.css';
+@import '@fontsource/heebo/500.css';
+@import '@fontsource/heebo/600.css';
+@import '@fontsource/heebo/700.css';
+@import '@fontsource/montserrat/800.css';
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #15161c;
+}
+
+a {
+  color: #6c74f0;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #4e56d6;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #8a8fa3;
+}
+
+/* Keep pretty text-wrap where supported, matching the mockup's text-wrap:pretty */
+h1,
+h2,
+h3,
+p {
+  text-wrap: pretty;
+}
+

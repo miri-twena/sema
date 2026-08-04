@@ -1,0 +1,66 @@
+const path = require('path');
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    path.join(__dirname, 'app/**/*.{ts,tsx}'),
+    path.join(__dirname, 'components/**/*.{ts,tsx}'),
+    path.join(__dirname, 'lib/**/*.{ts,tsx}'),
+  ],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          DEFAULT: '#6C74F0',
+          hover: '#5B62DE',
+          deep: '#4E56D6',
+          400: '#949CFF',
+          200: '#C7CDFF',
+          50: '#EEEFFE',
+        },
+        coral: '#F2887C',
+        yellow: '#F2C94C',
+        mint: '#7DD4A8',
+        ink: '#15161C',
+        'ink-footer': '#0F1015',
+        text: {
+          DEFAULT: '#15161C',
+          muted: '#5C6070',
+          faint: '#8A8FA3',
+        },
+        border: {
+          DEFAULT: '#E7E8EF',
+          soft: '#EDEEF4',
+          faint: '#F0F1F6',
+        },
+        tint: {
+          bg: '#FAFAFB',
+          hero: '#F7F8FF',
+        },
+        pastel: {
+          coral: { bg: '#FDEBE8', fg: '#C05A4E' },
+          mint: { bg: '#E4F6EC', fg: '#2F8F63' },
+          yellow: { bg: '#FBF3D9', fg: '#B48A0A' },
+        },
+      },
+      fontFamily: {
+        sans: ['Manrope', 'Heebo', 'system-ui', 'sans-serif'],
+        wordmark: ['Montserrat', 'sans-serif'],
+      },
+      maxWidth: {
+        container: '1140px',
+      },
+      borderRadius: {
+        card: '16px',
+        'card-lg': '18px',
+        btn: '12px',
+      },
+      boxShadow: {
+        hero: '0 18px 44px rgba(78,86,214,.10)',
+        proactive: '0 24px 60px rgba(0,0,0,.35)',
+        growth: '0 18px 40px rgba(78,86,214,.12)',
+      },
+    },
+  },
+  plugins: [],
+};
