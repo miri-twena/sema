@@ -325,6 +325,16 @@ class AgentTools:
             "glossary": load_glossary(),
         }
 
+    def check_scope(self, query: str, metrics_used: list[str] | None = None) -> dict | None:
+        """Public entry point to the data-access-scope gate below, for
+        callers that need to re-check a PREVIOUSLY-run query against the
+        CURRENT scope without going through run_sql again -- e.g. the
+        full-data CSV export endpoint re-validating that a user's scope
+        hasn't narrowed since the answer they're exporting was given
+        (full_data_export_prompt.md item 3). Same None-or-policy_blocked
+        contract as the internal gate."""
+        return self._scope_block(query, metrics_used)
+
     def run_sql(self, query: str, metrics_used: list[str] | None = None) -> dict:
         # Data-access-scope gate: runs BEFORE the SQL safety layer and before
         # anything touches the DB. A blocked query is never executed -- not

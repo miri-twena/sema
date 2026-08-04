@@ -28,6 +28,17 @@ export const he: TranslationKeys = {
     drillPlaceholder: (shortTitle: string) => `אפשר להמשיך לשאול על ${shortTitle}...`,
   },
 
+  table: {
+    downloadCsv: "הורדת CSV",
+    exportAllRows: (count: number) => `ייצוא כל ${count.toLocaleString()} השורות`,
+    exporting: "ייצוא בתהליך…",
+    exportRateLimited: "הגעתם למגבלת הייצוא. נסו שוב בעוד זמן קצר.",
+    exportScopeDenied: "המידע הזה כבר לא חלק מההרשאות שלכם.",
+    exportFailed: "הייצוא נכשל. נסו שוב.",
+    exportCeilingHit: (ceiling: number) =>
+      `התוצאה גדולה ממגבלת הייצוא של ${ceiling.toLocaleString()} שורות. הורדנו את ${ceiling.toLocaleString()} השורות הראשונות.`,
+  },
+
   sidebar: {
     newConversation: "שיחה חדשה",
     searchConversations: "חיפוש שיחות",

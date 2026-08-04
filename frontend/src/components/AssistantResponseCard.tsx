@@ -226,6 +226,7 @@ export function AssistantResponseCard({
             table={response.table}
             dir={dir}
             anchor={anchor}
+            clientId={clientId}
             // Same entity the chart above highlights (answer-screen redesign)
             // -- undefined when there's no chart or no highlight_x, which
             // DataTable treats as "highlight nothing", never a guess.

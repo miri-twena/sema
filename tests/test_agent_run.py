@@ -108,11 +108,13 @@ class ScriptedClient:
         self._actions = list(actions)
         self.calls = 0
         self.models: list[str] = []
+        self.systems: list = []
         self.messages = SimpleNamespace(create=self._create)
 
     def _create(self, **kwargs):
         self.calls += 1
         self.models.append(kwargs.get("model"))
+        self.systems.append(kwargs.get("system"))
         action = self._actions.pop(0) if len(self._actions) > 1 else self._actions[0]
         if isinstance(action, BaseException):
             raise action
@@ -136,6 +138,11 @@ def test_model_failover_attaches_notice(monkeypatch):
     assert {"kind": "fallback_model"} in resp["notices"]
     # Proof the swap really happened: primary first, backup second.
     assert fake.models == [agent.MODEL, "backup-model"]
+    # hebrew_output_quality_prompt.md item 2: the fallback call must carry the
+    # SAME system prompt (all language/language-integrity rules included) --
+    # verified here, not assumed, since a silently different prompt on the
+    # fallback path is exactly how the reported leak could recur unnoticed.
+    assert fake.systems[0] == fake.systems[1] == agent.CACHED_SYSTEM
 
 
 def test_both_models_down_is_unavailable_without_false_notice(monkeypatch):
@@ -164,3 +171,57 @@ def test_build_notices_clean_run_has_none():
     # No failures and no fallback -> no notices (the common, honest case).
     tools = SimpleNamespace(failures=[], results=[{"sql": "SELECT 1", "df": None}])
     assert agent._build_notices(tools, used_fallback_model=False) == []
+
+
+# --- script-leak guard retry path (hebrew_output_quality_prompt.md) --------
+
+
+def test_script_leak_is_retried_once_then_the_clean_answer_is_used():
+    # First present_answer leaks Arabic into a Hebrew answer; the retried
+    # present_answer is clean -- the clean one wins, no degradation.
+    fake = ScriptedClient(
+        [
+            _present("ההכנסות עלו الأسعار השנה"),
+            _present("ההכנסות עלו השנה"),
+        ]
+    )
+    resp = agent.run("מה ההכנסות השנה?", client=fake)
+    assert resp["insight_text"] == "ההכנסות עלו השנה"
+    assert resp["confidence"] != "low"
+    assert resp["notices"] == []
+    assert fake.calls == 2
+
+
+def test_script_leak_still_present_after_retry_is_shipped_degraded():
+    # Both attempts leak -- the (still-leaky) answer ships anyway rather than
+    # being discarded or looped again, but flagged: low confidence + notice.
+    fake = ScriptedClient(
+        [
+            _present("ההכנסות עלו الأسعار השנה"),
+            _present("ההכנסות ירדו الأسعار השנה"),
+        ]
+    )
+    resp = agent.run("מה ההכנסות השנה?", client=fake)
+    assert resp["insight_text"] == "ההכנסות ירדו الأسعار השנה"
+    assert resp["confidence"] == "low"
+    assert {"kind": "script_leak"} in resp["notices"]
+    assert fake.calls == 2
+
+
+def test_clean_answer_is_not_retried():
+    # The common case -- no leak, no retry, exactly one model call.
+    fake = ScriptedClient([_present("ההכנסות עלו השנה")])
+    resp = agent.run("מה ההכנסות השנה?", client=fake)
+    assert resp["insight_text"] == "ההכנסות עלו השנה"
+    assert resp["notices"] == []
+    assert fake.calls == 1
+
+
+def test_arabic_question_gets_arabic_answer_without_a_false_retry():
+    # An Arabic-scripted question legitimately gets an Arabic answer -- the
+    # guard must not mistake that for a leak and waste a retry on it.
+    fake = ScriptedClient([_present("الإيرادات ارتفعت هذا الشهر.")])
+    resp = agent.run("ما هي الإيرادات هذا الشهر؟", client=fake)
+    assert resp["insight_text"] == "الإيرادات ارتفعت هذا الشهر."
+    assert resp["notices"] == []
+    assert fake.calls == 1

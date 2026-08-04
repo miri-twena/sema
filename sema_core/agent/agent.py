@@ -28,7 +28,12 @@ import os
 import time
 
 from sema_core.agent.prompts import SYSTEM_PROMPT, build_user_message
-from sema_core.agent.response import PRESENT_ANSWER_TOOL, build_response, tables_in_sql as _tables_in
+from sema_core.agent.response import (
+    PRESENT_ANSWER_TOOL,
+    build_response,
+    detect_script_leak,
+    tables_in_sql as _tables_in,
+)
 from sema_core.agent.tools import TOOL_SCHEMAS, AgentTools
 from sema_core.client_registry import active_client_id
 from sema_core.conversation_store import derive_title
@@ -68,6 +73,18 @@ CACHED_SYSTEM = [
 # The response dict shape the UI renders (same contract as insight_builder).
 NOT_CONFIGURED_MESSAGE = "Claude API key is not configured yet."
 
+# Corrective nudge sent back as the present_answer tool_result when the
+# script-leak guard (hebrew_output_quality_prompt.md) catches wrong-script
+# text -- prompts a single redo rather than silently discarding or shipping a
+# known-bad answer. English is fine here regardless of the answer's own
+# language: this is server-to-model feedback about a TOOL CALL, not
+# user-facing text, the same way a run_sql error result is English JSON.
+SCRIPT_LEAK_RETRY_NUDGE = (
+    "Your previous answer contained text in the wrong script/language: "
+    "{snippet!r}. Call present_answer again -- every field written entirely "
+    "in the question's language, no other script anywhere."
+)
+
 
 def api_key_configured() -> bool:
     """True if an Anthropic API key is present in the environment."""
@@ -85,6 +102,9 @@ def _empty_response() -> dict:
         "charts": [],
         "table": None,
         "table_title": None,
+        "table_sql": None,
+        "table_total_rows": None,
+        "table_truncated": None,
         "recommended_actions": [],
     }
 
@@ -105,6 +125,7 @@ def _basic_response(insight_text: str, tools: AgentTools) -> dict:
             # and paginated by the UI. See build_response() for the same rule.
             resp["table"] = last
             resp["table_title"] = "Query result"
+            resp["table_sql"] = tools.results[-1].get("sql")
     return resp
 
 
@@ -175,7 +196,9 @@ def generate_title(question: str, client=None) -> str:
         return derive_title(question)
 
 
-def _build_notices(tools: AgentTools, used_fallback_model: bool) -> list[dict]:
+def _build_notices(
+    tools: AgentTools, used_fallback_model: bool, script_leak_unresolved: bool = False
+) -> list[dict]:
     """Structured "we degraded" signals for the UI to render as amber badges.
 
     Each notice is {"kind": <key>, ...params} -- localized on the client (like
@@ -194,6 +217,11 @@ def _build_notices(tools: AgentTools, used_fallback_model: bool) -> list[dict]:
         # At least one run_sql failed but the agent still produced grounded
         # results -- it corrected the query (or dropped a bad one) and answered.
         notices.append({"kind": "sql_retried", "attempts": len(failures)})
+    if script_leak_unresolved:
+        # The script-leak guard (hebrew_output_quality_prompt.md) retried once
+        # and the wrong-script text was still there -- the answer is shown
+        # anyway (stripping it isn't safe, it could change meaning), flagged.
+        notices.append({"kind": "script_leak"})
     return notices
 
 
@@ -291,13 +319,20 @@ def run(
     # are read by _finish (below) to disclose a fallback on the answer itself.
     active_model = MODEL
     used_fallback_model = False
+    # Script-leak guard state (hebrew_output_quality_prompt.md): whether a
+    # corrective retry has already been spent this run, and whether the
+    # SECOND attempt still leaked (in which case the answer ships anyway,
+    # flagged, rather than looping again or discarding a real answer).
+    script_leak_retried = False
+    script_leak_unresolved = False
 
     def _finish(resp: dict, outcome: str) -> dict:
         """Emit one structured log line summarizing the run, then return resp."""
-        # Disclose any degradation (fallback model, self-corrected SQL) as
-        # structured notices the UI renders as amber badges. Every exit path
-        # funnels through here, so no degraded answer escapes without them.
-        resp["notices"] = _build_notices(tools, used_fallback_model)
+        # Disclose any degradation (fallback model, self-corrected SQL, an
+        # unresolved script leak) as structured notices the UI renders as
+        # amber badges. Every exit path funnels through here, so no degraded
+        # answer escapes without them.
+        resp["notices"] = _build_notices(tools, used_fallback_model, script_leak_unresolved)
         log_event(
             logger,
             "agent_run",
@@ -424,13 +459,48 @@ def run(
         # Record the model's turn before acting on it.
         messages.append({"role": "assistant", "content": response.content})
 
-        # If the model called present_answer, that's the finish line: build the
-        # structured response and return immediately (no tool result needed).
-        for block in response.content:
-            if block.type == "tool_use" and block.name == PRESENT_ANSWER_TOOL["name"]:
-                tool_calls += 1
-                on_progress({"stage": "writing"})
-                return _finish(build_response(block.input, tools), "present_answer")
+        # If the model called present_answer, that's normally the finish line --
+        # UNLESS the script-leak guard catches wrong-script text, in which case
+        # this round instead sends a corrective tool_result and loops for one
+        # more round (consuming one of the MAX_ITERATIONS budget) rather than
+        # returning.
+        present_block = next(
+            (
+                b for b in response.content
+                if b.type == "tool_use" and b.name == PRESENT_ANSWER_TOOL["name"]
+            ),
+            None,
+        )
+        if present_block is not None:
+            tool_calls += 1
+            on_progress({"stage": "writing"})
+            resp = build_response(present_block.input, tools)
+            leak = detect_script_leak(resp, question)
+            if leak:
+                log_event(
+                    logger, "answer.script_leak",
+                    request_id=request_id, client_id=active_client_id(),
+                    snippet=leak, retried=script_leak_retried,
+                )
+            if leak and not script_leak_retried:
+                script_leak_retried = True
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": present_block.id,
+                        "content": SCRIPT_LEAK_RETRY_NUDGE.format(snippet=leak),
+                    }],
+                })
+                continue
+            if leak:
+                # Retried once already and it STILL leaked -- stripping isn't
+                # safe (could change meaning), so ship the answer anyway,
+                # degraded honestly: low confidence + a flagged notice (see
+                # _build_notices) rather than silently discarding a real answer.
+                resp["confidence"] = "low"
+                script_leak_unresolved = True
+            return _finish(resp, "present_answer")
 
         # Otherwise run the data tools and send results back for the next turn.
         tool_results = []

@@ -68,6 +68,10 @@ export const NOTICE_LABELS: Record<Lang, Record<string, { label: string; tip: st
       label: "Built-in report",
       tip: "The AI agent hit an error, so a built-in report answered instead of a live analysis.",
     },
+    script_leak: {
+      label: "Phrasing flagged",
+      tip: "This answer may contain wording issues and is shown with reduced confidence.",
+    },
   },
   he: {
     fallback_model: {
@@ -81,6 +85,10 @@ export const NOTICE_LABELS: Record<Lang, Record<string, { label: string; tip: st
     router_fallback: {
       label: "דוח מובנה",
       tip: "סוכן ה-AI נתקל בשגיאה, ולכן דוח מובנה השיב במקום ניתוח חי.",
+    },
+    script_leak: {
+      label: "ניסוח מסומן",
+      tip: "ייתכנו שיבושי ניסוח בתשובה זו.",
     },
   },
 };

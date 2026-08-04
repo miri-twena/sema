@@ -59,11 +59,19 @@ export interface DataTableModel {
   title?: string | null;
   columns: string[];
   rows: Record<string, unknown>[];
-  /** Rows the backing query returned. Older persisted turns lack it, so the
-   * table falls back to rows.length. */
+  /** Rows the backing query returned -- the TRUE total when `truncated`
+   * (server-computed via a COUNT(*), see api/serialize.py), not just
+   * rows.length. Older persisted turns lack it, so the table falls back to
+   * rows.length. */
   total_rows?: number;
   /** True when the SQL safety cap trimmed the result set. */
   truncated?: boolean;
+  /** Present only when this table is bound to a single agent SQL result
+   * (never for the rule-based insight_builder path) -- its presence, not
+   * its content, is what the client reads: it's what makes "Export all N
+   * rows" (exportTableCsv, by conversation/turn reference) available at
+   * all. The client never inspects or sends the SQL itself. */
+  sql?: string | null;
 }
 
 export interface DateRange {
@@ -1070,6 +1078,46 @@ export const api = {
   // `rating: null` clears an existing rating and resolves to `null`.
   sendFeedback: (req: { conversation_id: string; turn_index: number; rating: "up" | "down" | null; comment?: string; client_id: string }) =>
     postJSON<TurnFeedback | null>("/api/feedback", req),
+
+  // --- full-data CSV export (full_data_export_prompt.md) ---
+  // Re-runs the query bound to one turn's table on the server, WITHOUT the
+  // on-screen display cap -- by reference (conversation + turn) only, never
+  // by sending SQL. Returns the CSV as a Blob plus the server-chosen
+  // filename (parsed from Content-Disposition, question-derived + dated) so
+  // the caller only has to trigger the browser download, same as the
+  // existing client-side exportCsv already does for the capped case.
+  exportTableCsv: async (
+    conversationId: string,
+    turnIndex: number,
+    clientId: string,
+  ): Promise<{ blob: Blob; filename: string; ceilingHit: boolean; rowCeiling: number | null }> => {
+    const res = await fetch(`${BASE}/api/exports/table`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation_id: conversationId, turn_index: turnIndex, client_id: clientId }),
+    });
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        const data = await res.json();
+        if (typeof data?.detail === "string") detail = data.detail;
+      } catch {
+        // non-JSON error body -- keep the status-text fallback
+      }
+      throw new ApiError(res.status, detail);
+    }
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const starMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    const plainMatch = /filename="([^"]+)"/i.exec(disposition);
+    const filename = starMatch
+      ? decodeURIComponent(starMatch[1])
+      : (plainMatch?.[1] ?? "sema-export.csv");
+    const ceilingHit = res.headers.get("x-export-ceiling-hit") === "true";
+    const rowCeilingHeader = res.headers.get("x-export-row-ceiling");
+    const rowCeiling = rowCeilingHeader ? Number(rowCeilingHeader) : null;
+    const blob = await res.blob();
+    return { blob, filename, ceilingHit, rowCeiling };
+  },
 
   // --- drill-down threads (widget-anchored, never in the sidebar) ---
   threads: (conversationId: string, clientId: string) =>

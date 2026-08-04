@@ -5,11 +5,12 @@ by result_index, out-of-range indices, and missing optional fields.
 
 from __future__ import annotations
 
+import copy
 import datetime
 
 import pandas as pd
 
-from sema_core.agent.response import _looks_like_date_axis, build_response
+from sema_core.agent.response import _looks_like_date_axis, build_response, detect_script_leak
 
 
 class FakeTools:
@@ -366,3 +367,73 @@ def test_evidence_missing_date_range_is_none():
         tools,
     )
     assert resp["evidence"]["date_range"] is None
+
+
+# --- script-leak guard (hebrew_output_quality_prompt.md) --------------------
+
+
+def test_detect_script_leak_catches_arabic_in_hebrew_answer():
+    resp = {"insight_text": "ההכנסות עלו الأسعار השנה"}
+    leak = detect_script_leak(resp, "מה ההכנסות השנה?")
+    assert leak is not None
+    assert "الأسعار" in leak
+
+
+def test_detect_script_leak_passes_legit_hebrew_english_mix():
+    resp = {"insight_text": "ה-AOV ירד ב-Q3 לעומת Q2."}
+    assert detect_script_leak(resp, "מה קרה ל-AOV?") is None
+
+
+def test_detect_script_leak_passes_hebrew_with_currency_and_metric_names():
+    resp = {"insight_text": "ההכנסה עמדה על $287.6K, עלייה של AOV ב-4.4%."}
+    assert detect_script_leak(resp, "מה ההכנסה החודש?") is None
+
+
+def test_detect_script_leak_allows_arabic_when_question_is_arabic():
+    # The question itself is Arabic-scripted, so an Arabic answer is the
+    # LEGITIMATE, expected behavior (the answer always matches the question's
+    # language) -- not a leak. Proves the guard keys on the question's own
+    # language, not a hardcoded Hebrew/English allowlist.
+    resp = {"insight_text": "الإيرادات ارتفعت بنسبة 12% هذا الشهر."}
+    assert detect_script_leak(resp, "ما هي الإيرادات هذا الشهر؟") is None
+
+
+def test_detect_script_leak_catches_cyrillic():
+    resp = {"summary": "Revenue выросла this quarter."}
+    assert detect_script_leak(resp, "How is revenue?") is not None
+
+
+def test_detect_script_leak_catches_cjk():
+    resp = {"summary": "收入 increased this quarter."}
+    assert detect_script_leak(resp, "How is revenue?") is not None
+
+
+def test_detect_script_leak_covers_every_user_facing_field():
+    base = {
+        "summary": "ok",
+        "insight_text": "ok",
+        "missing": "ok",
+        "kpis": [{"label": "ok"}],
+        "recommended_actions": [{"action": "ok", "why": "ok", "expected_impact": "ok"}],
+        "follow_up_questions": ["ok"],
+        "clarification_options": ["ok"],
+    }
+    mutations = {
+        "summary": lambda r: r.__setitem__("summary", "الأسعار"),
+        "insight_text": lambda r: r.__setitem__("insight_text", "الأسعار"),
+        "missing": lambda r: r.__setitem__("missing", "الأسعار"),
+        "kpi label": lambda r: r["kpis"][0].__setitem__("label", "الأسعار"),
+        "action": lambda r: r["recommended_actions"][0].__setitem__("action", "الأسعار"),
+        "why": lambda r: r["recommended_actions"][0].__setitem__("why", "الأسعار"),
+        "expected_impact": lambda r: r["recommended_actions"][0].__setitem__(
+            "expected_impact", "الأسعار"
+        ),
+        "follow_up_questions": lambda r: r["follow_up_questions"].__setitem__(0, "الأسعار"),
+        "clarification_options": lambda r: r["clarification_options"].__setitem__(
+            0, "الأسعار"
+        ),
+    }
+    for field_name, mutate in mutations.items():
+        resp = copy.deepcopy(base)
+        mutate(resp)
+        assert detect_script_leak(resp, "מה המחיר?") is not None, f"missed leak in {field_name}"

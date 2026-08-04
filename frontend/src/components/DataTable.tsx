@@ -17,7 +17,7 @@ import {
   Download,
   MessageSquareText,
 } from "lucide-react";
-import type { DataTableModel } from "../lib/api";
+import { api, ApiError, type DataTableModel } from "../lib/api";
 import type { DrillContext } from "./DrillChat";
 import { followUpsLabel, formatCell } from "../lib/format";
 import { matchesHighlight } from "../lib/chart";
@@ -26,6 +26,7 @@ import { columnLabel } from "../lib/columnLabels";
 import { CopyableBlock } from "./CopyButton";
 import { copyRich, toHTMLTable, toTSV } from "../lib/clipboard";
 import { ThreadBadge } from "./ThreadBadge";
+import { useT } from "../locales";
 
 type Row = Record<string, unknown>;
 
@@ -64,6 +65,7 @@ export function DataTable({
   table,
   dir,
   anchor,
+  clientId,
   threadCount,
   onDrill,
   highlightValue,
@@ -71,6 +73,10 @@ export function DataTable({
   table: DataTableModel;
   dir?: "rtl" | "ltr";
   anchor?: { conversationId: string; turnIndex: number };
+  /** Which client's DB this table belongs to -- needed alongside `anchor` to
+   * call the full-data export endpoint. Undefined wherever anchor is
+   * (home dashboard, drill panel), which already disables export-all. */
+  clientId?: string;
   threadCount?: (title: string) => number | undefined;
   onDrill?: (ctx: DrillContext) => void;
   /** The chart's own highlight_x, matched against this table's first column
@@ -79,7 +85,11 @@ export function DataTable({
    * highlights nothing, same silent-absence rule the chart follows. */
   highlightValue?: unknown;
 }) {
+  const t = useT();
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [exportState, setExportState] = useState<"idle" | "loading" | "error">("idle");
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   const helper = createColumnHelper<Row>();
 
   const columns = useMemo(
@@ -121,6 +131,51 @@ export function DataTable({
     const rows = instance.getSortedRowModel().rows.map((r) => r.original);
     const name = (table.title || "sema-export").replace(/[^\w֐-׿ -]+/g, "").trim() || "sema-export";
     downloadCsv(`${name}.csv`, toCsv(table.columns, rows));
+  };
+
+  // The FULL result, re-run server-side without the display cap
+  // (full_data_export_prompt.md) -- only offered when the server told us
+  // this table is BOTH bound to a re-runnable query (`sql`, never inspected
+  // or sent by the client -- its presence alone gates this) AND actually
+  // truncated on screen. Below the cap, the loaded rows already ARE the
+  // full result, so the plain client-side exportCsv above is already a
+  // complete export -- no server round-trip needed for that case.
+  const canExportAll = Boolean(table.sql) && Boolean(table.truncated) && anchor && clientId;
+  const exportAllRows = async () => {
+    if (!anchor || !clientId) return;
+    setExportState("loading");
+    setExportError(null);
+    setExportNote(null);
+    try {
+      const { blob, filename, ceilingHit, rowCeiling } = await api.exportTableCsv(
+        anchor.conversationId,
+        anchor.turnIndex,
+        clientId,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportState("idle");
+      // Rare (full_data_export_prompt.md item 5): the true result is bigger
+      // than the export ceiling itself, not just the display cap. The file
+      // still downloaded (capped at the ceiling), so this is a note, not an
+      // error -- shown alongside the successful download, not instead of it.
+      if (ceilingHit && rowCeiling) setExportNote(t.table.exportCeilingHit(rowCeiling));
+    } catch (e) {
+      const message =
+        e instanceof ApiError && e.status === 429
+          ? t.table.exportRateLimited
+          : e instanceof ApiError && e.status === 403
+            ? t.table.exportScopeDenied
+            : t.table.exportFailed;
+      setExportError(message);
+      setExportState("error");
+    }
   };
 
   const tableTitle = table.title || "Table";
@@ -168,15 +223,37 @@ export function DataTable({
               <MessageSquareText size={14} /> Ask about this
             </button>
           )}
-          <button
-            onClick={exportCsv}
-            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-primary hover:border-primary transition"
-            title={`Download all ${total.toLocaleString()} rows as CSV`}
-          >
-            <Download size={13} /> Download CSV
-          </button>
+          {canExportAll ? (
+            <button
+              onClick={exportAllRows}
+              disabled={exportState === "loading"}
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-primary hover:border-primary transition disabled:opacity-60"
+              title={t.table.exportAllRows(total)}
+            >
+              <Download size={13} />
+              {exportState === "loading" ? t.table.exporting : t.table.exportAllRows(total)}
+            </button>
+          ) : (
+            <button
+              onClick={exportCsv}
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-primary hover:border-primary transition"
+              title={`Download all ${total.toLocaleString()} rows as CSV`}
+            >
+              <Download size={13} /> {t.table.downloadCsv}
+            </button>
+          )}
         </div>
       </div>
+      {exportState === "error" && exportError && (
+        <div className="mt-1.5 text-xs text-critical-fg" role="alert">
+          {exportError}
+        </div>
+      )}
+      {exportNote && (
+        <div className="mt-1.5 text-xs text-muted" role="status">
+          {exportNote}
+        </div>
+      )}
       <div className="rounded-xl border border-line overflow-hidden bg-surface">
         <span className="block h-[3px] w-full" style={{ background: CHART_PALETTE[0] }} aria-hidden />
         <div className="overflow-auto sema-scroll max-h-80">

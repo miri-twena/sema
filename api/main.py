@@ -26,6 +26,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,9 @@ from sema_core.org_settings_store import (
 from sema_core import retention
 from sema_core.retention_store import RetentionRunStore
 from sema_core.query_limit_store import QueryLimitStore, today as query_limit_today
+from sema_core.export_limit_store import ExportLimitStore, current_hour as export_limit_current_hour
+from sema_core.agent.tools import AgentTools
+from sema_core.agent.safety import SQLSafetyError, strip_limit, validate_and_prepare
 from sema_core import data_sources
 from sema_core import connector_catalog
 from sema_core import db_probe
@@ -101,7 +105,7 @@ from sema_core.semantic_editor import (
     write_atomic,
 )
 from sema_core.semantic_validate import validate_item
-from sema_core.db import check_connection, run_query
+from sema_core.db import check_connection, run_query, stream_sql_readonly
 from sema_core.obs import get_logger, log_admin_event, log_event, new_request_id
 from sema_core.audit_store import AuditStore
 from sema_core import home_config
@@ -173,6 +177,7 @@ from api.models import (
     ConversationDetail,
     ConversationMessage,
     FeedbackRequest,
+    TableExportRequest,
     TurnFeedback,
     ConversationSummary,
     ConversationUpdate,
@@ -277,6 +282,14 @@ feedback_store = TurnFeedbackStore(settings.conversation_db_path)
 # monkeypatch this attribute with an isolated store pointed at a temp file,
 # same as the stores above.
 query_limit_store = QueryLimitStore(settings.conversation_db_path)
+
+# Per-user hourly CSV-export rate limit (full_data_export_prompt.md item 5) --
+# same SQLite metadata DB, separate table/clock from query_limit_store above
+# (an export never calls the LLM, so it's a different kind of cost on a
+# different reset boundary). Module-level singleton; tests monkeypatch this
+# attribute with an isolated store pointed at a temp file, same as the
+# stores above.
+export_limit_store = ExportLimitStore(settings.conversation_db_path)
 
 
 def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
@@ -429,6 +442,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Response headers browsers hide from cross-origin `fetch()`/XHR JS
+    # unless explicitly exposed here (the CORS-safelisted set is Content-
+    # Type/Content-Length/etc, NOT Content-Disposition or any X- header) --
+    # the export endpoint's filename (Content-Disposition) and >250K-rows
+    # signal (X-Export-*) would otherwise read as null/missing on every
+    # cross-origin call (dev: :5173 -> :8000), silently degrading to the
+    # generic fallback filename with no error.
+    expose_headers=["Content-Disposition", "X-Export-Ceiling-Hit", "X-Export-Row-Ceiling"],
 )
 
 
@@ -1002,6 +1023,160 @@ def submit_feedback(req: FeedbackRequest) -> TurnFeedback | None:
     except InvalidRatingError:
         raise HTTPException(status_code=422, detail="invalid rating") from None
     return TurnFeedback(rating=row["rating"], comment=row["comment"])
+
+
+_EXPORT_FILENAME_UNSAFE_RE = re.compile(r"[^\w\s-]", re.UNICODE)
+
+
+def _export_filename(question: str) -> str:
+    """`<slugified question>_<date>.csv` -- same spirit as the client-side
+    Download CSV's own sanitization (DataTable.tsx's exportCsv), extended to
+    keep Hebrew (Python's `\\w` is already Unicode-aware, so this keeps any
+    script, not just Latin)."""
+    slug = _EXPORT_FILENAME_UNSAFE_RE.sub("", question or "").strip()
+    slug = re.sub(r"\s+", "_", slug)[:60].strip("_") or "sema-export"
+    date = datetime.now(timezone.utc).date().isoformat()
+    return f"{slug}_{date}.csv"
+
+
+def _csv_row(fields: list) -> str:
+    buf = io.StringIO()
+    csv.writer(buf).writerow(fields)
+    return buf.getvalue()
+
+
+@app.post("/api/exports/table")
+def export_table(req: TableExportRequest) -> StreamingResponse:
+    """Full-data CSV export (full_data_export_prompt.md): re-runs the query
+    bound to one turn's table WITHOUT the on-screen display cap.
+
+    By REFERENCE only -- conversation_id + turn_index resolve to the SQL the
+    agent already ran and persisted on that turn's Table.sql; the client
+    never sends SQL (that would bypass the agent's whole safety path). Every
+    guardrail the original answer went through runs again here: the
+    requester's CURRENT data-access scope (which may have narrowed since the
+    answer was given), the same sqlglot safety validation (single read-only
+    SELECT, no system catalogs), just with a much higher row ceiling
+    (SEMA_EXPORT_ROW_LIMIT) than the display cap. Streamed via a named
+    server-side cursor (sema_core.db.stream_sql_readonly) so a 250K-row
+    export never sits fully in memory.
+    """
+    request_id = new_request_id()
+    cid = _resolve_client(req.client_id)
+    me = current_org_user(cid)
+
+    # Rate limit: counts every export ATTEMPT (same increment-then-check
+    # order as _check_daily_query_limit), a no-op for an identity with no
+    # real org_user row to count against (same "unscoped = unrestricted"
+    # rule the daily query cap already applies).
+    limit = settings.export_hourly_limit
+    if limit > 0 and me.get("id") is not None:
+        hour = export_limit_current_hour()
+        count = export_limit_store.increment_and_get(cid, me["id"], hour)
+        if count > limit:
+            if export_limit_store.mark_notified_once(cid, me["id"], hour):
+                _audit(
+                    "export_rate_limited", client_id=cid, actor=me, action="export.rate_limited",
+                    target_type="export_limit", target_label=f"{limit}/hour",
+                    after={"count": count, "limit": limit, "hour": hour},
+                )
+            raise HTTPException(status_code=429, detail="Export rate limit reached. Try again later.")
+
+    # Resolve conversation_id + turn_index -> the table bound to that turn,
+    # the SAME "count user turns" walk get_conversation uses.
+    try:
+        raw = conversation_store.get_messages(req.conversation_id, client_id=cid)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown conversation_id") from None
+
+    turn_index = -1
+    table = None
+    question_text = ""
+    for m in raw:
+        if m["role"] == "user":
+            turn_index += 1
+            if turn_index == req.turn_index:
+                question_text = m["content"]
+        elif m["role"] == "assistant" and turn_index == req.turn_index and m.get("payload"):
+            try:
+                payload = ChatResponse.model_validate_json(m["payload"])
+            except Exception:
+                payload = None
+            table = payload.table if payload is not None else None
+            break
+
+    if table is None or not table.sql:
+        raise HTTPException(status_code=404, detail="no exportable table for this turn")
+
+    # Point active-client-scoped lookups (the scope check below) at this
+    # request's client -- reset in `finally` before returning, since the
+    # StreamingResponse body runs AFTER this function returns and must not
+    # depend on this override (stream_sql_readonly gets `client_id=cid`
+    # explicitly, precisely so it doesn't need to).
+    client_registry.set_active_client_override(cid)
+    try:
+        blocked = AgentTools(scope_id=me["data_scope"]).check_scope(table.sql, metrics_used=None)
+        if blocked is not None:
+            _audit(
+                "export_denied", client_id=cid, actor=me, action="data.export_denied",
+                target_type="conversation", target_id=req.conversation_id,
+                after={"turn_index": req.turn_index, "reason": blocked["reason"]},
+            )
+            raise HTTPException(status_code=403, detail=blocked["reason"])
+
+        try:
+            export_sql = validate_and_prepare(strip_limit(table.sql), max_rows=settings.export_row_limit)
+        except SQLSafetyError:
+            raise HTTPException(
+                status_code=400, detail="This result can no longer be exported safely."
+            ) from None
+    finally:
+        client_registry.set_active_client_override(None)
+
+    filename = _export_filename(question_text)
+    # Known from the answer's own COUNT (agent/response.py's _true_row_count)
+    # -- an approximation (the table may have changed since), but enough to
+    # flag the rare ">250K rows" case per full_data_export_prompt.md item 5:
+    # that's a data-pipeline job, not a chat export, so the file is still
+    # delivered (capped at export_row_limit by validate_and_prepare above,
+    # same mechanism as the display cap), plus a signal the client can show
+    # as a note rather than silently implying the file is the whole result.
+    ceiling_hit = bool(table.total_rows and table.total_rows > settings.export_row_limit)
+
+    def csv_stream():
+        row_count = 0
+        wrote_header = False
+        for columns, rows in stream_sql_readonly(export_sql, client_id=cid):
+            if not wrote_header:
+                yield _csv_row(columns)
+                wrote_header = True
+            for row in rows:
+                yield _csv_row(row)
+                row_count += 1
+        log_event(
+            logger, "api_export_table", request_id=request_id, client_id=cid,
+            conversation_id=req.conversation_id, turn_index=req.turn_index,
+            rows=row_count, ceiling_hit=ceiling_hit,
+        )
+        _audit(
+            "export_completed", client_id=cid, actor=me, action="data.exported",
+            target_type="conversation", target_id=req.conversation_id,
+            after={"turn_index": req.turn_index, "rows": row_count, "ceiling_hit": ceiling_hit},
+        )
+
+    ascii_fallback = "sema-export.csv"
+    return StreamingResponse(
+        csv_stream(),
+        media_type="text/csv",
+        headers={
+            "X-Export-Ceiling-Hit": "true" if ceiling_hit else "false",
+            "X-Export-Row-Ceiling": str(settings.export_row_limit),
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_fallback}"; '
+                f"filename*=UTF-8''{quote(filename)}"
+            )
+        },
+    )
 
 
 @app.patch("/api/conversations/{conversation_id}", response_model=ConversationSummary)

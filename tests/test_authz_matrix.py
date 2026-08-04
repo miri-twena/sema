@@ -63,6 +63,7 @@ ROUTE_CLASS: dict[tuple[str, str], str] = {
     ("GET", "/api/conversations"): "open",
     ("GET", "/api/conversations/{conversation_id}"): "open",
     ("POST", "/api/feedback"): "open",
+    ("POST", "/api/exports/table"): "open",
     ("PATCH", "/api/conversations/{conversation_id}"): "open",
     ("DELETE", "/api/conversations/{conversation_id}"): "open",
     ("GET", "/api/conversations/{conversation_id}/threads"): "open",

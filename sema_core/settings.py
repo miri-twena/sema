@@ -75,6 +75,17 @@ class Settings:
     row_limit: int
     statement_timeout_ms: int
 
+    # --- full-data CSV export (full_data_export_prompt.md) ---
+    # Ceiling on a re-run export query -- far above row_limit (the ON-SCREEN
+    # display cap) since export's whole point is "more than what's shown."
+    # Still a real ceiling, not "everything": a result past this returns a
+    # note instead of a file (a data-pipeline job, not a chat export).
+    export_row_limit: int
+    # Exports per (client, org_user) per rolling clock-hour -- abuse guardrail
+    # for a re-run that costs a real DB query, separate from daily_query_limit
+    # (that one counts LLM calls; an export never calls the LLM at all).
+    export_hourly_limit: int
+
     # --- database credentials (db NAME is per-client, resolved in db.py) ---
     db_host: str
     db_port: str
@@ -163,6 +174,8 @@ def load_settings() -> Settings:
         anthropic_max_retries=_int("SEMA_ANTHROPIC_MAX_RETRIES", 2),
         row_limit=_int("SEMA_ROW_LIMIT", 1000),
         statement_timeout_ms=_int("SEMA_STATEMENT_TIMEOUT_MS", 5000),
+        export_row_limit=_int("SEMA_EXPORT_ROW_LIMIT", 250_000),
+        export_hourly_limit=_int("SEMA_EXPORT_HOURLY_LIMIT", 20),
         db_host=os.environ.get("POSTGRES_HOST", "localhost"),
         db_port=os.environ.get("POSTGRES_PORT", "5432"),
         db_user=os.environ.get("POSTGRES_USER", "sema_user"),

@@ -62,6 +62,20 @@ class ChatRequest(BaseModel):
     turn_index: int | None = None
 
 
+class TableExportRequest(BaseModel):
+    """POST /api/exports/table body: by REFERENCE only -- which turn's table
+    to re-run -- never raw SQL from the client (full_data_export_prompt.md
+    item 2: accepting client-supplied SQL would bypass the agent's whole
+    safety path). `turn_index` is the same 0-based "which user question"
+    index ChatRequest/FeedbackRequest already use. Scoped to the main
+    conversation transcript only, not drill-down threads (same scope note as
+    FeedbackRequest/TurnFeedback -- see ConversationMessage's docstring)."""
+
+    conversation_id: str
+    turn_index: int = Field(ge=0)
+    client_id: str | None = None
+
+
 class FeedbackRequest(BaseModel):
     """POST /api/feedback body. `rating: null` clears an existing rating
     (sema_core.feedback_store.clear) -- `comment` is ignored in that case.
@@ -103,12 +117,22 @@ class Table(BaseModel):
     title: str | None = None
     columns: list[str] = []
     rows: list[dict[str, Any]] = []
-    # Rows the backing query actually returned. Equals len(rows) unless the SQL
-    # safety cap (SEMA_ROW_LIMIT) trimmed the result -- the UI shows this as
+    # The TRUE total behind this table when `truncated` -- a cheap COUNT(*)
+    # computed server-side (sema_core.agent.response._true_row_count), not
+    # just len(rows). Falls back to len(rows) when the count wasn't computed
+    # (not truncated, or the count itself failed) -- the UI shows this as
     # "Showing 1-50 of 406" and warns when `truncated` is set, so a capped list
     # can never masquerade as a complete one.
     total_rows: int = 0
     truncated: bool = False
+    # The specific query that produced THIS table, by reference only -- lets
+    # POST /api/exports/table re-run exactly this result without the display
+    # cap (full_data_export_prompt.md). None for tables that aren't bound to
+    # a single agent SQL result (the rule-based insight_builder path) --
+    # those can't be re-run and don't offer "Export all N rows". Persisted
+    # in the conversation payload same as everything else on this model;
+    # never itself the payload of a client request (see TableExportRequest).
+    sql: str | None = None
 
 
 class DateRange(BaseModel):

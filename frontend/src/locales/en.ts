@@ -30,6 +30,18 @@ export const en = {
     drillPlaceholder: (shortTitle: string) => `Ask about ${shortTitle}...`,
   },
 
+  // full_data_export_prompt.md: the table widget's CSV export.
+  table: {
+    downloadCsv: "Download CSV",
+    exportAllRows: (count: number) => `Export all ${count.toLocaleString()} rows`,
+    exporting: "Exporting…",
+    exportRateLimited: "You've reached the export limit. Try again in a bit.",
+    exportScopeDenied: "This data is no longer part of your access.",
+    exportFailed: "Export failed. Please try again.",
+    exportCeilingHit: (ceiling: number) =>
+      `This result is larger than the ${ceiling.toLocaleString()}-row export limit. Downloaded the first ${ceiling.toLocaleString()} rows.`,
+  },
+
   sidebar: {
     newConversation: "New conversation",
     searchConversations: "Search conversations",

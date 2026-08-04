@@ -158,6 +158,61 @@ def run_sql_readonly(sql: str, params: dict | None = None, client_id: str | None
     return _run(sql, params, client_id, role="readonly")
 
 
+def stream_sql_readonly(sql: str, client_id: str | None = None, batch_size: int = 2000):
+    """Stream already-validated SQL through the read-only role as (columns,
+    row_batch) tuples, without ever materializing the full result in memory.
+
+    Unlike run_sql_readonly (pandas' read_sql_query, which buffers the whole
+    result into a DataFrame), this uses a named psycopg2 cursor -- Postgres
+    keeps the result set server-side and hands it back a `batch_size` chunk
+    at a time (`cursor.itersize`). Built for the full-data CSV export
+    (full_data_export_prompt.md item 1: "stream the CSV response, don't
+    buffer 250K rows in memory"), where a plain run_sql_readonly on a
+    250K-row result would hold the entire thing as a DataFrame at once.
+
+    A generator: the connection is checked out of the pool on first
+    iteration and returned in `finally`, so a caller that only consumes part
+    of it (an aborted download) still releases the connection instead of
+    leaking it.
+    """
+    cid = client_id or active_client_id()
+    p = _get_pool(cid, "readonly")
+    conn = p.getconn()
+    broken = False
+    try:
+        # Autocommit is wrong for a named (server-side) cursor -- it needs a
+        # real transaction to stay open across fetches, unlike the plain
+        # queries elsewhere in this module.
+        if conn.autocommit:
+            conn.autocommit = False
+        with conn.cursor(name=f"sema_export_{os.getpid()}_{id(conn)}") as cur:
+            cur.itersize = batch_size
+            cur.execute(sql)
+            # For a NAMED (server-side) cursor, psycopg2 leaves `.description`
+            # None until AFTER the first fetch -- unlike a plain cursor, where
+            # it's populated right after execute(). Reading it before the
+            # first fetchmany() below would raise TypeError on `None`.
+            while True:
+                rows = cur.fetchmany(batch_size)
+                columns = [d[0] for d in cur.description] if cur.description else []
+                if not rows:
+                    yield columns, []
+                    break
+                yield columns, rows
+        conn.rollback()  # read-only: end the transaction cleanly, no commit needed
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            broken = True
+        raise
+    finally:
+        p.putconn(conn, close=broken)
+
+
 def check_connection(client_id: str | None = None) -> bool:
     """True if the active (or given) client's database is reachable."""
     try:

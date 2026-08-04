@@ -65,14 +65,23 @@ def to_chat_response(resp: dict, sql_used: str | None = None) -> ChatResponse:
     table: Table | None = None
     t = resp.get("table")
     if t is not None and not t.empty:
-        # A result sitting exactly on the safety cap was almost certainly cut
-        # there, so flag it rather than presenting a capped list as complete.
+        # table_truncated/table_total_rows are set upstream (agent/response.py,
+        # agent/agent.py) whenever the table is bound to a real SQL result --
+        # table_total_rows is the TRUE count behind a truncated table, not
+        # just len(t). The rule-based insight_builder path never sets them,
+        # so this falls back to the old length-vs-cap heuristic for that path
+        # (a result sitting exactly on the safety cap was almost certainly
+        # cut there).
+        truncated = resp.get("table_truncated")
+        if truncated is None:
+            truncated = bool(len(t) >= settings.row_limit)
         table = Table(
             title=resp.get("table_title"),
             columns=_columns(t),
             rows=_records(t),
-            total_rows=int(len(t)),
-            truncated=bool(len(t) >= settings.row_limit),
+            total_rows=resp.get("table_total_rows") or int(len(t)),
+            truncated=truncated,
+            sql=resp.get("table_sql"),
         )
 
     evidence: Evidence | None = None

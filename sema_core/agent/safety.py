@@ -95,6 +95,39 @@ def validate_and_prepare(sql: str, max_rows: int = DEFAULT_ROW_LIMIT) -> str:
     return statement.sql(dialect="postgres")
 
 
+def strip_limit(sql: str) -> str:
+    """Remove a top-level LIMIT from an already-prepared statement.
+
+    `validate_and_prepare` only REPLACES an existing LIMIT when it's larger
+    than the new cap (`current_limit > max_rows`) -- by design, so a
+    legitimate small LIMIT the model wrote on purpose survives re-validation
+    unchanged. That means feeding a display-capped `sql_used` (LIMIT 1000,
+    injected by the FIRST validate_and_prepare call) straight into a second
+    one with a higher `max_rows` for export would leave the 1000 in place --
+    silently capping the "full" export at the same 1000 rows it was supposed
+    to bypass. Callers building an export must strip the old LIMIT first, so
+    the export's validate_and_prepare call sees no limit and adds its own
+    (export_row_limit-sized) cap fresh.
+
+    Raises SQLSafetyError on unparseable input OR more than one statement --
+    `sqlglot.parse_one` alone would silently parse (and return) only the
+    FIRST of "SELECT 1; DROP TABLE x;" rather than rejecting it, which would
+    make this function quietly launder a stacked statement into something
+    validate_and_prepare then accepts as clean. Parsing the same way
+    validate_and_prepare does (parse everything, require exactly one
+    statement) keeps this defense-in-depth rather than a bypass.
+    """
+    try:
+        statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
+    except Exception as e:
+        raise SQLSafetyError(f"Could not parse SQL: {e}") from e
+    if len(statements) != 1:
+        raise SQLSafetyError("Only a single SQL statement is allowed.")
+    statement = statements[0]
+    statement.set("limit", None)
+    return statement.sql(dialect="postgres")
+
+
 def is_safe(sql: str) -> bool:
     """Convenience boolean check (does not return the prepared SQL)."""
     try:

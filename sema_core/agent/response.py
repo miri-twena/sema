@@ -28,10 +28,13 @@ import pandas as pd
 import sqlglot
 from sqlglot import expressions as exp
 
+from sema_core.agent.safety import strip_limit
 from sema_core.agent.semantic import load_knowledge
 from sema_core.client_registry import active_client_id
 from sema_core.data_sources import stale_source_caveat
+from sema_core.db import run_sql_readonly
 from sema_core.obs import get_logger, log_event
+from sema_core.settings import settings
 
 logger = get_logger("agent")
 
@@ -404,6 +407,9 @@ def _empty_response() -> dict:
         "charts": [],
         "table": None,
         "table_title": None,
+        "table_sql": None,
+        "table_total_rows": None,
+        "table_truncated": None,
         "recommended_actions": [],
         "follow_up_questions": [],
         "sql_used": None,
@@ -421,6 +427,25 @@ def _df_at(tools, index) -> pd.DataFrame | None:
     if 0 <= i < len(tools.results):
         return tools.results[i]["df"]
     return None
+
+
+def _true_row_count(sql: str) -> int | None:
+    """The real total behind an already-capped query, via a cheap COUNT(*)
+    wrapper -- so a truncated table's "Showing 1-50 of N" and the export
+    button's "Export all N rows" state a real number instead of the capped
+    length (full_data_export_prompt.md item 4). Best-effort: any failure
+    (a COUNT that itself times out on a very expensive query, a transient DB
+    error) returns None rather than raising, since this is a nicety on top
+    of an already-successful answer, not something worth failing the whole
+    response over -- callers fall back to the capped length they already have.
+    """
+    try:
+        uncapped = strip_limit(sql)
+        count_df = run_sql_readonly(f"SELECT COUNT(*) AS n FROM ({uncapped}) AS _sema_count")
+        return int(count_df["n"].iloc[0])
+    except Exception:
+        logger.warning("true row count failed; falling back to the capped length", exc_info=True)
+        return None
 
 
 def _database_name() -> str | None:
@@ -756,6 +781,76 @@ def _clean_action(raw) -> dict | None:
     }
 
 
+# --- language-integrity guard (hebrew_output_quality_prompt.md) -----------
+# Deterministic backstop for a real failure mode: the model (the FALLBACK
+# model especially) occasionally slips a wrong-script word or phrase into an
+# otherwise correctly-languaged answer -- e.g. a stray Arabic word inside a
+# Hebrew answer. A prose instruction alone can't be trusted to prevent this
+# (the same "never trust the LLM alone" reasoning as _apply_mode_policy
+# below), so this checks the actual OUTPUT text deterministically.
+# Ranges written as literal characters (not \uXXXX escapes) so the actual
+# glyphs are visible in a diff -- each is annotated with its exact codepoint
+# range so a reviewer doesn't have to decode them by eye. Verified with
+# `[hex(ord(c)) for c in pattern]` against the ranges named in each comment.
+_SCRIPT_BLOCKS: dict[str, re.Pattern] = {
+    "Arabic": re.compile(r"[؀-ۿݐ-ݿ]"),  # U+0600-U+06FF, U+0750-U+077F
+    "Cyrillic": re.compile(r"[Ѐ-ӿ]"),  # U+0400-U+04FF
+    # Han (Chinese/Japanese kanji), Hiragana/Katakana, Hangul -- lumped under
+    # "CJK" per this guard's own scope, since a leak of any of the three is
+    # the same failure mode (an unrelated East-Asian script mid-answer).
+    "CJK": re.compile(r"[一-鿿぀-ヿ가-힯]"),  # U+4E00-U+9FFF, U+3040-U+30FF, U+AC00-U+D7AF
+}
+
+
+def _answer_text_fields(resp: dict) -> list[str]:
+    """Every user-facing text field of a built response, flattened -- the
+    surface the script-leak guard (and any future output-quality check) must
+    cover: summary, insight_text, missing, KPI labels, recommended_actions'
+    action/why/expected_impact, follow_up_questions, clarification_options.
+    Chart/table titles are model-authored too but out of this guard's stated
+    scope."""
+    fields: list[str] = []
+    for key in ("summary", "insight_text", "missing"):
+        v = resp.get(key)
+        if isinstance(v, str) and v:
+            fields.append(v)
+    for kpi in resp.get("kpis") or []:
+        label = kpi.get("label")
+        if isinstance(label, str) and label:
+            fields.append(label)
+    for action in resp.get("recommended_actions") or []:
+        for k in ("action", "why", "expected_impact"):
+            v = action.get(k)
+            if isinstance(v, str) and v:
+                fields.append(v)
+    fields.extend(q for q in (resp.get("follow_up_questions") or []) if isinstance(q, str) and q)
+    fields.extend(o for o in (resp.get("clarification_options") or []) if isinstance(o, str) and o)
+    return fields
+
+
+def detect_script_leak(resp: dict, question: str) -> str | None:
+    """The offending snippet if any answer text field contains a script the
+    QUESTION itself didn't use, else None.
+
+    Keyed on the question's OWN script, not a hardcoded Hebrew/English
+    allowlist: a question written in Arabic legitimately gets an Arabic
+    answer (LANGUAGE in the system prompt -- the answer always matches the
+    question's language), so Arabic appearing in THAT answer is not a leak.
+    The common case (a Hebrew or English question) has neither Arabic,
+    Cyrillic, nor CJK in the question, so all three are checked.
+    """
+    for script, pattern in _SCRIPT_BLOCKS.items():
+        if pattern.search(question):
+            continue  # the question itself uses this script -- expected, not a leak
+        for field in _answer_text_fields(resp):
+            match = pattern.search(field)
+            if match:
+                start = max(0, match.start() - 15)
+                end = min(len(field), match.end() + 15)
+                return field[start:end]
+    return None
+
+
 def _executed_results(tools) -> list:
     """The run_sql results this answer could be grounded in."""
     return list(getattr(tools, "results", None) or [])
@@ -932,6 +1027,26 @@ def build_response(tool_input: dict, tools) -> dict:
             # cut to a preview here.
             resp["table"] = df
             resp["table_title"] = table.get("title", "Result")
+            # The SPECIFIC query that backs THIS table (not the whole
+            # (possibly multi-query) sql_used below) -- persisted so a later
+            # "Export all N rows" request can re-run exactly this result by
+            # reference, never raw client-supplied SQL (full_data_export_
+            # prompt.md item 2). None for the rule-based insight_builder/
+            # agent.py fallback paths, which have no bound tools.results entry.
+            try:
+                idx = int(table["result_index"])
+            except (TypeError, ValueError):
+                idx = -1
+            table_sql = tools.results[idx].get("sql") if 0 <= idx < len(tools.results) else None
+            resp["table_sql"] = table_sql
+            truncated = len(df) >= settings.row_limit
+            resp["table_truncated"] = truncated
+            # A result sitting exactly on the cap was almost certainly cut
+            # there -- look up the real total so "Showing 1-50 of N" and the
+            # export button state a true count, not the capped length.
+            resp["table_total_rows"] = (
+                (table_sql and truncated and _true_row_count(table_sql)) or len(df)
+            )
 
     # Surface the SQL the agent actually ran (for the UI's "View SQL" trust
     # feature). Joined when several queries were run to build the answer.
