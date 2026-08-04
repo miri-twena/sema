@@ -17,7 +17,23 @@ export function detectBrowserLang(navigatorLanguage: string | undefined): Lang {
 }
 
 interface LoginCopy {
+  /** Dead since the split-panel redesign (login_redesign_prompt.md): the
+   * single "AI Business Advisor" phrase now lives once, in BrandPanel's
+   * tagline, not duplicated under the form. Kept in the dictionary (like
+   * LOGIN_COPY.he) so nothing has to re-add it if a future screen needs it. */
   headline: string;
+  /** Brand panel tagline under the mark, uppercase (matches Logo's own
+   * "AI BUSINESS ADVISOR" tagline convention -- not re-typed as a literal
+   * string in BrandPanel.tsx so the two never drift). */
+  brandTagline: string;
+  /** Brand panel value line -- approved copy, exact wording. */
+  brandValueLine: string;
+  chipPlainLanguage: string;
+  chipLiveData: string;
+  /** Form panel heading (EmailStep) -- replaces the old duplicate "AI
+   * Business Advisor" line now that identity lives in the brand panel. */
+  welcomeTitle: string;
+  welcomeSubtitle: string;
   emailLabel: string;
   emailPlaceholder: string;
   continueButton: string;
@@ -44,6 +60,15 @@ interface LoginCopy {
 export const LOGIN_COPY: Record<Lang, LoginCopy> = {
   en: {
     headline: "AI Business Advisor",
+    // Literal uppercase (matches Logo.tsx's own tagline convention: a real
+    // uppercase string, not text-transform, so a copy/paste of the DOM text
+    // is already correct).
+    brandTagline: "AI BUSINESS ADVISOR",
+    brandValueLine: "Plain questions. Answers from your data.",
+    chipPlainLanguage: "Plain language",
+    chipLiveData: "Live data",
+    welcomeTitle: "Welcome back",
+    welcomeSubtitle: "Sign in with your work email.",
     emailLabel: "Email",
     emailPlaceholder: "you@company.com",
     continueButton: "Continue",
@@ -82,6 +107,12 @@ export const LOGIN_COPY: Record<Lang, LoginCopy> = {
     // English, always"), kept here so the dictionary stays the single
     // source of truth if per-org login language is ever reinstated.
     headline: "AI Business Advisor",
+    brandTagline: "AI BUSINESS ADVISOR",
+    brandValueLine: "שאלות פשוטות. תשובות מהנתונים שלך.",
+    chipPlainLanguage: "שפה פשוטה",
+    chipLiveData: "נתונים חיים",
+    welcomeTitle: "ברוכים השבים",
+    welcomeSubtitle: "התחברו עם כתובת האימייל של העבודה שלכם.",
     emailLabel: "אימייל",
     emailPlaceholder: "you@company.com",
     continueButton: "המשך",

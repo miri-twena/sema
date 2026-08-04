@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { api, resolveApiUrl } from "../../lib/api";
 import { dirFor, LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import { useLoginFlow } from "../../hooks/useLoginFlow";
+import { BrandPanel } from "./BrandPanel";
 import { EmailStep } from "./EmailStep";
 import { CodeStep } from "./CodeStep";
 import { ErrorScreen } from "./ErrorScreen";
@@ -64,29 +65,13 @@ export function LoginPage() {
     return () => window.clearTimeout(id);
   }, [state.step]);
 
-  return (
-    <div dir={dir} className="min-h-screen flex items-center justify-center bg-bg px-6 py-12">
-      {state.step === "email" && (
-        <EmailStep
-          lang={lang}
-          submitting={state.emailSubmitting}
-          orgContext={orgContext}
-          onSubmit={submitEmail}
-          troubleHref={troubleHref}
-        />
-      )}
-
-      {state.step === "code" && (
-        <CodeStep
-          lang={lang}
-          state={state}
-          onCodeChange={setCode}
-          onResend={resend}
-          onChangeEmail={changeEmail}
-        />
-      )}
-
-      {state.step === "error" && state.errorKind && (
+  // ErrorScreen is deliberately NOT part of the split shell (login_redesign_
+  // prompt.md §1) -- it keeps the plain centered layout, just with the
+  // horizontal (not stacked) Logo so it still matches the new brand
+  // direction.
+  if (state.step === "error" && state.errorKind) {
+    return (
+      <div dir={dir} className="min-h-screen flex items-center justify-center bg-bg px-6 py-12">
         <ErrorScreen
           lang={lang}
           kind={state.errorKind}
@@ -94,14 +79,55 @@ export function LoginPage() {
           onRetry={changeEmail}
           onChangeEmail={changeEmail}
         />
-      )}
+        {import.meta.env.DEV && (
+          <DevStatePanel onForce={forcePreset} onReset={() => dispatch({ type: "RESET" })} />
+        )}
+      </div>
+    );
+  }
 
-      {state.step === "redirecting" && (
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 size={22} className="animate-spin text-primary" />
-          <p className="text-sm text-muted">{t.redirecting}</p>
+  return (
+    <div dir={dir} className="min-h-screen flex items-center justify-center bg-bg p-6">
+      {/* The split CARD (login_redesign_prompt.md's amended §1): a contained
+          card centered on the regular product background, NOT a full-
+          viewport split -- narrower on mobile (where it also switches to a
+          column: brand strip on top, form below), capped at 860px wide and
+          520px tall (content may grow it further) on desktop. */}
+      <div
+        className="w-[min(92vw,420px)] md:w-[min(92vw,860px)] md:min-h-[520px] flex flex-col md:flex-row rounded-loginCard border border-line shadow-loginCard overflow-hidden"
+      >
+        <BrandPanel />
+        <div className="flex-1 flex items-center justify-center bg-surface px-6 py-10">
+          <div className="w-full" style={{ maxWidth: "min(84%, 300px)" }}>
+            {state.step === "email" && (
+              <EmailStep
+                lang={lang}
+                submitting={state.emailSubmitting}
+                orgContext={orgContext}
+                onSubmit={submitEmail}
+                troubleHref={troubleHref}
+              />
+            )}
+
+            {state.step === "code" && (
+              <CodeStep
+                lang={lang}
+                state={state}
+                onCodeChange={setCode}
+                onResend={resend}
+                onChangeEmail={changeEmail}
+              />
+            )}
+
+            {state.step === "redirecting" && (
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 size={22} className="animate-spin text-primary" />
+                <p className="text-sm text-muted">{t.redirecting}</p>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       {import.meta.env.DEV && (
         <DevStatePanel onForce={forcePreset} onReset={() => dispatch({ type: "RESET" })} />

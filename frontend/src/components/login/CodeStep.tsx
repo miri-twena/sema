@@ -1,7 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import type { LoginState } from "../../hooks/useLoginFlow";
-import { Logo } from "../brand/Logo";
 
 export function CodeStep({
   lang,
@@ -22,12 +21,11 @@ export function CodeStep({
   const hasError = state.codeError !== null;
 
   return (
-    <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
-      <div className="flex flex-col items-center mb-[26px]">
-        <Logo size={64} stacked tagline />
-        <p className="text-[13.5px] text-muted mt-2" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
+    <div className="w-full">
+      <div className="mb-7">
+        <h1 className="text-[17px] font-semibold text-ink" dir="ltr" style={{ unicodeBidi: "plaintext" }}>
           {t.codeSentTo(state.email)}
-        </p>
+        </h1>
       </div>
 
       <label htmlFor="login-code" className="block text-[12.5px] font-medium text-ink mb-[5px]">

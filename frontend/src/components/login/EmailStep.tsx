@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import { Loader2, Mail } from "lucide-react";
 import { LOGIN_COPY, type Lang } from "../../lib/loginCopy";
 import { SSOButton } from "./SSOButton";
-import { Logo } from "../brand/Logo";
 
 export function EmailStep({
   lang,
@@ -28,9 +27,9 @@ export function EmailStep({
   };
 
   return (
-    <div className="w-full max-w-sm rounded-loginCard border border-line bg-surface px-8 pt-[34px] pb-7 shadow-loginCard">
+    <div className="w-full">
       {orgContext && (
-        <div className="flex flex-col items-center mb-6">
+        <div className="flex flex-col items-start mb-6">
           {orgContext.logoUrl ? (
             <img src={orgContext.logoUrl} alt={orgContext.name} className="h-10 w-auto mb-2 object-contain" />
           ) : null}
@@ -38,9 +37,9 @@ export function EmailStep({
         </div>
       )}
 
-      <div className="flex flex-col items-center mb-7">
-        <Logo size={64} stacked tagline />
-        <p className="text-[13.5px] text-muted mt-2">{t.headline}</p>
+      <div className="mb-7">
+        <h1 className="text-[17px] font-semibold text-ink">{t.welcomeTitle}</h1>
+        <p className="text-[12.5px] text-muted mt-1">{t.welcomeSubtitle}</p>
       </div>
 
       <form onSubmit={handleSubmit} noValidate>
