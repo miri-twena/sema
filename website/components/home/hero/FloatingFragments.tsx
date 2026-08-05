@@ -6,7 +6,7 @@ export default function FloatingFragments() {
         viewBox="0 0 219 185"
         width="150"
         height="127"
-        className="absolute -left-6 top-8 opacity-[.08]"
+        className="absolute -start-6 top-8 opacity-[.08]"
         style={{ animation: 'float-slow-a 8s ease-in-out infinite' }}
       >
         <polygon points="67.0,4.0 104.0,7.0 72.0,35.0" fill="#6C74F0" />
@@ -18,7 +18,7 @@ export default function FloatingFragments() {
         viewBox="0 0 219 185"
         width="120"
         height="101"
-        className="absolute -right-8 bottom-4 opacity-[.07]"
+        className="absolute -end-8 bottom-4 opacity-[.07]"
         style={{ animation: 'float-slow-b 9s ease-in-out infinite' }}
       >
         <polygon points="26.0,106.0 69.0,49.0 75.0,54.0 98.0,110.0 26.0,110.0" fill="#4E56D6" />
