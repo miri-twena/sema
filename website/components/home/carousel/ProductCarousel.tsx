@@ -229,21 +229,29 @@ export default function ProductCarousel({ slides, locale }: { slides: Slide[]; l
 
       <p className="m-0 text-center text-[14.5px] font-semibold text-text">{slides[active]?.caption}</p>
 
-      <div className="flex justify-center gap-2">
+      <div className="flex justify-center">
         {slides.map((slide, i) => (
+          // The visible dot stays 8px (22px active) to match the design, but a
+          // Lighthouse a11y pass flagged the *hit target* at that same 8x8px --
+          // below the 24x24px minimum. The button itself is now a 24x24px
+          // touch target with the small dot centered inside as a child span.
           <button
             key={slide.src}
             type="button"
             aria-label={`Go to screenshot ${i + 1}`}
             aria-current={i === active}
             onClick={() => scrollToIndex(i)}
-            className="rounded-full transition-all"
-            style={{
-              width: i === active ? 22 : 8,
-              height: 8,
-              background: i === active ? '#6C74F0' : '#E7E8EF',
-            }}
-          />
+            className="flex h-6 w-6 flex-none items-center justify-center"
+          >
+            <span
+              className="block rounded-full transition-all"
+              style={{
+                width: i === active ? 22 : 8,
+                height: 8,
+                background: i === active ? '#6C74F0' : '#E7E8EF',
+              }}
+            />
+          </button>
         ))}
       </div>
     </div>
