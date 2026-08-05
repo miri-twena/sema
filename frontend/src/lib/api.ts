@@ -5,13 +5,27 @@ import type { ProgressEvent } from "./progress";
 import type { AnalysisStep } from "./evidence";
 import { revokeAccess, withAccessKeyHeader } from "./pilotAccess";
 
-// Falls back to localhost:8000 only when VITE_API_URL is truly UNSET (bare
-// `npm run dev` outside docker-compose, which always sets it explicitly) --
-// checked via `!== undefined` rather than truthiness so a deliberately EMPTY
-// value (the production single-service build, where the API serves the
-// built frontend from its own origin) is honored as "same-origin, call
-// relative paths" instead of being coerced back to the dev default.
-const BASE = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : "http://localhost:8000";
+// Three cases, in order:
+//   1. VITE_API_URL explicitly set (checked via `!== undefined` rather than
+//      truthiness, so a deliberately EMPTY string is also honored here,
+//      not coerced past this branch) -- use it verbatim.
+//   2. Unset AND this is a production build (`import.meta.env.PROD`, which
+//      Vite statically inlines at build time -- api/Dockerfile.prod's
+//      `npm run build` leaves VITE_API_URL unset on purpose) -- "" for
+//      same-origin relative paths, since the prod image serves the built
+//      frontend from the SAME FastAPI origin (api/main.py's SPA catch-all).
+//      A previous version of this fallback went to case 3 here instead,
+//      which meant a production bundle would try to call an API at
+//      localhost:8000 -- unreachable outside the machine that built it.
+//   3. Unset AND not a production build (bare `npm run dev` outside
+//      docker-compose, which always sets VITE_API_URL explicitly) --
+//      localhost:8000, the standalone-uvicorn dev default.
+const BASE =
+  import.meta.env.VITE_API_URL !== undefined
+    ? import.meta.env.VITE_API_URL
+    : import.meta.env.PROD
+      ? ""
+      : "http://localhost:8000";
 
 /** A server-relative path (e.g. PublicOrgSettings.logo_path, "/api/admin/
  * org-settings/logo/ecommerce") -> a fully-qualified URL an <img> tag can
