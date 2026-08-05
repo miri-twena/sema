@@ -1,6 +1,27 @@
 -- ============================================================================
 -- SEMA: Postgres init script (runs once, on a FRESH volume).
 -- ============================================================================
+-- LOCAL DEVELOPMENT / DOCKER COMPOSE ONLY -- this is NOT the Render/
+-- production workflow and must never be run against a Render (or any other
+-- managed/production) database. It only ever executes automatically via the
+-- official postgres image's own /docker-entrypoint-initdb.d mechanism
+-- (docker-compose.yml, and docker-compose.prod.yml's LOCAL smoke-test
+-- Postgres both mount sql/init here) -- a Render-managed Postgres instance
+-- does not run init scripts at all, so this file simply never reaches it.
+-- It hardcodes the role's password ('sema_readonly_pw') ON PURPOSE: that's
+-- the well-known LOCAL dev default (.env.example's own POSTGRES_READONLY_
+-- PASSWORD), the exact value sema_core/settings.py's validate_for_
+-- production() refuses to let the app boot with in production, which is
+-- precisely why it must stay confined to this local-only file.
+--
+-- For Render (or any other real deployment), use sql/create_readonly_role.sql
+-- instead (docs/deployment.md's Render section has the full walkthrough) --
+-- it creates the SAME role and grants but with NO password baked in,
+-- deliberately, set interactively via `\password sema_readonly` so it can
+-- match whatever random value Render generated for POSTGRES_READONLY_
+-- PASSWORD, instead of every deployment sharing this one dev-only secret.
+-- ============================================================================
+--
 -- The official postgres image runs every file in /docker-entrypoint-initdb.d
 -- exactly once, the first time the data volume is created, connected to the
 -- default POSTGRES_DB (sema_db) as POSTGRES_USER. We use it to:

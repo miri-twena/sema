@@ -18,6 +18,16 @@ Requires:
   - PostgreSQL running and reachable (see docker-compose.yml)
   - .env file with connection settings (copy .env.example -> .env)
   - data/output/*.csv already generated (run data/generate_data.py first)
+
+Note on the read-only agent role: unlike data/insurance/load_data.py, this
+loader does NOT re-grant sema_readonly SELECT access after (re)creating
+tables -- it relies entirely on sql/create_readonly_role.sql's ALTER
+DEFAULT PRIVILEGES (set once, by the same admin role that both scripts
+connect as) to cover tables this loader's schema.sql drops and recreates.
+In a real deployment (docs/deployment.md's Render section), re-run
+sql/create_readonly_role.sql against this database after loading anyway --
+it's idempotent and is the documented, verified way to confirm access
+rather than relying solely on default-privilege inheritance.
 """
 
 from __future__ import annotations

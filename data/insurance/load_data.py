@@ -92,7 +92,12 @@ def fix_sequence(conn, table_name: str, id_column: str) -> None:
 
 
 def grant_readonly(conn) -> None:
-    """Grant the agent's read-only role SELECT on the freshly created tables."""
+    """Grant the agent's read-only role SELECT on the freshly created tables.
+
+    Assumes the role ALREADY EXISTS (sql/create_readonly_role.sql) -- GRANT
+    to a role that doesn't exist yet fails immediately, so in a real
+    deployment (docs/deployment.md's Render section) the role/grant script
+    must run against insurance_db BEFORE this loader does, not after."""
     role = os.environ.get("POSTGRES_READONLY_USER", "sema_readonly")
     with conn.cursor() as cur:
         cur.execute(f"GRANT USAGE ON SCHEMA public TO {role}")

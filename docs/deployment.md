@@ -233,124 +233,283 @@ what gets resolved:
 
 | `render.yaml` env var | Render connection field | Notes |
 |---|---|---|
-| `POSTGRES_HOST` | Internal hostname (`fromDatabase: host`) | Resolves only from services in the same Render private network — never publicly routable, which is exactly what you want (§9.8). |
+| `POSTGRES_HOST` | Internal hostname (`fromDatabase: host`) | Resolves only from services in the same Render private network — never publicly routable, which is exactly what you want (§9.7). |
 | `POSTGRES_PORT` | `fromDatabase: port` | Always `5432` for Render Postgres. |
 | `POSTGRES_USER` | `fromDatabase: user` | Render's own admin user — **do not** also use this as `POSTGRES_READONLY_USER` (§9.4). |
 | `POSTGRES_PASSWORD` | `fromDatabase: password` | |
 | `POSTGRES_DB` | `fromDatabase: database` | `sema_db` — the `ecommerce` client's database (`config/clients.yaml`'s `db_env: POSTGRES_DB`). |
 
-### 9.3 The `insurance` tenant's database (manual — not in the Blueprint)
+### 9.3 Obtain the Render External Database URL without exposing it
 
-Render provisions exactly one database per Postgres instance; the Blueprint
-schema has no field to declare a second one. `config/clients.yaml` has two
-clients (`ecommerce` → `POSTGRES_DB`, `insurance` → `POSTGRES_DB_INSURANCE`)
-sharing one instance in dev via separate database names — reproduce that
-here manually rather than silently pointing `insurance` at the same
-database as `ecommerce` (that would break tenant isolation, AGENTS.md's
-"never silently fall back to another tenant's data") or dropping the
-`insurance` client from this deployment silently.
+Several steps below (§9.4–§9.6) need `psql` connected as `sema-pilot-db`'s
+admin user from your own machine — Render only offers this via the
+**External Connection String** (`sema-pilot-db` → **Connect** tab), which
+embeds the admin password. Handle it so it never lands in git, chat, a
+screenshot, shell history, or a log:
 
-From the Render dashboard, open `sema-pilot-db`'s **Connect** tab, copy the
-**External Connection String** (temporarily — see §9.8 for locking this
-back down afterward), then:
-
-```bash
-psql "<external connection string>" -c "CREATE DATABASE insurance_db;"
+```powershell
+$env:SEMA_TMP_DB_URL = Read-Host "Paste the Render External Connection String"
 ```
 
-Set `POSTGRES_DB_INSURANCE=insurance_db` in the web service's environment
-(dashboard → Environment, since this var is `sync: false` in the
-Blueprint). **For this internal pilot**, leave the `insurance` client's data
-unloaded unless you specifically need it — the ecommerce client is the
-pilot's actual subject (§9.6). The `insurance` database existing empty is
-fine; SEMA only fails a request for it (404) if the client isn't in
-`config/clients.yaml` at all, not if its tables are empty.
+`Read-Host` reads your pasted answer as interactive input, not as a
+command-line argument — it is never written to PowerShell's command
+history (only literal commands you type are). Use `$env:SEMA_TMP_DB_URL`
+in every command below instead of pasting the connection string itself
+each time, and remove it the moment you're done (§9.7 has the exact
+cleanup command) — never leave it sitting in an open terminal's
+environment longer than the setup steps that need it.
 
-### 9.4 Create the dedicated read-only role
+### 9.4 Provision `insurance_db` and the shared `sema_readonly` role
 
 **Never set `POSTGRES_READONLY_USER` to Render's own admin user** (§9.2's
 `POSTGRES_USER`) — `sema_core`'s SQL-safety layer (`sema_core/agent/safety.py`)
 trusts this role to be PHYSICALLY unable to write, not just told not to;
 reusing the admin user silently turns every "read-only" guardrail into
-nothing. Using the same external connection string as §9.3:
+nothing. `sema_readonly` is cluster-wide (one role, not one per database) —
+create it once, then apply its grants to each tenant database separately,
+since Postgres privileges are always scoped per-database.
 
-```bash
-psql "<external connection string>" -f sql/create_readonly_role.sql
+Open ONE interactive `psql` session for this whole section (using §9.3's
+temporary variable):
+
+```powershell
+psql $env:SEMA_TMP_DB_URL
 ```
 
-Read that script before running it — it creates a role scoped to
-`SELECT`-only on the relevant schema(s). Then run it again against
-`insurance_db` too, once that database exists (§9.3), if you plan to load
-insurance data. Set `POSTGRES_READONLY_USER` / `POSTGRES_READONLY_PASSWORD`
-in the web service's environment to whatever the script created (`sync:
-false` in the Blueprint, same as above).
+Then, at the `psql` prompt:
 
-### 9.5 Set `POSTGRES_READONLY_USER` / `POSTGRES_READONLY_PASSWORD`
+```sql
+-- Both tenants live on THIS SAME Render Postgres instance (one paid
+-- service, not two) as separate databases -- never point `insurance` at
+-- `ecommerce`'s own database, and never skip creating this one silently.
+CREATE DATABASE insurance_db;
 
-Covered in §9.4 above — listed separately here only because the original
-checklist calls it out as its own step. Dashboard → Environment on
-`sema-pilot`, not `.env` (never committed).
+-- sema_db: create the role (idempotent, no password yet -- see the file's
+-- own comments) and apply its CONNECT/USAGE/SELECT/default-SELECT grants.
+\c sema_db
+\i sql/create_readonly_role.sql
 
-### 9.6 Load the ecommerce pilot dataset
+-- Set the role's password interactively -- NOT a command-line argument, so
+-- it never appears in shell history or a process listing. Enter the EXACT
+-- value already stored (or that you're about to store) as Render's
+-- POSTGRES_READONLY_PASSWORD env var, so the database role and the app's
+-- configured credential match.
+\password sema_readonly
 
-Run the existing loader against the external connection string (§9.3),
-temporarily, from your machine — never commit credentials, never paste them
-into chat:
+-- insurance_db: same script, same idempotent role (a no-op there since it
+-- already exists), but its CONNECT/USAGE/SELECT grants are database-scoped
+-- and so must be applied again, connected HERE.
+\c insurance_db
+\i sql/create_readonly_role.sql
 
-```bash
-POSTGRES_HOST=<external host> POSTGRES_PORT=5432 \
-POSTGRES_USER=<admin user> POSTGRES_PASSWORD=<admin password> \
-POSTGRES_DB=sema_db \
+\q
+```
+
+Set `POSTGRES_READONLY_USER=sema_readonly` and `POSTGRES_READONLY_PASSWORD`
+(the exact value you just typed at `\password`) in the web service's
+environment (dashboard → Environment, both `sync: false` in the Blueprint).
+Also set `POSTGRES_DB_INSURANCE=insurance_db` now — §9.6 covers this in
+more detail, but there's no reason to make a second dashboard trip later.
+
+### 9.5 Load both tenants' data, then reapply the read-only grants
+
+From your own machine, temporarily, using process-scoped environment
+variables (never a `.env` file pointed at Render, and never commit these
+values) — `Read-Host` again for the password, same reasoning as §9.3:
+
+```powershell
+$env:POSTGRES_HOST = "<external host from the Connect tab>"
+$env:POSTGRES_PORT = "5432"
+$env:POSTGRES_USER = "<admin user from the Connect tab>"
+$env:POSTGRES_PASSWORD = Read-Host "Render admin password"
+
+$env:POSTGRES_DB = "sema_db"
 .venv\Scripts\python.exe data\load_data.py
+
+.venv\Scripts\python.exe data\insurance\load_data.py
+
+Remove-Item Env:\POSTGRES_HOST, Env:\POSTGRES_PORT, Env:\POSTGRES_USER, Env:\POSTGRES_PASSWORD, Env:\POSTGRES_DB
 ```
 
-This applies `sql/schema.sql` and bulk-loads the deterministic dataset
-(`data/README.md`) — same script, same data, as local dev. Lock external
-access back down immediately after (§9.8).
+(`data/insurance/load_data.py` reads `POSTGRES_DB_INSURANCE`, defaulting to
+`insurance_db` — already correct, no override needed. It also re-grants
+`sema_readonly` SELECT on its own tables automatically at the end; `data/
+load_data.py` does not — see that file's own comment on why.)
 
-### 9.7 The `insurance` client during this pilot
+Both loaders **drop and recreate their tables** (`sql/schema.sql` /
+`sql/insurance/schema.sql`), which can leave `sema_readonly`'s explicit
+`GRANT SELECT ON ALL TABLES` behind a table that no longer exists under
+that grant. Reapply/verify it for both, uniformly, rather than trusting
+`ALTER DEFAULT PRIVILEGES` alone or remembering which loader already did it:
 
-Documented explicitly rather than left implicit: this pilot's Blueprint
-provisions the `insurance` database (§9.3) but does **not** load data into
-it or run its read-only role setup by default. If a reviewer switches the
-client selector to "Auto Insurance" during the pilot, they'll see an empty
-(but tenant-safe — never ecommerce's data) database. Load it the same way
-as §9.4/§9.6, pointed at `insurance_db`, if the pilot specifically needs it
-demoed; otherwise this is a known, intentional limitation, not a bug.
+```powershell
+psql $env:SEMA_TMP_DB_URL -d sema_db -f sql/create_readonly_role.sql
+psql $env:SEMA_TMP_DB_URL -d insurance_db -f sql/create_readonly_role.sql
+```
 
-### 9.8 Restrict external database access after setup
+(The script is idempotent — re-running it after the role already exists
+and already has a password just reapplies the grants; it does not touch
+or clear the password `\password` set in §9.4.)
 
-§9.3/§9.4/§9.6 above use Postgres's temporary external connection string.
-Once done: Render dashboard → `sema-pilot-db` → **Access Control**, remove
-any external IP allow-list entries you added (or, if you never added one
+**Verify now, while external access is still open** (§9.7 restricts it
+right after) — this is the point in the workflow where every guarantee
+this whole section exists for can actually be checked against real data.
+
+Database-level isolation first (proves the two tenants are genuinely
+separate databases, not just separately-labeled tables), admin connection:
+
+```sql
+\c sema_db
+\dt
+-- expect: customers, marketing_campaigns, orders, order_items, products, website_sessions
+SELECT count(*) FROM orders;             -- non-zero
+SELECT * FROM policies LIMIT 1;          -- EXPECTED TO ERROR: relation "policies" does not exist
+
+\c insurance_db
+\dt
+-- expect: agents, claims, drivers, policies, policyholders, premium_payments, products, vehicles
+SELECT count(*) FROM policies;           -- non-zero
+SELECT count(*) FROM claims;             -- non-zero
+SELECT * FROM orders LIMIT 1;            -- EXPECTED TO ERROR: relation "orders" does not exist
+```
+
+The last query in each block isn't optional cleverness — it's the actual
+proof that the ecommerce connection cannot see insurance's tables and vice
+versa: in Postgres, a connection to one database simply has no visibility
+into another database's objects at all, so this always fails, by
+construction, for any two separate databases (not something SEMA's own
+code enforces — the isolation is structural).
+
+Then `sema_readonly`'s privileges, connecting AS that role (same temporary
+connection string, different role):
+
+```powershell
+psql $env:SEMA_TMP_DB_URL -U sema_readonly -d sema_db -W
+```
+
+(`-U`/`-d` override the connection string's admin username/database;
+`-W` forces psql to prompt fresh rather than reuse the URI's embedded
+ADMIN password, which belongs to a different role and would fail here.)
+
+```sql
+SELECT count(*) FROM orders;             -- succeeds
+INSERT INTO orders DEFAULT VALUES;       -- EXPECTED TO ERROR: permission denied for table orders
+UPDATE orders SET order_id = order_id;   -- EXPECTED TO ERROR: permission denied
+DELETE FROM orders;                      -- EXPECTED TO ERROR: permission denied
+TRUNCATE orders;                         -- EXPECTED TO ERROR: permission denied
+DROP TABLE orders;                       -- EXPECTED TO ERROR: must be owner of table orders
+```
+
+Repeat against `insurance_db` (`psql $env:SEMA_TMP_DB_URL -U sema_readonly
+-d insurance_db -W`, same five statements against `policies` or `claims`)
+— every one of them must fail the same way. If any of them SUCCEEDS, stop:
+something upstream (a stray `GRANT` run by hand, or the wrong role
+connected) has broken the read-only guarantee, and it must be fixed
+(re-run the `\i sql/create_readonly_role.sql` commands above, which REVOKE
+write privileges unconditionally) before this pilot goes live — do not
+proceed to §9.6/§9.7 with a failing check here.
+
+**Caveat:** running these loaders from your own machine also runs their
+`seed_org_users()` / SQLite-touching side effects against **your local**
+`var/sema_state.db` (`SEMA_CONVERSATION_DB`), not Render's persisted disk —
+they only load Postgres data remotely. That's expected; the app's own
+demo-user seeding on Render is a separate, already-solved concern
+(`sema_core.org_user_store`), not something this dataset load needs to
+repeat.
+
+### 9.6 Set `POSTGRES_DB_INSURANCE` and finish this tenant's configuration
+
+If you didn't already in §9.4: `POSTGRES_DB_INSURANCE=insurance_db` in the
+`sema-pilot` web service's environment (`sync: false` in the Blueprint) —
+this is what `config/clients.yaml`'s `insurance` client (`db_env:
+POSTGRES_DB_INSURANCE`) resolves to reach its own database, kept
+completely separate from `ecommerce`'s `POSTGRES_DB=sema_db`. Confirm both
+are set: `POSTGRES_DB=sema_db` and `POSTGRES_DB_INSURANCE=insurance_db` —
+**never** the same value for both, which would silently collapse the two
+tenants onto one database (AGENTS.md: "never silently fall back to another
+tenant's data").
+
+Both tenants are now fully provisioned and loaded for this pilot — unlike
+an earlier draft of this doc, `insurance` is not a "loaded on request"
+afterthought; §9.5 loads it every time §9.5 runs.
+
+### 9.7 Restrict external database access again
+
+§9.3–§9.5 above used Postgres's temporary **external** connection string.
+Once done:
+
+```powershell
+Remove-Item Env:\SEMA_TMP_DB_URL
+```
+
+Then Render dashboard → `sema-pilot-db` → **Access Control**, remove any
+external IP allow-list entries you added (or, if you never added one
 beyond Render's default, confirm none exist). `sema-pilot`'s own connection
 keeps working — it uses the **internal** hostname (§9.2), which is only
 reachable from services in the same Render private network and is
 unaffected by the external allow-list.
 
-### 9.9 Configure the Render environment variables
+### 9.8 Restart or redeploy the Web Service
 
-Every `sync: false` var in `render.yaml` (§9.2–§9.5 above, plus §9.10–§9.13
-below) is set from the `sema-pilot` service's dashboard → **Environment**
-tab, never by editing `render.yaml` with real values (that file is
-committed to git).
+The env vars set in §9.4/§9.6 (`POSTGRES_READONLY_USER`,
+`POSTGRES_READONLY_PASSWORD`, `POSTGRES_DB_INSURANCE`) trigger an automatic
+redeploy the moment you save them in the dashboard — if you set all three
+before this point, there's nothing further to do here. Otherwise: dashboard
+→ `sema-pilot` → **Manual Deploy → Deploy latest commit** (or **Restart**
+if only env vars changed, no new commit). Wait for the deploy to report
+healthy (`/healthz`, §6) before moving to §9.9.
 
-### 9.10 Generate `SEMA_API_KEY`
+### 9.9 Verify each tenant independently through SEMA
+
+The database-level checks already ran in §9.5, while external access was
+still open — this step is the application-level counterpart, through the
+now-redeployed app itself, confirming `client_id` switching can't fall back
+from one tenant to the other (enforced in code, `api/main.py`'s
+`_resolve_client`, not just by the database being physically separate):
+
+1. Open the deployed app, switch the client selector between "E-Commerce"
+   and "Auto Insurance", and confirm each shows ITS OWN data (revenue/
+   orders for ecommerce, policies/claims for insurance) — never the other
+   tenant's numbers, never a blank/error state for either.
+2. `curl https://<your-domain>/api/clients -H "X-API-Key: <your key>"` →
+   confirm both `ecommerce` and `insurance` are listed.
+3. `curl` gets awkward with a JSON body once PowerShell's own quoting rules
+   are in play — `Invoke-RestMethod` (PowerShell-native) avoids that:
+   ```powershell
+   try {
+       Invoke-RestMethod -Method Post -Uri "https://<your-domain>/api/client" `
+         -Headers @{ "X-API-Key" = "<your key>" } `
+         -ContentType "application/json" `
+         -Body '{"client_id":"not-a-real-client"}'
+   } catch {
+       $_.Exception.Response.StatusCode.value__   # expect: 404
+   }
+   ```
+   Never a silent fallback to either real tenant's data.
+
+### 9.10 Configure the Render environment variables
+
+Every `sync: false` var in `render.yaml` (§9.4/§9.6 above, plus
+§9.11–§9.13 below) is set from the `sema-pilot` service's dashboard →
+**Environment** tab, never by editing `render.yaml` with real values (that
+file is committed to git).
+
+### 9.11 Generate `SEMA_API_KEY`
 
 Any high-entropy random string — this is the internal-pilot access-gate
 value (§0), not a cryptographic key with a required format:
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+```powershell
+.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-### 9.11 Generate and validate `SEMA_SECRETS_KEY`
+### 9.12 Generate and validate `SEMA_SECRETS_KEY`
 
 Must be a valid Fernet key specifically (`sema_core/settings.py`'s
 `validate_for_production` checks this and refuses to boot otherwise):
 
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```powershell
+.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 **Render's own "Generate" button on a text env var field does not know this
@@ -362,7 +521,7 @@ this specific variable.
 Never paste either generated value into chat, an issue, or a commit — enter
 them directly in the Render dashboard's Environment tab.
 
-### 9.12 Set `SEMA_PUBLIC_URL`
+### 9.13 Set `SEMA_PUBLIC_URL`
 
 Unknown until the first deploy assigns your `*.onrender.com` URL (this is
 why it's `sync: false` rather than guessed at in `render.yaml`). After the
@@ -371,7 +530,7 @@ that exact URL (no trailing slash) → the resulting env change triggers a
 redeploy automatically. Until this is set, CORS will reject the frontend's
 own requests (§5).
 
-### 9.13 Verify disk persistence
+### 9.14 Verify disk persistence
 
 After the app is up with real data in it (a conversation, an uploaded
 logo, a published semantic-model edit):
@@ -384,7 +543,7 @@ logo, a published semantic-model edit):
    real, not just the "first boot seeds it" path a restart alone doesn't
    touch.
 
-### 9.14 Rotate the internal access key
+### 9.15 Rotate the internal access key
 
 Dashboard → Environment → change `SEMA_API_KEY` → save (triggers a
 redeploy). Every existing browser tab's stored key (`sessionStorage`) stops
@@ -395,7 +554,7 @@ separate client-side rotation step needed. Share the new key with the pilot
 group through whatever channel you'd share any short-lived secret (not
 email in plaintext if you can avoid it).
 
-### 9.15 The explicit upgrade gate before an external pilot
+### 9.16 The explicit upgrade gate before an external pilot
 
 Everything in this document — including the access-key gate — targets an
 **internal, trusted-group** pilot. Before inviting real external customers,
