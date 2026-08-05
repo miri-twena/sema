@@ -4,9 +4,12 @@ import ProactiveFeed from './ProactiveFeed';
 export default function Proactive({ locale }: { locale: Locale }) {
   const t = getDictionary(locale);
   const alerts = [
-    { bar: '#F2887C', tagBg: '#FDEBE8', tagFg: '#C05A4E', tag: t.a1Tag, time: t.a1Time, text: t.a1Text },
+    // tagFg values are darkened from the original coral/gold (#C05A4E, #B48A0A):
+    // both failed WCAG AA (3.8:1, 2.9:1) against their pastel tagBg pill at this
+    // 10.5px bold size. #B44C40/#896908 clear 4.5:1 while keeping the same hue.
+    { bar: '#F2887C', tagBg: '#FDEBE8', tagFg: '#B44C40', tag: t.a1Tag, time: t.a1Time, text: t.a1Text },
     { bar: '#6C74F0', tagBg: '#EEEFFE', tagFg: '#4E56D6', tag: t.a2Tag, time: t.a2Time, text: t.a2Text },
-    { bar: '#F2C94C', tagBg: '#FBF3D9', tagFg: '#B48A0A', tag: t.a3Tag, time: t.a3Time, text: t.a3Text },
+    { bar: '#F2C94C', tagBg: '#FBF3D9', tagFg: '#896908', tag: t.a3Tag, time: t.a3Time, text: t.a3Text },
   ];
   return (
     <section id="proactive" data-screen-label="Proactive" className="bg-ink">

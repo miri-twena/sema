@@ -37,7 +37,8 @@ export default function AlertToast({ t }: { t: Dictionary }) {
       }}
       aria-hidden="true"
     >
-      <span className="text-[12.5px] font-bold text-[#C05A4E]">{t.toastTitle}</span>
+      {/* #C05A4E was 4.36:1 here, just under WCAG AA's 4.5:1 for this bold 12.5px text. */}
+      <span className="text-[12.5px] font-bold text-[#B44C40]">{t.toastTitle}</span>
       <span className="text-[11px] text-text-faint">{t.toastCaption}</span>
     </div>
   );

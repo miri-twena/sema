@@ -159,7 +159,8 @@ export default function HeroDemoCard({ t }: { t: Dictionary }) {
                   <div className="px-3.5 py-3">
                     <div className="text-[11px] text-text-faint">{kpi.label}</div>
                     <div className="text-lg font-extrabold text-text">
-                      {kpi.value} <span className="text-xs font-bold text-[#2F8F63]">{kpi.delta}</span>
+                      {/* #2F8F63 was 3.9:1 on white for this bold xs text; #297C56 clears 4.5:1. */}
+                      {kpi.value} <span className="text-xs font-bold text-[#297C56]">{kpi.delta}</span>
                     </div>
                   </div>
                 </div>

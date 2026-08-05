@@ -26,7 +26,10 @@ module.exports = {
         text: {
           DEFAULT: '#15161C',
           muted: '#5C6070',
-          faint: '#8A8FA3',
+          // Was #8A8FA3 (2.9:1 on white -- fails WCAG AA for the many small/bold
+          // labels that use it: kickers, timestamps, price notes, the inactive
+          // locale-switcher label). Darkened to clear 4.5:1 on white.
+          faint: '#6E748C',
         },
         border: {
           DEFAULT: '#E7E8EF',

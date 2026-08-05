@@ -1,9 +1,11 @@
 import type { Locale, Quote } from './types';
 
+// YM/NA colors darkened from #2F8F63/#C05A4E: both failed WCAG AA (3.6:1, 3.8:1)
+// as 13px bold initials on their tint background; #297C56/#B44C40 clear 4.5:1.
 const base = [
   { init: 'DK', tint: '#EEEFFE', color: '#4E56D6' },
-  { init: 'YM', tint: '#E4F6EC', color: '#2F8F63' },
-  { init: 'NA', tint: '#FDEBE8', color: '#C05A4E' },
+  { init: 'YM', tint: '#E4F6EC', color: '#297C56' },
+  { init: 'NA', tint: '#FDEBE8', color: '#B44C40' },
 ];
 
 const en = [
