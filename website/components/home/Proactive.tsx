@@ -1,4 +1,5 @@
 import { getDictionary, type Locale } from '@/lib/i18n';
+import ProactiveFeed from './ProactiveFeed';
 
 export default function Proactive({ locale }: { locale: Locale }) {
   const t = getDictionary(locale);
@@ -30,24 +31,8 @@ export default function Proactive({ locale }: { locale: Locale }) {
               <span className="text-[11.5px] text-text-faint">{t.homeSub}</span>
             </div>
           </div>
-          <div className="flex flex-col gap-[11px] bg-tint-bg px-[18px] py-4">
-            {alerts.map((a) => (
-              <div key={a.tag} className="overflow-hidden rounded-xl border border-border-soft bg-white">
-                <div className="h-[3px]" style={{ background: a.bar }} />
-                <div className="flex flex-col gap-1.5 px-[15px] py-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[10.5px] font-bold"
-                      style={{ background: a.tagBg, color: a.tagFg }}
-                    >
-                      {a.tag}
-                    </span>
-                    <span className="ms-auto text-[11px] text-text-faint">{a.time}</span>
-                  </div>
-                  <span className="text-[13.5px] font-semibold leading-[1.5] text-text">{a.text}</span>
-                </div>
-              </div>
-            ))}
+          <div className="bg-tint-bg px-[18px] py-4">
+            <ProactiveFeed alerts={alerts} />
           </div>
         </div>
       </div>

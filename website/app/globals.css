@@ -50,3 +50,102 @@ p {
   text-wrap: pretty;
 }
 
+/* Safety net for every CSS-driven animation/transition on the site (JS-driven
+   loops like the hero typing effect, toast interval, and carousel autoplay
+   check useReducedMotion() themselves and skip scheduling entirely). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes float-slow-a {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes float-slow-b {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(10px);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes grow-bar {
+  from {
+    height: 0;
+  }
+}
+
+@keyframes draw-line {
+  from {
+    stroke-dashoffset: var(--dash-length, 200);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Reveal-from-the-logical-end: used by the Proactive feed's initial stagger.
+   translateX has no logical form, so the sign is flipped explicitly per :dir(). */
+.reveal-end {
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 500ms ease, transform 500ms ease;
+}
+:dir(rtl) .reveal-end {
+  transform: translateX(-24px);
+}
+.reveal-end.is-visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes feed-slide-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes feed-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+

@@ -1,4 +1,5 @@
 import DemoForm from './DemoForm';
+import HeadingUnderline from './HeadingUnderline';
 import { getDictionary, type Locale } from '@/lib/i18n';
 
 export default function BookDemoSection({ locale }: { locale: Locale }) {
@@ -15,6 +16,7 @@ export default function BookDemoSection({ locale }: { locale: Locale }) {
             className="self-start"
           />
           <h2 className="m-0 text-[36px] font-extrabold leading-[1.15] tracking-[-.02em] text-white">{t.ctaTitle}</h2>
+          <HeadingUnderline color="#949CFF" />
           <p className="m-0 max-w-[420px] text-base leading-[1.65] text-[#A9ADC0]">{t.ctaSub}</p>
         </div>
         <DemoForm t={t} />

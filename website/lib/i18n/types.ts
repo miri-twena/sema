@@ -13,6 +13,17 @@ export interface Dictionary {
   demoLabel: string;
   demoQ: string;
   demoTitle: string;
+  demoQ2: string;
+  demoTitle2: string;
+  toastTitle: string;
+  toastCaption: string;
+  carouselKicker: string;
+  carouselTitle: string;
+  capHome: string;
+  capAnswer: string;
+  capBrief: string;
+  capUsers: string;
+  capSemantic: string;
   logosLabel: string;
   featKicker: string;
   featTitle: string;
