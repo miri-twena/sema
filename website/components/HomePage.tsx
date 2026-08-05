@@ -1,5 +1,6 @@
 import Header from './Header';
 import Footer from './Footer';
+import SkipLink from './SkipLink';
 import BookDemoSection from './BookDemoSection';
 import HashScrollOnMount from './HashScrollOnMount';
 import Hero from './home/Hero';
@@ -14,14 +15,17 @@ export default function HomePage({ locale }: { locale: Locale }) {
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <HashScrollOnMount />
+      <SkipLink locale={locale} />
       <Header locale={locale} page="home" />
-      <Hero locale={locale} />
-      <Features locale={locale} />
-      <ProductShowcase locale={locale} />
-      <Proactive locale={locale} />
-      <HowItWorks locale={locale} />
-      <Testimonials locale={locale} />
-      <BookDemoSection locale={locale} />
+      <main id="main-content">
+        <Hero locale={locale} />
+        <Features locale={locale} />
+        <ProductShowcase locale={locale} />
+        <Proactive locale={locale} />
+        <HowItWorks locale={locale} />
+        <Testimonials locale={locale} />
+        <BookDemoSection locale={locale} />
+      </main>
       <Footer locale={locale} />
     </div>
   );

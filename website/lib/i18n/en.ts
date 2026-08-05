@@ -1,6 +1,7 @@
 import type { Dictionary } from './types';
 
 export const en: Dictionary = {
+  skipToContent: 'Skip to content',
   navProduct: 'Product',
   navHow: 'How it works',
   navCustomers: 'Customers',

@@ -1,6 +1,7 @@
 import type { Dictionary } from './types';
 
 export const he: Dictionary = {
+  skipToContent: 'דלגו לתוכן',
   navProduct: 'מוצר',
   navHow: 'איך זה עובד',
   navCustomers: 'לקוחות',

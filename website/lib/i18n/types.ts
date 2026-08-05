@@ -1,6 +1,7 @@
 export type Locale = 'en' | 'he';
 
 export interface Dictionary {
+  skipToContent: string;
   navProduct: string;
   navHow: string;
   navCustomers: string;

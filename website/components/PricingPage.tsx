@@ -1,5 +1,6 @@
 import Header from './Header';
 import Footer from './Footer';
+import SkipLink from './SkipLink';
 import BookDemoSection from './BookDemoSection';
 import { DiamondBulletIcon } from './icons';
 import { getDictionary, getPoints, type Locale } from '@/lib/i18n';
@@ -10,8 +11,10 @@ export default function PricingPage({ locale }: { locale: Locale }) {
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
+      <SkipLink locale={locale} />
       <Header locale={locale} page="pricing" />
 
+      <main id="main-content">
       <section data-screen-label="Pricing" style={{ background: 'linear-gradient(180deg,#F7F8FF 0%,#FFFFFF 60%)' }}>
         <div className="mx-auto flex max-w-container flex-col gap-[52px] px-6 pb-24 pt-[84px]">
           <div className="flex flex-col items-center gap-3 text-center">
@@ -107,6 +110,7 @@ export default function PricingPage({ locale }: { locale: Locale }) {
       </section>
 
       <BookDemoSection locale={locale} />
+      </main>
       <Footer locale={locale} />
     </div>
   );
