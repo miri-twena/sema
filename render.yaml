@@ -118,11 +118,16 @@ services:
         sync: false
       - key: POSTGRES_READONLY_PASSWORD
         sync: false
-      # The `insurance` tenant's database name, once it's created manually
-      # on the same instance (docs/deployment.md) -- until then, leave unset
-      # and see that doc's note on the insurance client during this pilot.
+      # The `insurance` tenant's database name -- not a secret (it's a
+      # plain identifier, not a credential), so unlike POSTGRES_READONLY_*
+      # above this is a fixed value, not `sync: false`. Both tenant
+      # databases are provisioned and loaded on the same Postgres instance
+      # (docs/deployment.md's Render section) -- never the same value as
+      # POSTGRES_DB, which would silently collapse the two tenants onto one
+      # database (AGENTS.md: "never silently fall back to another tenant's
+      # data").
       - key: POSTGRES_DB_INSURANCE
-        sync: false
+        value: insurance_db
 
 databases:
   - name: sema-pilot-db

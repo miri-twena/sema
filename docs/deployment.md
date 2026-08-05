@@ -308,8 +308,8 @@ CREATE DATABASE insurance_db;
 Set `POSTGRES_READONLY_USER=sema_readonly` and `POSTGRES_READONLY_PASSWORD`
 (the exact value you just typed at `\password`) in the web service's
 environment (dashboard → Environment, both `sync: false` in the Blueprint).
-Also set `POSTGRES_DB_INSURANCE=insurance_db` now — §9.6 covers this in
-more detail, but there's no reason to make a second dashboard trip later.
+`POSTGRES_DB_INSURANCE` needs no manual step here — it's a fixed
+(non-secret) value in `render.yaml` itself (§9.6).
 
 ### 9.5 Load both tenants' data, then reapply the read-only grants
 
@@ -417,17 +417,21 @@ demo-user seeding on Render is a separate, already-solved concern
 (`sema_core.org_user_store`), not something this dataset load needs to
 repeat.
 
-### 9.6 Set `POSTGRES_DB_INSURANCE` and finish this tenant's configuration
+### 9.6 `POSTGRES_DB_INSURANCE` is already set — confirm it
 
-If you didn't already in §9.4: `POSTGRES_DB_INSURANCE=insurance_db` in the
-`sema-pilot` web service's environment (`sync: false` in the Blueprint) —
-this is what `config/clients.yaml`'s `insurance` client (`db_env:
-POSTGRES_DB_INSURANCE`) resolves to reach its own database, kept
-completely separate from `ecommerce`'s `POSTGRES_DB=sema_db`. Confirm both
-are set: `POSTGRES_DB=sema_db` and `POSTGRES_DB_INSURANCE=insurance_db` —
-**never** the same value for both, which would silently collapse the two
-tenants onto one database (AGENTS.md: "never silently fall back to another
-tenant's data").
+Unlike `POSTGRES_READONLY_USER`/`POSTGRES_READONLY_PASSWORD`, this one
+needs no dashboard step: `render.yaml` declares
+`POSTGRES_DB_INSURANCE=insurance_db` as a fixed, non-secret value (not
+`sync: false`) — it's a plain database identifier, not a credential, and
+both tenant databases are now provisioned and loaded (§9.4/§9.5), so
+there's nothing left to fill in. This is what `config/clients.yaml`'s
+`insurance` client (`db_env: POSTGRES_DB_INSURANCE`) resolves to reach its
+own database, kept completely separate from `ecommerce`'s
+`POSTGRES_DB=sema_db`. Confirm both are set correctly on the deployed
+service (dashboard → Environment): `POSTGRES_DB=sema_db` and
+`POSTGRES_DB_INSURANCE=insurance_db` — **never** the same value for both,
+which would silently collapse the two tenants onto one database
+(AGENTS.md: "never silently fall back to another tenant's data").
 
 Both tenants are now fully provisioned and loaded for this pilot — unlike
 an earlier draft of this doc, `insurance` is not a "loaded on request"
@@ -451,13 +455,16 @@ unaffected by the external allow-list.
 
 ### 9.8 Restart or redeploy the Web Service
 
-The env vars set in §9.4/§9.6 (`POSTGRES_READONLY_USER`,
-`POSTGRES_READONLY_PASSWORD`, `POSTGRES_DB_INSURANCE`) trigger an automatic
-redeploy the moment you save them in the dashboard — if you set all three
-before this point, there's nothing further to do here. Otherwise: dashboard
-→ `sema-pilot` → **Manual Deploy → Deploy latest commit** (or **Restart**
-if only env vars changed, no new commit). Wait for the deploy to report
-healthy (`/healthz`, §6) before moving to §9.9.
+The dashboard env vars set in §9.4 (`POSTGRES_READONLY_USER`,
+`POSTGRES_READONLY_PASSWORD`) trigger an automatic redeploy the moment you
+save them — if you set both before this point, there's nothing further to
+do here. (`POSTGRES_DB_INSURANCE` doesn't need this step at all anymore:
+it's a fixed value in `render.yaml` itself, §9.6, applied whenever the
+service deploys from the Blueprint rather than something you set by hand
+per-deploy.) Otherwise: dashboard → `sema-pilot` → **Manual Deploy → Deploy
+latest commit** (or **Restart** if only env vars changed, no new commit).
+Wait for the deploy to report healthy (`/healthz`, §6) before moving to
+§9.9.
 
 ### 9.9 Verify each tenant independently through SEMA
 
@@ -489,10 +496,12 @@ from one tenant to the other (enforced in code, `api/main.py`'s
 
 ### 9.10 Configure the Render environment variables
 
-Every `sync: false` var in `render.yaml` (§9.4/§9.6 above, plus
-§9.11–§9.13 below) is set from the `sema-pilot` service's dashboard →
-**Environment** tab, never by editing `render.yaml` with real values (that
-file is committed to git).
+Every `sync: false` var in `render.yaml` (§9.4 above, plus §9.11–§9.13
+below) is set from the `sema-pilot` service's dashboard → **Environment**
+tab, never by editing `render.yaml` with real values (that file is
+committed to git). `POSTGRES_DB_INSURANCE` (§9.6) is the one exception —
+it's a fixed, non-secret value declared directly in `render.yaml`, so
+there's no dashboard entry to make for it.
 
 ### 9.11 Generate `SEMA_API_KEY`
 
