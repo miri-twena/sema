@@ -46,7 +46,11 @@ export function AdminPanel({
 
   return (
     <ToastProvider>
-      <div className="flex h-screen bg-bg text-ink">
+      {/* h-full, not h-screen: App.tsx wraps this in a flex-col shell with
+          the impersonation banner (impersonation_prompt.md) taking its own
+          row above -- h-screen here would claim a full extra viewport height
+          on top of that, overflowing the page. */}
+      <div className="flex h-full bg-bg text-ink">
         {/* Secondary nav */}
         <aside className="w-64 shrink-0 h-full border-e border-line bg-surface flex flex-col">
           <div className="p-4 border-b border-line">

@@ -69,6 +69,9 @@ ROUTE_CLASS: dict[tuple[str, str], str] = {
     ("GET", "/api/conversations/{conversation_id}/threads"): "open",
     ("GET", "/api/conversations/{conversation_id}/threads/{thread_id}"): "open",
     ("GET", "/api/admin/me"): "admin",
+    ("POST", "/api/admin/impersonation"): "admin",
+    ("DELETE", "/api/admin/impersonation"): "admin",
+    ("GET", "/api/admin/impersonation"): "admin",
     ("GET", "/api/admin/roles"): "admin",
     ("GET", "/api/admin/data-scopes"): "admin",
     ("GET", "/api/admin/users"): "admin",
@@ -203,7 +206,15 @@ def client(monkeypatch) -> TestClient:
 
 
 def _as(monkeypatch, email: str) -> None:
-    monkeypatch.setattr(main, "current_identity", lambda: {"client_id": CID, "email": email})
+    """Pretend the caller is `email`. Patches BOTH current_identity (the
+    EFFECTIVE identity every route resolves through) and real_identity (the
+    never-impersonated identity the 3 impersonation routes use) to the same
+    value -- this file tests plain role-based authz, not impersonation
+    itself (see test_impersonation.py for "effective identity differs from
+    real identity" scenarios), so the two should always agree here."""
+    identity = {"client_id": CID, "email": email}
+    monkeypatch.setattr(main, "current_identity", lambda: identity)
+    monkeypatch.setattr(main, "real_identity", lambda: identity)
 
 
 def _call(client: TestClient, method: str, url: str) -> int:

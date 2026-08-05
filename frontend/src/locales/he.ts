@@ -178,6 +178,10 @@ export const he: TranslationKeys = {
       noUsersYet: "עדיין אין משתמשים.",
       couldNotLoad: "לא ניתן לטעון את המשתמשים. נסו שוב.",
       actionsLabel: (name: string) => `פעולות עבור ${name}`,
+      viewAsUser: "צפייה כמשתמש/ת",
+      viewAsUserForLabel: (name: string) => `צפייה כ${name}`,
+      cannotViewAsSuspended: "אי אפשר לצפות כמשתמש/ת מושעה/ית.",
+      cannotViewAsInvited: "אי אפשר לצפות כמשתמש/ת שעדיין לא הצטרף/ה.",
       viewDetails: "הצגת פרטים",
       viewDetailsForLabel: (name: string) => `הצגת פרטים עבור ${name}`,
       suspendUser: "השעיית משתמש",
@@ -232,5 +236,14 @@ export const he: TranslationKeys = {
         sendInvite: "שליחת הזמנה",
       },
     },
+  },
+
+  impersonation: {
+    bannerViewingAs: (name: string, role: string) => `צופה כ${name} (${role})`,
+    endsIn: (minutes: number) => `מסתיים בעוד ${minutes} דק'`,
+    endsInUnderAMinute: "מסתיים בעוד פחות מדקה",
+    stop: "עצירה",
+    startFailed: "לא ניתן היה לצפות באפליקציה כמשתמש/ת זה/ו. נסו שוב.",
+    stopFailed: "לא ניתן היה להפסיק את הצפייה. נסו שוב.",
   },
 };

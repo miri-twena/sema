@@ -588,6 +588,22 @@ export interface AdminUser {
   data_scope: AdminDataScope;
 }
 
+// --- admin: impersonation ("view as user", impersonation_prompt.md) --------
+/** Mirrors api/models.py ImpersonationState -- the shape of GET/POST/DELETE
+ * /api/admin/impersonation's response. `active: false` means every other
+ * field is null (no session running). `expires_at` is an ISO timestamp; the
+ * banner computes its own live "ends in Nm" countdown from it rather than
+ * trusting a server-rendered string that would go stale between polls. */
+export interface ImpersonationState {
+  active: boolean;
+  target_id: string | null;
+  target_name: string | null;
+  target_email: string | null;
+  target_role: AdminRole | null;
+  started_at: string | null;
+  expires_at: string | null;
+}
+
 export interface AdminUserList {
   users: AdminUser[];
   member_count: number;
@@ -923,6 +939,11 @@ export interface AuditEvent {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   created_at: string;
+  /** Set only when this action happened while the real admin was
+   * impersonating `actor_name` (impersonation_prompt.md) -- e.g. rendered as
+   * "Dana Levi (via Miri Levi)". Null for every event outside impersonation. */
+  impersonator_id: string | null;
+  impersonator_name: string | null;
 }
 
 export interface AuditEventList {
@@ -1165,6 +1186,16 @@ export const api = {
       adminRequest<AdminUser>("POST", `/api/admin/users/${id}/resend-invite`) as Promise<AdminUser>,
     roles: () => getJSON<RoleInfo[]>("/api/admin/roles"),
     dataScopes: () => getJSON<DataScopeInfo[]>("/api/admin/data-scopes"),
+
+    // --- admin: impersonation ("view as user") ---
+    impersonation: {
+      state: () => getJSON<ImpersonationState>("/api/admin/impersonation"),
+      start: (userId: string) =>
+        adminRequest<ImpersonationState>("POST", "/api/admin/impersonation", {
+          user_id: userId,
+        }) as Promise<ImpersonationState>,
+      stop: () => adminRequest<ImpersonationState>("DELETE", "/api/admin/impersonation") as Promise<ImpersonationState>,
+    },
 
     // --- admin: organization settings (spec §2) ---
     orgSettings: {

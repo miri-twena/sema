@@ -208,6 +208,24 @@ export function useAdminUsers() {
     [refresh],
   );
 
+  /** "View as user" (impersonation_prompt.md): start impersonating, then hard
+   * -reload the whole app -- the simplest correct way to re-fetch every piece
+   * of state (conversations, home config, data scope) under the new
+   * effective identity, with no partial-refresh bugs to chase. On failure
+   * (403/404/409 -- already impersonating, suspended target, ...) shows the
+   * server's own message via a toast rather than reloading.*/
+  const viewAsUser = useCallback(
+    async (id: string) => {
+      try {
+        await api.admin.impersonation.start(id);
+        window.location.reload();
+      } catch (e) {
+        toast(e instanceof ApiError ? e.detail : "Couldn't view the app as this user.");
+      }
+    },
+    [toast],
+  );
+
   return {
     users,
     total,
@@ -233,5 +251,6 @@ export function useAdminUsers() {
     remove,
     resend,
     invite,
+    viewAsUser,
   };
 }

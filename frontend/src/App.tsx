@@ -7,10 +7,12 @@ import {
   type Client,
   type Alert,
   type DailyBrief as DailyBriefResponse,
+  type ImpersonationState,
   type Overview,
   type PopularQuestion,
   type PublicOrgSettings,
 } from "./lib/api";
+import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { configureFormatting } from "./lib/format";
 import { detectBrowserLang } from "./lib/loginCopy";
 import { firstUserMessage } from "./lib/conversations";
@@ -43,6 +45,13 @@ export default function App() {
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [orgSettings, setOrgSettings] = useState<PublicOrgSettings | null>(null);
   const [me, setMe] = useState<AdminUser | null>(null);
+  // impersonation_prompt.md: fetched once at boot (the frontend polls
+  // nothing new -- Start/Stop each hard-reload the whole app, so a fresh
+  // GET here on every real page load is all that's needed). Resolved
+  // against the REAL admin identity server-side, so this still answers
+  // correctly even while `me` above is null (impersonating a non-admin
+  // makes GET /api/admin/me 403, but this endpoint stays reachable).
+  const [impersonation, setImpersonation] = useState<ImpersonationState | null>(null);
   // The user's chosen period, tagged with the client it belongs to -- so
   // switching clients falls back to that client's default (its latest
   // complete month) instead of carrying over a period it may not even have.
@@ -130,6 +139,20 @@ export default function App() {
       .me()
       .then((u) => !cancelled && setMe(u))
       .catch(() => !cancelled && setMe(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // impersonation_prompt.md: the app-wide banner's data, fetched once at
+  // boot alongside `me` above. A failed/unresolved fetch just keeps it null
+  // (banner renders nothing), same fallback style as `me`.
+  useEffect(() => {
+    let cancelled = false;
+    api.admin.impersonation
+      .state()
+      .then((s) => !cancelled && setImpersonation(s))
+      .catch(() => !cancelled && setImpersonation(null));
     return () => {
       cancelled = true;
     };
@@ -406,35 +429,55 @@ export default function App() {
       onSwitchClient={switchClient}
       onNewConversation={startNewConversation}
       onGoHome={goHome}
-      onOpenAdmin={() => {
-        setAdminOpen(true);
-        setDrawerOpen(false);
-      }}
+      // impersonation_prompt.md: hide the admin gear while impersonating a
+      // non-admin -- GET /api/admin/me 403s in that case (require_client_admin
+      // resolves the TARGET's own, lesser role), so `me` is already null; the
+      // gear simply follows the same signal rather than needing its own.
+      onOpenAdmin={
+        me?.role === "client_admin"
+          ? () => {
+              setAdminOpen(true);
+              setDrawerOpen(false);
+            }
+          : undefined
+      }
     />
   );
+
+  // impersonation_prompt.md: the persistent "seatbelt" banner, shown above
+  // BOTH the admin panel and the chat shell below -- an app-wide concern, not
+  // scoped to either surface.
+  const banner = impersonation?.active ? <ImpersonationBanner state={impersonation} /> : null;
 
   // The admin panel is its own full-page surface (spec §4: "opens as a full
   // page, not a modal"), so it replaces the whole chat shell rather than
   // overlaying it. State-based, like the rest of the app's navigation.
   if (adminOpen) {
     return (
-      <Suspense fallback={<div className="h-screen bg-bg" />}>
-        <AdminPanel
-          clientLabel={activeClient?.label ?? ""}
-          onClose={() => {
-            // "Back to SEMA" aligns with the rest of the app's brand-wordmark
-            // navigation (home_hebrew_polish_prompt.md item 8): it lands on
-            // HOME, not just whatever chat state happened to be underneath.
-            goHome();
-            setAdminOpen(false);
-          }}
-        />
-      </Suspense>
+      <div className="flex flex-col h-screen bg-bg">
+        {banner}
+        <div className="flex-1 min-h-0">
+          <Suspense fallback={<div className="h-full bg-bg" />}>
+            <AdminPanel
+              clientLabel={activeClient?.label ?? ""}
+              onClose={() => {
+                // "Back to SEMA" aligns with the rest of the app's brand-wordmark
+                // navigation (home_hebrew_polish_prompt.md item 8): it lands on
+                // HOME, not just whatever chat state happened to be underneath.
+                goHome();
+                setAdminOpen(false);
+              }}
+            />
+          </Suspense>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-bg text-ink">
+    <div className="flex flex-col h-screen bg-bg text-ink">
+      {banner}
+      <div className="flex flex-1 min-h-0">
       {/* Desktop: persistent, always-visible sidebar. */}
       <div className="hidden md:block">{renderSidebar()}</div>
 
@@ -580,6 +623,7 @@ export default function App() {
           />
         </Suspense>
       )}
+      </div>
     </div>
   );
 }

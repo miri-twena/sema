@@ -83,12 +83,34 @@ class AuditStore:
                 "BEFORE DELETE ON audit_events BEGIN "
                 "SELECT RAISE(ABORT, 'audit_events is append-only'); END"
             )
+            self._migrate(conn)
+
+    @staticmethod
+    def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Guarded, idempotent ALTERs onto an existing database -- same
+        no-framework pattern org_user_store.py uses. `impersonator_id`/
+        `impersonator_name` (impersonation_prompt.md): while an admin is
+        impersonating another user, `actor_*` stays the EFFECTIVE (target)
+        user for continuity with every other row, and these two columns carry
+        the real admin's identity alongside it -- so no event performed while
+        impersonating ever appears indistinguishable from a plain action by
+        the target user. NULL for every event recorded outside impersonation
+        (the overwhelming majority)."""
+        cols = self._columns(conn, "audit_events")
+        if "impersonator_id" not in cols:
+            conn.execute("ALTER TABLE audit_events ADD COLUMN impersonator_id TEXT")
+        if "impersonator_name" not in cols:
+            conn.execute("ALTER TABLE audit_events ADD COLUMN impersonator_name TEXT")
 
     # --- row mapping ---------------------------------------------------
 
     _COLS = (
         "id, client_id, actor_id, actor_name, actor_role, action, "
-        "target_type, target_id, target_label, before, after, created_at"
+        "target_type, target_id, target_label, before, after, created_at, "
+        "impersonator_id, impersonator_name"
     )
 
     @staticmethod
@@ -106,6 +128,8 @@ class AuditStore:
             "before": json.loads(r[9]) if r[9] is not None else None,
             "after": json.loads(r[10]) if r[10] is not None else None,
             "created_at": r[11],
+            "impersonator_id": r[12],
+            "impersonator_name": r[13],
         }
 
     # --- writes --------------------------------------------------------
@@ -123,21 +147,28 @@ class AuditStore:
         target_label: str | None = None,
         before: dict | None = None,
         after: dict | None = None,
+        impersonator: dict | None = None,
     ) -> dict:
         """Append one audit event. `action` is a canonical dotted id
         (e.g. "user.role_changed", "semantic.published") -- the frontend
-        keys its human-readable sentence templates off it."""
+        keys its human-readable sentence templates off it. `impersonator`
+        (impersonation_prompt.md) is the real admin's own identity dict (id,
+        name/email) when this action happened WHILE they were impersonating
+        `actor_id` -- None (the default) for every event recorded outside
+        impersonation."""
         event_id = uuid.uuid4().hex
         now = _now()
         with closing(self._connect()) as conn, conn:
             conn.execute(
-                f"INSERT INTO audit_events ({self._COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO audit_events ({self._COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event_id, client_id, actor_id, actor_name, actor_role, action,
                     target_type, target_id, target_label,
                     json.dumps(before) if before is not None else None,
                     json.dumps(after) if after is not None else None,
                     now,
+                    impersonator.get("id") if impersonator else None,
+                    (impersonator.get("name") or impersonator.get("email")) if impersonator else None,
                 ),
             )
         with closing(self._connect()) as conn:

@@ -134,17 +134,55 @@ const SENTENCES: Record<string, Sentence> = {
   },
   "alert.deleted": (e, dir) =>
     dir === "rtl" ? `${actorOf(e)} מחק/ה את ההתראה "${targetOf(e)}"` : `${actorOf(e)} deleted the "${targetOf(e)}" alert`,
+  // impersonation_prompt.md: `actor` is always the REAL admin on these two
+  // events specifically (unlike every other row, where a dual-identity event
+  // has the TARGET as actor and the admin as impersonator -- see
+  // impersonatorSuffix below).
+  "impersonation.started": (e, dir) =>
+    dir === "rtl"
+      ? `${actorOf(e)} התחיל/ה לצפות כ${targetOf(e)}`
+      : `${actorOf(e)} started viewing as ${targetOf(e)}`,
+  "impersonation.stopped": (e, dir) => {
+    const expired = field(e.after, "reason") === "expired";
+    if (dir === "rtl") {
+      return expired
+        ? `הצפייה של ${actorOf(e)} כ${targetOf(e)} הסתיימה (פג תוקף)`
+        : `${actorOf(e)} הפסיק/ה לצפות כ${targetOf(e)}`;
+    }
+    return expired
+      ? `${actorOf(e)}'s session viewing as ${targetOf(e)} expired`
+      : `${actorOf(e)} stopped viewing as ${targetOf(e)}`;
+  },
 };
+
+/** "Dana Levi (via Miri Levi)" -- appended after the actor's name wherever an
+ * audit row is rendered, whenever this action happened WHILE the real admin
+ * was impersonating `actor_name` (impersonation_prompt.md's audit spec: every
+ * such action must show BOTH identities, never plain-target with no trace of
+ * the admin). Empty string when there's no impersonator (the overwhelming
+ * majority of rows). */
+export function impersonatorSuffix(e: AuditEvent, dir: Dir): string {
+  if (!e.impersonator_name) return "";
+  return dir === "rtl" ? ` (על ידי ${e.impersonator_name})` : ` (via ${e.impersonator_name})`;
+}
 
 /** One human-readable sentence for an audit row, in the app's active
  * language -- built from the action id + target, never hardcoded per row so
  * every surface (table row, drawer header) reads identically. Falls back to
  * a generic "{actor} performed {action} on {target}" for an action id this
- * module doesn't recognize yet, so a new action is never silently blank. */
+ * module doesn't recognize yet, so a new action is never silently blank.
+ *
+ * impersonation_prompt.md: whenever the event carries an impersonator (this
+ * action happened while the real admin was impersonating `actor_name`), the
+ * sentence gets a trailing "(via {impersonator})" -- e.g. "Dana Levi invited
+ * Ronit Shapira as Analyst (via Miri Levi)" -- so no action performed while
+ * impersonating can ever read as plain-target with no trace of the admin. */
 export function auditSentence(e: AuditEvent, dir: Dir): string {
   const build = SENTENCES[e.action];
-  if (build) return build(e, dir);
-  return dir === "rtl"
-    ? `${actorOf(e)} ביצע/ה ${e.action} על ${targetOf(e)}`
-    : `${actorOf(e)} performed ${e.action} on ${targetOf(e)}`;
+  const base = build
+    ? build(e, dir)
+    : dir === "rtl"
+      ? `${actorOf(e)} ביצע/ה ${e.action} על ${targetOf(e)}`
+      : `${actorOf(e)} performed ${e.action} on ${targetOf(e)}`;
+  return base + impersonatorSuffix(e, dir);
 }

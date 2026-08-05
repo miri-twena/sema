@@ -51,7 +51,15 @@ from sema_core.conversation_store import (
     ThreadNotFoundError,
     truncate_by_tokens,
 )
-from sema_core.current_user import current_identity
+from sema_core.current_user import (
+    AlreadyImpersonatingError,
+    current_identity,
+    get_impersonation_state,
+    real_identity,
+    reap_expired_impersonation,
+    start_impersonation,
+    stop_impersonation,
+)
 from sema_core import data_scope
 from sema_core.org_user_store import (
     AdminScopeError,
@@ -121,6 +129,8 @@ from api.models import (
     AdminUser,
     AdminUserList,
     AdminUserUpdate,
+    ImpersonationStartRequest,
+    ImpersonationState,
     AlertCatalogItem,
     AlertMetricCatalogItem,
     AlertRuleInfo,
@@ -314,19 +324,22 @@ def require_api_key(request: Request, x_api_key: str | None = Header(default=Non
         raise HTTPException(status_code=401, detail="invalid or missing API key")
 
 
-def require_client_admin() -> dict:
-    """Admin-panel auth: resolve the current identity to a real org_users row
-    and require an active client_admin. Applied per-route (via Depends) to the
-    /api/admin/* endpoints only -- NOT globally like require_api_key.
+def _identity_user_id(identity: dict) -> str:
+    """Resolve the mock identity (client_id + email) to its user id. Raises
+    OrgUserNotFoundError if the identity has no row for that client, which
+    require_client_admin turns into a 403."""
+    row = org_user_store.get_by_email(identity["client_id"], identity["email"])
+    if row is None:
+        raise OrgUserNotFoundError(identity["email"])
+    return row["id"]
 
-    Built as real middleware even though the identity is mocked for now (see
-    sema_core.current_user): when login lands, current_identity() starts
-    reading a verified session and this check keeps working unchanged. Returns
-    the resolved user dict so endpoints know who "self" is (to tag is_self and
-    to scope every query to the admin's own client_id -- a client admin manages
-    only their own organization).
-    """
-    identity = current_identity()
+
+def _resolve_client_admin(identity: dict) -> dict:
+    """Resolve an identity dict to a real org_users row and require an active
+    client_admin -- shared by require_client_admin (the EFFECTIVE identity,
+    which is the impersonation target while a "view as" session is active)
+    and require_real_client_admin (always the REAL signed-in identity, never
+    swapped)."""
     try:
         user = org_user_store.get_user(identity["client_id"], _identity_user_id(identity))
     except OrgUserNotFoundError:
@@ -336,14 +349,70 @@ def require_client_admin() -> dict:
     return user
 
 
-def _identity_user_id(identity: dict) -> str:
-    """Resolve the mock identity (client_id + email) to its user id. Raises
-    OrgUserNotFoundError if the identity has no row for that client, which
-    require_client_admin turns into a 403."""
-    row = org_user_store.get_by_email(identity["client_id"], identity["email"])
-    if row is None:
-        raise OrgUserNotFoundError(identity["email"])
-    return row["id"]
+def require_client_admin() -> dict:
+    """Admin-panel auth: resolve the EFFECTIVE current identity to a real
+    org_users row and require an active client_admin. Applied per-route (via
+    Depends) to the /api/admin/* endpoints only -- NOT globally like
+    require_api_key.
+
+    Built as real middleware even though the identity is mocked for now (see
+    sema_core.current_user): when login lands, current_identity() starts
+    reading a verified session and this check keeps working unchanged. Returns
+    the resolved user dict so endpoints know who "self" is (to tag is_self and
+    to scope every query to the admin's own client_id -- a client admin manages
+    only their own organization).
+
+    Impersonation (impersonation_prompt.md): current_identity() itself is the
+    single swap point -- while the real admin is impersonating someone else,
+    it resolves to the TARGET, so this dependency naturally enforces "no
+    privilege escalation, only loss": impersonating a non-admin 403s here
+    (the target's own role fails the check above) exactly like any other
+    non-admin caller, while impersonating a FELLOW admin still passes (their
+    own admin routes stay reachable -- see require_client_admin_no_impersonation
+    for the narrower "highest blast radius" carve-out that blocks even that
+    case). When impersonation IS active, the returned dict additionally
+    carries `_impersonator` (the real admin's id/name/role) so `_audit()` can
+    stamp every admin-panel mutation made under this call with both
+    identities, per the audit spec."""
+    user = _resolve_client_admin(current_identity())
+    raw = real_identity()
+    active = get_impersonation_state(raw["client_id"], raw["email"])
+    if active is not None:
+        user = dict(user)
+        user["_impersonator"] = {
+            "id": active["admin_user_id"],
+            "name": active.get("admin_name") or raw["email"],
+            "role": active.get("admin_role"),
+        }
+    return user
+
+
+def require_real_client_admin() -> dict:
+    """Same as require_client_admin, but resolved against the REAL signed-in
+    identity, bypassing any active impersonation swap entirely. Used ONLY by
+    the impersonation start/stop/state endpoints -- this is what guarantees
+    Stop (and checking current state) always works for the real admin even
+    while impersonating a non-admin target, whose EFFECTIVE identity would
+    otherwise 403 on every admin route (see require_client_admin above)."""
+    return _resolve_client_admin(real_identity())
+
+
+def require_client_admin_no_impersonation(me: dict = Depends(require_client_admin)) -> dict:
+    """require_client_admin, PLUS: reject (403) if any impersonation is
+    currently active for the real admin -- even when the impersonation
+    TARGET is themselves a client_admin. Reserved for the highest-blast-radius
+    admin mutations (user management, org settings, semantic model publish/
+    restore -- impersonation_prompt.md's Rules section): those must never be
+    reachable "as someone else", so an admin impersonating a fellow admin has
+    to drop impersonation first even though every OTHER admin route stays
+    open to them."""
+    raw = real_identity()
+    if get_impersonation_state(raw["client_id"], raw["email"]) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Stop impersonating before performing this action.",
+        )
+    return me
 
 
 # A synthetic "no scoping installed" user: full access, no real id. Returned
@@ -1286,9 +1355,17 @@ def _audit(event: str, *, client_id: str, actor: dict, action: str, **kw) -> dic
     audit_store singleton -- the ONE call site every admin-mutation route
     uses (spec §3 item 7), so no route has to remember to pass the store.
     Returns the persisted audit row (most callers ignore it; report-problem
-    needs the generated event id)."""
+    needs the generated event id).
+
+    `actor` is whatever require_client_admin returned -- while impersonation
+    is active it carries an extra `_impersonator` key (real admin id/name/
+    role, see require_client_admin's docstring). Pulled out here rather than
+    left for log_admin_event, so `actor` stays exactly the org_users row
+    shape everywhere else it's used (e.g. `_admin_user`'s is_self check)."""
+    impersonator = actor.get("_impersonator")
     return log_admin_event(
-        logger, event, audit_store=audit_store, client_id=client_id, actor=actor, action=action, **kw
+        logger, event, audit_store=audit_store, client_id=client_id, actor=actor, action=action,
+        impersonator=impersonator, **kw,
     )
 
 
@@ -1296,6 +1373,124 @@ def _audit(event: str, *, client_id: str, actor: dict, action: str, **kw) -> dic
 def admin_me(me: dict = Depends(require_client_admin)) -> AdminUser:
     """The current (mocked) user, resolved live from the org_users table."""
     return _admin_user(me, me)
+
+
+# --- admin: impersonation ("view as user", impersonation_prompt.md) --------
+# All three routes resolve against the REAL admin identity
+# (require_real_client_admin), never the effective (possibly impersonated)
+# one -- see that dependency's docstring for why: it's what makes Stop (and
+# checking state) always work for the real admin, even mid-impersonation of
+# a non-admin whose effective identity would 403 on every OTHER admin route.
+
+
+def _impersonation_state(session: dict) -> ImpersonationState:
+    return ImpersonationState(
+        active=True,
+        target_id=session["target_user_id"],
+        target_name=session.get("target_name") or session["target_email"],
+        target_email=session["target_email"],
+        target_role=session.get("target_role"),
+        started_at=session["started_at"],
+        expires_at=session["expires_at"],
+    )
+
+
+def _audit_impersonation_ended(client_id: str, actor: dict, session: dict, *, reason: str) -> None:
+    """Shared by the explicit-stop and lazy-expiry-reap paths below --
+    `impersonation.stopped` with `reason` noting which one (spec: "explicit
+    stop vs. expiry noted")."""
+    _audit(
+        "impersonation_stopped", client_id=client_id, actor=actor, action="impersonation.stopped",
+        target_type="user", target_id=session["target_user_id"],
+        target_label=session.get("target_name") or session["target_email"],
+        after={"reason": reason},
+    )
+
+
+@app.post("/api/admin/impersonation", response_model=ImpersonationState, status_code=201)
+def start_impersonation_route(
+    req: ImpersonationStartRequest, me: dict = Depends(require_real_client_admin)
+) -> ImpersonationState:
+    """Start "view as user": from here on, the real admin's effective role and
+    data scope become the TARGET's (current_identity() is the single swap
+    point every other identity-aware route already resolves through -- see
+    sema_core.current_user's module docstring), never the admin's own. No
+    privilege escalation is possible: impersonating a non-admin makes every
+    /api/admin/* route 403 immediately (require_client_admin resolves the
+    target's own, lesser role).
+
+    Errors: 404 unknown user (also covers a cross-client user id --
+    org_user_store scopes every lookup by the admin's own client_id, so
+    another tenant's user is indistinguishable from "doesn't exist", the same
+    rule every other admin-panel lookup already follows); 409 for
+    self-impersonation, a suspended/invited target (they can't sign in
+    themselves either), or already impersonating someone else.
+    """
+    cid = me["client_id"]
+    admin_email = me["email"]
+    # Reap a stale (expired-but-uncleaned) session FIRST so it never falsely
+    # blocks a fresh start with "already impersonating".
+    expired = reap_expired_impersonation(cid, admin_email)
+    if expired is not None:
+        _audit_impersonation_ended(cid, me, expired, reason="expired")
+
+    if req.user_id == me["id"]:
+        raise HTTPException(status_code=409, detail="You can't view the app as yourself.")
+    try:
+        target = org_user_store.get_user(cid, req.user_id)
+    except OrgUserNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown user") from None
+    if target["status"] != "active":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Can't view as a {target['status']} user -- they can't sign in yet.",
+        )
+    try:
+        session = start_impersonation(
+            cid, admin_email,
+            admin_user_id=me["id"], admin_name=me.get("name") or me["email"], admin_role=me["role"],
+            target_user_id=target["id"], target_email=target["email"],
+            target_name=target.get("name") or target["email"], target_role=target["role"],
+        )
+    except AlreadyImpersonatingError:
+        raise HTTPException(
+            status_code=409, detail="You're already viewing as another user. Stop first.",
+        ) from None
+    _audit(
+        "impersonation_started", client_id=cid, actor=me, action="impersonation.started",
+        target_type="user", target_id=target["id"], target_label=target.get("name") or target["email"],
+        after={
+            "target_email": target["email"], "target_role": target["role"],
+            "expires_at": session["expires_at"],
+        },
+    )
+    return _impersonation_state(session)
+
+
+@app.delete("/api/admin/impersonation", response_model=ImpersonationState)
+def stop_impersonation_route(me: dict = Depends(require_real_client_admin)) -> ImpersonationState:
+    """Stop "view as user". Idempotent and ALWAYS 200 for the real admin,
+    whether or not a session was actually active -- Stop must never be gated
+    behind the (possibly reduced) effective role (design constraint 3)."""
+    cid = me["client_id"]
+    stopped = stop_impersonation(cid, me["email"])
+    if stopped is not None:
+        _audit_impersonation_ended(cid, me, stopped, reason="manual")
+    return ImpersonationState(active=False)
+
+
+@app.get("/api/admin/impersonation", response_model=ImpersonationState)
+def get_impersonation_route(me: dict = Depends(require_real_client_admin)) -> ImpersonationState:
+    """Current impersonation state for the real admin -- what the app-wide
+    banner (and the sidebar's admin-gear visibility, via GET /api/admin/me
+    403ing while impersonating a non-admin) reads once at boot; the frontend
+    polls nothing new (a hard reload on start/stop re-fetches everything)."""
+    cid = me["client_id"]
+    expired = reap_expired_impersonation(cid, me["email"])
+    if expired is not None:
+        _audit_impersonation_ended(cid, me, expired, reason="expired")
+    session = get_impersonation_state(cid, me["email"])
+    return _impersonation_state(session) if session else ImpersonationState(active=False)
 
 
 # The role catalog's single source of truth (spec §3) -- the UI's header
@@ -1381,7 +1576,7 @@ def admin_list_users(
 
 @app.post("/api/admin/users/invite", response_model=AdminUser, status_code=201)
 def admin_invite_user(
-    req: AdminInviteRequest, me: dict = Depends(require_client_admin)
+    req: AdminInviteRequest, me: dict = Depends(require_client_admin_no_impersonation)
 ) -> AdminUser:
     """Invite a user by email (status=invited, expires in 7 days). No email is
     actually sent yet -- it's logged. 422 on a malformed email, 409 if the
@@ -1414,7 +1609,7 @@ def admin_invite_user(
 
 @app.patch("/api/admin/users/{user_id}", response_model=AdminUser)
 def admin_update_user(
-    user_id: str, req: AdminUserUpdate, me: dict = Depends(require_client_admin)
+    user_id: str, req: AdminUserUpdate, me: dict = Depends(require_client_admin_no_impersonation)
 ) -> AdminUser:
     """Change a user's role/status/data_scope. Only the fields present in the
     body change. 409 if the change would remove the last active admin (or
@@ -1475,7 +1670,7 @@ def admin_update_user(
 
 
 @app.delete("/api/admin/users/{user_id}", status_code=204)
-def admin_delete_user(user_id: str, me: dict = Depends(require_client_admin)) -> None:
+def admin_delete_user(user_id: str, me: dict = Depends(require_client_admin_no_impersonation)) -> None:
     """Remove a user. 409 if it's the last active admin, 404 if not in this org."""
     cid = me["client_id"]
     try:
@@ -1495,7 +1690,7 @@ def admin_delete_user(user_id: str, me: dict = Depends(require_client_admin)) ->
 
 
 @app.post("/api/admin/users/{user_id}/resend-invite", response_model=AdminUser)
-def admin_resend_invite(user_id: str, me: dict = Depends(require_client_admin)) -> AdminUser:
+def admin_resend_invite(user_id: str, me: dict = Depends(require_client_admin_no_impersonation)) -> AdminUser:
     """Reset an invited user's expiry to 7 days from now. No email is sent --
     logged, like the original invite."""
     cid = me["client_id"]
@@ -1675,7 +1870,7 @@ def admin_validate_semantic_draft(
 
 @app.post("/api/admin/semantic/publish", response_model=SemanticModelResponse)
 def admin_publish_semantic(
-    req: SemanticPublishRequest, me: dict = Depends(require_client_admin)
+    req: SemanticPublishRequest, me: dict = Depends(require_client_admin_no_impersonation)
 ) -> SemanticModelResponse:
     """Re-validate every requested draft server-side (defense in depth -- a
     client-side "already validated" flag is never trusted alone), then write
@@ -1761,7 +1956,7 @@ def admin_list_semantic_versions(me: dict = Depends(require_client_admin)) -> li
 
 @app.post("/api/admin/semantic/versions/{version_id}/restore", response_model=SemanticVersion)
 def admin_restore_semantic_version(
-    version_id: str, me: dict = Depends(require_client_admin)
+    version_id: str, me: dict = Depends(require_client_admin_no_impersonation)
 ) -> SemanticVersion:
     """Rewrite every semantic YAML file to exactly match an old version's
     snapshot (removing any file that didn't exist back then), then record
@@ -1859,7 +2054,7 @@ def admin_get_org_settings(me: dict = Depends(require_client_admin)) -> OrgSetti
 
 @app.patch("/api/admin/org-settings", response_model=OrgSettings)
 def admin_update_org_settings(
-    req: OrgSettingsUpdate, me: dict = Depends(require_client_admin)
+    req: OrgSettingsUpdate, me: dict = Depends(require_client_admin_no_impersonation)
 ) -> OrgSettings:
     """Per-field partial update. Every changed field is audit-logged with its
     before/after value (one log_event call per field, spec §2/§3). Never
@@ -1917,7 +2112,7 @@ def admin_retention_preview(
 
 @app.post("/api/admin/org-settings/logo", response_model=OrgSettings)
 async def admin_upload_logo(
-    file: UploadFile = File(...), me: dict = Depends(require_client_admin)
+    file: UploadFile = File(...), me: dict = Depends(require_client_admin_no_impersonation)
 ) -> OrgSettings:
     cid = me["client_id"]
     data = await file.read(_LOGO_MAX_BYTES + 1)

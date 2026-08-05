@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Mail, MoreHorizontal } from "lucide-react";
+import { Mail, MoreHorizontal, UserRoundCog } from "lucide-react";
 import type { AdminDataScope, AdminRole, AdminUser } from "../../lib/api";
 import { usePopoverMenu } from "../../hooks/usePopoverMenu";
 import { initials, pastelFor } from "../../lib/avatar";
@@ -75,6 +75,7 @@ export function UserRow({
   onRemove,
   onResend,
   onOpenDetail,
+  onViewAsUser,
 }: {
   user: AdminUser;
   isLastActiveAdmin: boolean;
@@ -87,6 +88,10 @@ export function UserRow({
   onRemove: (id: string) => void;
   onResend: (id: string) => void;
   onOpenDetail: (user: AdminUser) => void;
+  /** "View as user" (impersonation_prompt.md) -- omitted entirely on the
+   * current user's own row (hidden on self, per spec); every other eligible
+   * row gets it, disabled with a tooltip for suspended/invited targets. */
+  onViewAsUser: (id: string) => void;
 }) {
   const t = useT();
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -237,6 +242,17 @@ export function UserRow({
             >
               {t.common.cancel}
             </button>
+            {/* Disabled, with a tooltip -- an invited user can't sign in
+                themselves yet, so there's no "their app" to view as. */}
+            <button
+              type="button"
+              disabled
+              title={t.admin.users.cannotViewAsInvited}
+              aria-label={t.admin.users.viewAsUserForLabel(user.email)}
+              className="text-muted/50 cursor-not-allowed"
+            >
+              <UserRoundCog size={15} />
+            </button>
           </>
         ) : user.is_self ? null : (
           <div className="relative">
@@ -252,6 +268,18 @@ export function UserRow({
             </button>
             {menuOpen && (
               <PopoverMenu pos={pos} menuRef={menuRef} className="rounded-xl p-1">
+                <button
+                  role="menuitem"
+                  disabled={suspended}
+                  title={suspended ? t.admin.users.cannotViewAsSuspended : undefined}
+                  onClick={() => {
+                    onViewAsUser(user.id);
+                    closeMenu();
+                  }}
+                  className="w-full text-start rounded-lg px-2.5 py-2 text-[0.8rem] text-ink hover:bg-surfaceAlt disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition"
+                >
+                  {t.admin.users.viewAsUser}
+                </button>
                 <button
                   role="menuitem"
                   onClick={() => {

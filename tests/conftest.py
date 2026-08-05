@@ -138,6 +138,22 @@ def _isolated_feedback_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_impersonation_store(tmp_path, monkeypatch):
+    """Every test gets its own throwaway impersonation-session store
+    (impersonation_prompt.md), same isolation as the other admin-panel
+    stores above. Unlike those stores, this one is a module-level singleton
+    inside sema_core.current_user rather than api.main -- current_identity()
+    (the single identity swap point) needs to consult it directly, with no
+    store object threaded through every one of its call sites."""
+    import sema_core.current_user as current_user
+    from sema_core.impersonation_store import ImpersonationStore
+
+    monkeypatch.setattr(
+        current_user, "_impersonation_store", ImpersonationStore(tmp_path / "test_impersonation.db")
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolated_query_limit_store(tmp_path, monkeypatch):
     """Every test gets its own throwaway daily-query-limit store
     (backend_qa_prompt.md item 5), same isolation as the other admin-panel

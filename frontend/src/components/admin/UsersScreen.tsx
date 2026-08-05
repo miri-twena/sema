@@ -66,6 +66,7 @@ export function UsersScreen({ clientLabel }: { clientLabel: string }) {
     remove,
     resend,
     invite,
+    viewAsUser,
   } = useAdminUsers();
   const t = useT();
 
@@ -190,6 +191,7 @@ export function UsersScreen({ clientLabel }: { clientLabel: string }) {
                   onRemove={remove}
                   onResend={resend}
                   onOpenDetail={setSelectedUser}
+                  onViewAsUser={viewAsUser}
                 />
               ))}
             </div>

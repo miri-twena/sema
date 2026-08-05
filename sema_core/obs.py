@@ -70,6 +70,7 @@ def log_admin_event(
     target_label: str | None = None,
     before: dict | None = None,
     after: dict | None = None,
+    impersonator: dict | None = None,
     **fields,
 ) -> dict:
     """The ONE call site an admin-panel mutation uses instead of log_event:
@@ -84,7 +85,9 @@ def log_admin_event(
     name/email, role). `action` is a canonical dotted id (e.g.
     "user.role_changed", "semantic.published") the frontend keys its
     human-readable sentence off; `target_*`/`before`/`after` describe what
-    changed for the audit drawer's diff view.
+    changed for the audit drawer's diff view. `impersonator`
+    (impersonation_prompt.md) is the real admin's identity dict when `actor`
+    was resolved while they were impersonating someone else -- None normally.
     """
     log_event(logger, event, client_id=client_id, action=action, actor_id=actor.get("id"), **fields)
     return audit_store.record(
@@ -98,4 +101,5 @@ def log_admin_event(
         target_label=target_label,
         before=before,
         after=after,
+        impersonator=impersonator,
     )

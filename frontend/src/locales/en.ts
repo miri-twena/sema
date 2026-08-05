@@ -188,6 +188,10 @@ export const en = {
       noUsersYet: "No users yet.",
       couldNotLoad: "Couldn't load users. Please try again.",
       actionsLabel: (name: string) => `Actions for ${name}`,
+      viewAsUser: "View as user",
+      viewAsUserForLabel: (name: string) => `View as ${name}`,
+      cannotViewAsSuspended: "Can't view as a suspended user.",
+      cannotViewAsInvited: "Can't view as a user who hasn't joined yet.",
       viewDetails: "View details",
       viewDetailsForLabel: (name: string) => `View details for ${name}`,
       suspendUser: "Suspend user",
@@ -242,6 +246,20 @@ export const en = {
         sendInvite: "Send invite",
       },
     },
+  },
+
+  // impersonation_prompt.md: admin "View as user" -- the persistent top
+  // banner shown app-wide while a client_admin is viewing as another org
+  // user, and its error copy. The banner text is built from these pieces
+  // (name + role label + countdown) rather than one template string, so the
+  // countdown can update independently every tick.
+  impersonation: {
+    bannerViewingAs: (name: string, role: string) => `Viewing as ${name} (${role})`,
+    endsIn: (minutes: number) => `ends in ${minutes}m`,
+    endsInUnderAMinute: "ends in <1m",
+    stop: "Stop",
+    startFailed: "Couldn't view the app as this user. Please try again.",
+    stopFailed: "Couldn't stop viewing as this user. Please try again.",
   },
 };
 

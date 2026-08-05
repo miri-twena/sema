@@ -803,6 +803,30 @@ class AdminUserUpdate(BaseModel):
     data_scope: AdminDataScope | None = None
 
 
+# --- admin: impersonation ("view as user", impersonation_prompt.md) --------
+class ImpersonationStartRequest(BaseModel):
+    """POST body: the org user to view the app as."""
+
+    user_id: str
+
+
+class ImpersonationState(BaseModel):
+    """GET/POST/DELETE /api/admin/impersonation's response shape: either "no
+    active session" (active=False, every other field null) or the current
+    target + expiry the banner needs to render "Viewing as {target_name}
+    ({target_role}) · ends in Nm". `expires_at` is an ISO timestamp -- the
+    client computes its own live "Nm" countdown from it rather than the
+    server sending a pre-rendered, instantly-stale string."""
+
+    active: bool
+    target_id: str | None = None
+    target_name: str | None = None
+    target_email: str | None = None
+    target_role: AdminRole | None = None
+    started_at: str | None = None
+    expires_at: str | None = None
+
+
 class RoleInfo(BaseModel):
     """One entry in the role catalog (GET /api/admin/roles) -- the single
     source of truth for the role legend/tooltip copy in the UI. `id` matches
@@ -1030,7 +1054,11 @@ class AuditEvent(BaseModel):
     dotted id ("user.role_changed", "semantic.published", ...) the frontend
     keys its human-readable sentence + category tag off of; `before`/`after`
     back the drawer's field-by-field diff. `actor_id` is null for a system-
-    driven event (none exist yet, but the shape allows for one)."""
+    driven event (none exist yet, but the shape allows for one).
+    `impersonator_id`/`impersonator_name` (impersonation_prompt.md) are set
+    ONLY when this action happened while the real admin was impersonating
+    `actor_*` -- e.g. "Dana Levi (via Miri Levi)" -- null for every event
+    recorded outside impersonation."""
 
     id: str
     client_id: str
@@ -1044,6 +1072,8 @@ class AuditEvent(BaseModel):
     before: dict[str, Any] | None = None
     after: dict[str, Any] | None = None
     created_at: str
+    impersonator_id: str | None = None
+    impersonator_name: str | None = None
 
 
 class AuditEventList(BaseModel):
