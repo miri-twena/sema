@@ -66,6 +66,7 @@ export default function Features({ locale }: { locale: Locale }) {
         <div className="flex max-w-[640px] flex-col gap-3">
           <span className="text-xs font-bold uppercase tracking-[.14em] text-text-faint">{t.featKicker}</span>
           <h2 className="m-0 text-4xl font-extrabold leading-[1.15] tracking-[-.02em]">{t.featTitle}</h2>
+          <p className="m-0 text-[15px] leading-[1.65] text-text-muted">{t.featSub}</p>
         </div>
         <div className="grid grid-cols-1 gap-[22px] md:grid-cols-3">
           {cards.map((c, i) => (

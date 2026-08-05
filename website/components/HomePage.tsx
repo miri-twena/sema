@@ -5,6 +5,7 @@ import BookDemoSection from './BookDemoSection';
 import HashScrollOnMount from './HashScrollOnMount';
 import Hero from './home/Hero';
 import Features from './home/Features';
+import SemanticModel from './home/SemanticModel';
 import ProductShowcase from './home/ProductShowcase';
 import Proactive from './home/Proactive';
 import HowItWorks from './home/HowItWorks';
@@ -20,6 +21,7 @@ export default function HomePage({ locale }: { locale: Locale }) {
       <main id="main-content">
         <Hero locale={locale} />
         <Features locale={locale} />
+        <SemanticModel locale={locale} />
         <ProductShowcase locale={locale} />
         <Proactive locale={locale} />
         <HowItWorks locale={locale} />

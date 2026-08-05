@@ -85,10 +85,22 @@ export default function HeroDemoCard({ t }: { t: Dictionary }) {
     <div className="relative">
       <AlertToast t={t} />
       <div className="overflow-hidden rounded-card-lg border border-border bg-white shadow-hero">
-      <div className="flex items-center gap-2.5 border-b border-border-faint px-6 py-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/sema-mark-brand.svg" alt="" style={{ height: 21, width: 'auto' }} />
-        <span className="text-[13px] font-bold uppercase tracking-[.08em] text-text-faint">{t.demoLabel}</span>
+      <div className="flex items-center justify-between gap-2 border-b border-border-faint px-6 py-4">
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/sema-mark-brand.svg" alt="" style={{ height: 21, width: 'auto' }} />
+          <span className="whitespace-nowrap text-[13px] font-bold uppercase tracking-[.08em] text-text-faint">
+            {t.demoLabel}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#297C56]"
+            style={{ animation: 'status-pulse 2.5s ease-in-out infinite' }}
+          />
+          <span className="whitespace-nowrap text-xs font-medium text-text-faint">{t.dataConnected}</span>
+        </div>
       </div>
       <div className="flex flex-col gap-4 p-6">
         <div

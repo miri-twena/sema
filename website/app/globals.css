@@ -110,6 +110,18 @@ p {
   }
 }
 
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
 /* Reveal-from-the-logical-end: used by the Proactive feed's initial stagger.
    translateX has no logical form, so the sign is flipped explicitly per :dir(). */
 .reveal-end {
