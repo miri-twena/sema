@@ -70,4 +70,16 @@ EXPOSE 8000
 # single uvicorn worker is enough for a first pilot deployment -- scale by
 # running more container instances behind the platform's own load balancer
 # rather than multiple workers inside one container.
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# sema_core.persist_bootstrap runs FIRST, once per container start (see its
+# own docstring): it seeds/symlinks the writable sql/ tree onto whatever
+# single persistent disk this platform mounted (docs/deployment.md's Render
+# section -- SEMA_PERSIST_ROOT, default /app/persist) and makes sure var/'s
+# parent directory exists for SQLite. `&& exec uvicorn ...` -- not a second
+# CMD step -- so uvicorn REPLACES this shell process (same PID) instead of
+# running as its child; without exec, Docker's stop signal would hit the
+# shell, not uvicorn, and shutdown would only happen after the platform's
+# force-kill timeout instead of uvicorn's own graceful drain. $PORT is
+# Render's convention for "which port to listen on" (falls back to 8000 for
+# any platform/local run that doesn't set it, e.g. docker-compose.prod.yml).
+CMD ["sh", "-c", "python -m sema_core.persist_bootstrap && exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

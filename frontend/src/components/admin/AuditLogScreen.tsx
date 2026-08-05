@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { Download, Loader2, Search } from "lucide-react";
 import { api, type AuditEvent } from "../../lib/api";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import { initials, pastelFor } from "../../lib/avatar";
@@ -7,6 +7,7 @@ import { timeAgo } from "../../lib/time";
 import { auditCategory, auditCategoryLabel, auditSentence, isImpersonationEvent } from "./auditSentences";
 import { AuditEventDrawer } from "./AuditEventDrawer";
 import { Pager } from "./Pager";
+import { useToast } from "./toast-context";
 import { CHART_PALETTE, CHART_PALETTE_TEXT } from "../../lib/tokens";
 
 /** Category -> identity hue index, so a long log becomes scannable at a
@@ -91,6 +92,7 @@ function EventRow({ event, onOpen }: { event: AuditEvent; onOpen: (e: AuditEvent
  * (see useAuditLog) since the log can grow unbounded, unlike Users.
  */
 export function AuditLogScreen({ clientLabel }: { clientLabel: string }) {
+  const toast = useToast();
   const {
     events,
     total,
@@ -111,7 +113,8 @@ export function AuditLogScreen({ clientLabel }: { clientLabel: string }) {
     setSearch,
     setPage,
     clearFilters,
-    exportUrl,
+    downloadCsv,
+    downloading,
   } = useAuditLog();
 
   const [selected, setSelected] = useState<AuditEvent | null>(null);
@@ -142,12 +145,17 @@ export function AuditLogScreen({ clientLabel }: { clientLabel: string }) {
             {total} event{total === 1 ? "" : "s"}
           </p>
         </div>
-        <a
-          href={exportUrl}
-          className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.82rem] text-ink hover:border-primary hover:text-primary transition"
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={async () => {
+            const ok = await downloadCsv();
+            if (!ok) toast("Couldn't export the audit log. Try again.");
+          }}
+          className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[0.82rem] text-ink hover:border-primary hover:text-primary disabled:opacity-60 transition"
         >
-          <Download size={14} /> Export CSV
-        </a>
+          {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Export CSV
+        </button>
       </div>
 
       {/* Filters toolbar */}

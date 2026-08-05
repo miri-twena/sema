@@ -3,6 +3,7 @@
 
 import type { ProgressEvent } from "./progress";
 import type { AnalysisStep } from "./evidence";
+import { revokeAccess, withAccessKeyHeader } from "./pilotAccess";
 
 // Falls back to localhost:8000 only when VITE_API_URL is truly UNSET (bare
 // `npm run dev` outside docker-compose, which always sets it explicitly) --
@@ -476,30 +477,47 @@ export const DEFAULT_HOME_CONFIG: HomeConfig = {
   alerts: {},
 };
 
+/** Every /api/* route is gated by the internal-pilot access key (see
+ * lib/pilotAccess.ts) -- a 401 here specifically means that key is
+ * missing/wrong/expired, so it's the ONE status code every fetch helper
+ * below reacts to by clearing it and telling the gate to reappear. */
+function checkUnauthorized(res: Response): void {
+  if (res.status === 401) revokeAccess();
+}
+
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(`${BASE}${path}`, { headers: withAccessKeyHeader() });
+  if (!res.ok) {
+    checkUnauthorized(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
 async function postJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withAccessKeyHeader({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
     signal, // lets the caller abort the request (stop button)
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    checkUnauthorized(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
 async function sendJSON<T>(method: "PATCH" | "DELETE", path: string, body?: unknown): Promise<T | null> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: withAccessKeyHeader(body ? { "Content-Type": "application/json" } : undefined),
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    checkUnauthorized(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.status === 204 ? null : ((await res.json()) as T);
 }
 
@@ -530,10 +548,11 @@ async function adminRequest<T>(
 ): Promise<T | null> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: withAccessKeyHeader(body ? { "Content-Type": "application/json" } : undefined),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
+    checkUnauthorized(res);
     // FastAPI puts the message under `detail` -- usually a string, but the
     // semantic-model publish endpoint sends a structured
     // {message, failures} object on a 409; fall back to the status text for
@@ -1037,7 +1056,7 @@ export const api = {
   ): Promise<ChatResponse> => {
     const res = await fetch(`${BASE}/api/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withAccessKeyHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         question,
         history,
@@ -1048,7 +1067,10 @@ export const api = {
       }),
       signal,
     });
-    if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok || !res.body) {
+      checkUnauthorized(res);
+      throw new Error(`${res.status} ${res.statusText}`);
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -1114,10 +1136,11 @@ export const api = {
   ): Promise<{ blob: Blob; filename: string; ceilingHit: boolean; rowCeiling: number | null }> => {
     const res = await fetch(`${BASE}/api/exports/table`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withAccessKeyHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify({ conversation_id: conversationId, turn_index: turnIndex, client_id: clientId }),
     });
     if (!res.ok) {
+      checkUnauthorized(res);
       let detail = `${res.status} ${res.statusText}`;
       try {
         const data = await res.json();
@@ -1212,8 +1235,13 @@ export const api = {
       uploadLogo: async (file: File): Promise<OrgSettings> => {
         const form = new FormData();
         form.append("file", file);
-        const res = await fetch(`${BASE}/api/admin/org-settings/logo`, { method: "POST", body: form });
+        const res = await fetch(`${BASE}/api/admin/org-settings/logo`, {
+          method: "POST",
+          headers: withAccessKeyHeader(),
+          body: form,
+        });
         if (!res.ok) {
+          checkUnauthorized(res);
           let detail = `${res.status} ${res.statusText}`;
           try {
             const data = await res.json();
@@ -1268,13 +1296,31 @@ export const api = {
         const qs = auditQuery(filters);
         return getJSON<AuditEventList>(`/api/admin/audit${qs ? `?${qs}` : ""}`);
       },
-      /** No fetch here -- the export is a plain GET the browser downloads
-       * directly (there's no per-request auth header to carry, see
-       * adminRequest's callers), so the caller just navigates an anchor to
-       * this URL. */
-      exportUrl: (filters: AuditFilters) => {
+      /** Fetches the CSV WITH the access-key header and triggers the browser
+       * download from a blob URL -- a plain `<a href>` to a protected /api/*
+       * route can't carry X-API-Key, which is why this isn't just a URL the
+       * caller navigates to (same rationale as exportTableCsv above). */
+      download: async (filters: AuditFilters): Promise<void> => {
         const qs = auditQuery(filters);
-        return `${BASE}/api/admin/audit/export${qs ? `?${qs}` : ""}`;
+        const res = await fetch(`${BASE}/api/admin/audit/export${qs ? `?${qs}` : ""}`, {
+          headers: withAccessKeyHeader(),
+        });
+        if (!res.ok) {
+          checkUnauthorized(res);
+          throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+        }
+        const disposition = res.headers.get("content-disposition") ?? "";
+        const match = /filename="([^"]+)"/i.exec(disposition);
+        const filename = match?.[1] ?? "audit-log.csv";
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
       },
     },
 
@@ -1352,8 +1398,9 @@ export const api = {
 async function uploadFile<T>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}${path}`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: withAccessKeyHeader(), body: form });
   if (!res.ok) {
+    checkUnauthorized(res);
     let detail = `${res.status} ${res.statusText}`;
     try {
       const data = await res.json();

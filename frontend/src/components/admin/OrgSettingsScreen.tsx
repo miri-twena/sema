@@ -3,6 +3,7 @@ import { Image as ImageIcon, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { api, ApiError, resolveApiUrl, type CurrencyInfo, type OrgSettings, type RetentionPolicy } from "../../lib/api";
 import { configureFormatting } from "../../lib/format";
+import { useProtectedImageSrc } from "../../hooks/useProtectedImageSrc";
 import { timeAgo } from "../../lib/time";
 import { useToast } from "./toast-context";
 import { CHART_PALETTE } from "../../lib/tokens";
@@ -117,6 +118,10 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
   const [pendingRetention, setPendingRetention] = useState<RetentionPolicy | null>(null);
   const [retentionPreviewCount, setRetentionPreviewCount] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Fetched WITH the pilot access key and re-served as a blob URL -- see
+  // useProtectedImageSrc's docstring. Called before the loading/settings
+  // guard below so hook order stays stable across renders.
+  const logoUrl = useProtectedImageSrc(resolveApiUrl(settings?.logo_path ?? null));
 
   useEffect(() => {
     Promise.all([api.admin.orgSettings.get(), api.admin.orgSettings.currencies(), api.admin.orgSettings.timezones()])
@@ -235,8 +240,6 @@ export function OrgSettingsScreen({ clientLabel }: { clientLabel: string }) {
       </div>
     );
   }
-
-  const logoUrl = resolveApiUrl(settings.logo_path);
 
   // Form-heavy screen -- a smaller bump than the table screens (Users/Audit
   // log get the full xl/2xl staged width): individual fields already cap at

@@ -7,6 +7,14 @@
 # a real platform (Railway/Render/etc., which typically build straight from
 # api/Dockerfile.prod rather than from this compose file).
 #
+# The api service's volume layout mirrors Render's internal-pilot Blueprint
+# (render.yaml): ONE volume at /app/persist, seeded/symlinked at container
+# start by sema_core.persist_bootstrap (see api/Dockerfile.prod's CMD) --
+# not two separate volumes at /app/var and /app/sql like this file used to
+# mount directly, since Render only offers one disk mount path per service
+# and this compose file is meant to reproduce that constraint locally, not
+# just the image build.
+#
 # Set SEMA_HOST_PORT to publish on something other than 8000 (e.g. to run
 # this alongside docker-compose.yml's dev stack, which already uses 8000).
 #
@@ -67,6 +75,12 @@ services:
       # the container itself, not the postgres service.
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      # .env's own default (var/sema_state.db) is a RELATIVE path, which
+      # would resolve under /app directly, not the persisted disk -- this
+      # override is what actually routes SQLite (+ uploaded logos, see
+      # api/main.py's _logos_dir) onto the mounted volume below. Render's
+      # Blueprint (render.yaml) sets the same value.
+      SEMA_CONVERSATION_DB: /app/persist/var/sema_state.db
     ports:
       # Published on all interfaces (not loopback-only like the dev compose):
       # this image REQUIRES SEMA_API_KEY to be set once SEMA_ENV=production
@@ -76,17 +90,16 @@ services:
       # dev stack on 8000 without a port conflict.
       - "${SEMA_HOST_PORT:-8000}:8000"
     volumes:
-      # SQLite conversation/org state -- see .env.example's SEMA_CONVERSATION_DB.
-      - sema_var_prod:/app/var
-      # The semantic model's *.yaml files (sql/semantic/, sql/insurance/
-      # semantic/) are mutated on disk by the admin panel's Publish/Restore
-      # flow (sema_core/semantic_editor.py's write_atomic) -- genuinely
-      # stateful application data, not just config, so it needs the same
-      # persistent-volume treatment as var/ or a published semantic model
-      # would revert to whatever was baked into the image on every restart.
-      - sema_semantic_prod:/app/sql
+      # ONE volume, mirroring Render's single disk mount -- sema_core.
+      # persist_bootstrap (run by api/Dockerfile.prod's CMD, before uvicorn
+      # starts) seeds persist/sql from the image's own sql/ tree on first
+      # boot and symlinks sql/ to it, and creates persist/var for SQLite +
+      # uploaded logos. Both are genuinely stateful application data (the
+      # admin panel's Publish/Restore flow mutates the semantic YAML on
+      # disk at runtime -- sema_core/semantic_editor.py's write_atomic), so
+      # losing this volume loses real data, not just config.
+      - sema_persist_prod:/app/persist
 
 volumes:
   sema_pgdata_prod:
-  sema_var_prod:
-  sema_semantic_prod:
+  sema_persist_prod:

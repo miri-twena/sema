@@ -303,20 +303,36 @@ export_limit_store = ExportLimitStore(settings.conversation_db_path)
 
 
 def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
-    """Auth scaffold: every route requires X-API-Key matching SEMA_API_KEY.
+    """Auth scaffold: every /api/* route requires X-API-Key matching
+    SEMA_API_KEY. THIS IS AN INTERNAL-PILOT ACCESS GATE, NOT REAL
+    AUTHENTICATION -- see docs/deployment.md's Render section. It proves
+    "has the shared pilot key", never a per-user identity, tenant
+    authorization, or anything suitable for an external customer-facing
+    deployment.
 
     Empty SEMA_API_KEY = auth disabled (local dev). Structured as a FastAPI
     dependency so swapping in real auth (JWT, per-tenant keys) later means
     replacing this one function. compare_digest avoids timing side-channels.
 
-    /healthz is exempt: it's the infra platform's own liveness/readiness probe
-    (Railway/Render, etc.), which cannot be expected to send an API key, and
-    deployment_prep_prompt.md explicitly specs it as "no auth". This is the
-    ONLY app-level dependency (applied to every route below via `FastAPI(
-    dependencies=...)`), so excluding one path has to happen inside it rather
-    than via a per-route override.
+    Exempt paths -- both deliberately reachable with NO key so the pilot's
+    unauthenticated surface is exactly "an empty shell, not a login screen":
+    - `/healthz`: the infra platform's own liveness/readiness probe
+      (Railway/Render, etc.), which cannot be expected to send an API key.
+    - anything NOT under `/api` (or the OpenAPI/docs paths, gated separately
+      below): the built SPA's `index.html` and its static JS/CSS/assets
+      (api/main.py's catch-all route, registered last). The browser has to be
+      able to load the access-gate SCREEN itself before it has a key to send
+      -- gating the shell too would make the pilot unreachable. The actual
+      data/admin surface is entirely under `/api/*`, which stays gated below.
+
+    This is the ONLY app-level dependency (applied to every route below via
+    `FastAPI(dependencies=...)`), so excluding these paths has to happen
+    inside it rather than via a per-route override.
     """
-    if request.url.path == "/healthz":
+    path = request.url.path
+    if path == "/healthz":
+        return
+    if not path.startswith("/api"):
         return
     if not settings.api_key:
         return
@@ -494,6 +510,14 @@ app = FastAPI(
     version="0.1.0",
     dependencies=[Depends(require_api_key)],  # applied to ALL routes
     lifespan=lifespan,
+    # Swagger/ReDoc/the raw OpenAPI schema live outside /api, so require_api_key
+    # (scoped to /api/* + /healthz, see its docstring) doesn't gate them --
+    # intentional in dev, but in production they'd otherwise leak the whole
+    # route/schema surface to anyone with the pilot URL. Disabled outright
+    # rather than gated: nothing needs interactive docs in a private pilot.
+    docs_url=None if settings.env == "production" else "/docs",
+    redoc_url=None if settings.env == "production" else "/redoc",
+    openapi_url=None if settings.env == "production" else "/openapi.json",
 )
 
 # CORS: SEMA_CORS_ORIGINS is the explicit allowlist (defaults to the local

@@ -20,6 +20,7 @@ import { shouldFocusAskInput } from "./lib/homeShortcut";
 import { useChat } from "./hooks/useChat";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useConversations } from "./hooks/useConversations";
+import { useProtectedImageSrc } from "./hooks/useProtectedImageSrc";
 import { useThreads } from "./hooks/useThreads";
 import { ScrollToLatest } from "./components/ScrollToLatest";
 import { Sidebar } from "./components/Sidebar";
@@ -44,6 +45,10 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [orgSettings, setOrgSettings] = useState<PublicOrgSettings | null>(null);
+  // Fetched WITH the pilot access key and re-served as a blob URL -- the
+  // logo lives behind a protected /api/* route, and a plain <img src> can't
+  // carry a custom header (see useProtectedImageSrc's docstring).
+  const orgLogoUrl = useProtectedImageSrc(resolveApiUrl(orgSettings?.logo_path ?? null));
   const [me, setMe] = useState<AdminUser | null>(null);
   // impersonation_prompt.md: fetched once at boot (the frontend polls
   // nothing new -- Start/Stop each hard-reload the whole app, so a fresh
@@ -416,7 +421,7 @@ export default function App() {
       clients={clients}
       activeClientId={activeId}
       dbConnected={dbConnected}
-      orgLogoUrl={resolveApiUrl(orgSettings?.logo_path ?? null)}
+      orgLogoUrl={orgLogoUrl}
       conversations={conversations.conversations}
       activeConversationId={chat.conversationId}
       conversationsLoading={conversations.loading}

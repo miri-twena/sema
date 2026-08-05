@@ -22,6 +22,7 @@ export function useAuditLog() {
   const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
   const [q, setQ] = useState(""); // debounced copy that actually filters
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const id = window.setTimeout(() => setQ(search.trim()), 200);
@@ -61,13 +62,26 @@ export function useAuditLog() {
     void refresh();
   }, [refresh]);
 
-  const exportUrl = api.admin.audit.exportUrl({
-    actor: actor || undefined,
-    category: category || undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
-    q: q || undefined,
-  });
+  /** Returns false (rather than throwing) on failure so the screen can toast
+   * without a try/catch of its own -- same "boolean result, no throw" shape
+   * as other admin-panel actions in this codebase. */
+  const downloadCsv = useCallback(async (): Promise<boolean> => {
+    setDownloading(true);
+    try {
+      await api.admin.audit.download({
+        actor: actor || undefined,
+        category: category || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        q: q || undefined,
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setDownloading(false);
+    }
+  }, [actor, category, dateFrom, dateTo, q]);
 
   const filtering = !!(actor || category || dateFrom || dateTo || q);
   const clearFilters = () => {
@@ -98,7 +112,8 @@ export function useAuditLog() {
     setSearch,
     setPage,
     clearFilters,
-    exportUrl,
+    downloadCsv,
+    downloading,
     refresh,
   };
 }

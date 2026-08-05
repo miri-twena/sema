@@ -1,0 +1,132 @@
+# Render Blueprint for SEMA's internal pilot (docs/deployment.md's Render
+# section has the full walkthrough -- read that before using this file).
+#
+# Scope: one paid Web Service (Docker, Frankfurt, Starter) serving the
+# React frontend + FastAPI backend from a single origin, one small Render
+# Postgres for the ecommerce tenant, and one persistent disk. This is
+# EVERYTHING that can be represented safely and declaratively for this
+# deployment -- three things deliberately are NOT here, because the
+# Blueprint schema has no way to express them safely:
+#   1. The `insurance` tenant's database. Render Postgres provisions ONE
+#      database per instance; there's no Blueprint field to declare a
+#      second database on the same instance, and pointing `insurance` at
+#      the SAME database as `ecommerce` would violate tenant isolation
+#      (AGENTS.md: "an unknown/wrong client_id must never silently fall
+#      back to another tenant's data"). The manual step (create a second
+#      database on this same instance via psql) is documented in
+#      docs/deployment.md.
+#   2. The dedicated read-only Postgres role (POSTGRES_READONLY_USER /
+#      POSTGRES_READONLY_PASSWORD). Render only creates one admin-level
+#      user per database instance -- there's no Blueprint field to create
+#      an ADDITIONAL, SELECT-only role. Using Render's own admin user as
+#      POSTGRES_READONLY_USER would defeat the whole point of that role
+#      (sema_core's SQL-safety layer trusts it to be read-only), so this
+#      is a manual step too (sql/create_readonly_role.sql, see the docs).
+#   3. SEMA_PUBLIC_URL. Render only assigns the service's *.onrender.com
+#      URL AFTER the first deploy, so there's no value to put here on a
+#      first pass -- declared with `sync: false` (manual) rather than
+#      guessed at.
+#
+# Every other secret below is also `sync: false`: Render prompts for these
+# in its dashboard at first deploy and NEVER stores a real value in this
+# file (this file is committed to git).
+
+services:
+  - type: web
+    name: sema-pilot
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./api/Dockerfile.prod
+    dockerContext: .
+    healthCheckPath: /healthz
+    # Only redeploy once CI's checks pass on the branch -- never ship an
+    # internal pilot straight off a red build.
+    autoDeployTrigger: checksPass
+    disk:
+      name: sema-pilot-disk
+      # sema_core.persist_bootstrap (run by api/Dockerfile.prod's CMD, before
+      # uvicorn starts) expects exactly this path -- see its own docstring
+      # for why it can't be /app or /app/sql directly (either would hide
+      # the application code / the image's baked-in sql/ tree on first boot).
+      mountPath: /app/persist
+      sizeGB: 1
+    envVars:
+      - key: SEMA_ENV
+        value: production
+      # No real user auth yet -- see docs/deployment.md's own warning at the
+      # top. Declared explicitly rather than left to default so this
+      # deployment states its (limited) auth posture on purpose.
+      - key: SEMA_AUTH_MODE
+        value: mock
+      - key: SEMA_CLIENT
+        value: ecommerce
+      - key: SEMA_CONVERSATION_DB
+        value: /app/persist/var/sema_state.db
+      # Conservative for a Starter instance (512MB RAM) and a very small
+      # trusted pilot (a handful of concurrent users, not a public launch):
+      # each (client, role) pool caps at this, and this pilot only ever
+      # activates ONE client (ecommerce) x 2 roles (full-access + read-only)
+      # -- so worst case is 2x5=10 concurrent Postgres connections, well
+      # inside a small Postgres plan's connection budget, and light enough
+      # that psycopg2's own per-connection memory overhead doesn't compete
+      # with the API process for the instance's 512MB. Compare the dev/
+      # general-production default of 20 (backend_qa_prompt.md's QA sweep
+      # target), sized for real concurrent traffic this pilot doesn't have.
+      - key: SEMA_DB_POOL_MAX
+        value: "5"
+      # Assigned by Render only AFTER the first deploy -- fill in and
+      # redeploy once you know the *.onrender.com URL (docs/deployment.md).
+      - key: SEMA_PUBLIC_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # The internal-pilot access-key gate (api/main.py's require_api_key,
+      # frontend/src/lib/pilotAccess.ts) -- NOT real per-user authentication.
+      - key: SEMA_API_KEY
+        sync: false
+      # Must be a valid Fernet key -- docs/deployment.md explains how to
+      # generate and VALIDATE one (Render's generic "Generate" button is not
+      # guaranteed to produce Fernet-compatible output).
+      - key: SEMA_SECRETS_KEY
+        sync: false
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sema-pilot-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sema-pilot-db
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sema-pilot-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sema-pilot-db
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sema-pilot-db
+          property: database
+      # Dedicated SELECT-only role, created manually via sql/create_readonly_
+      # role.sql (docs/deployment.md) -- MUST NOT be sema-pilot-db's own
+      # admin user/password above. sema_core's SQL-safety layer trusts this
+      # role to physically be unable to write, not just to be told not to.
+      - key: POSTGRES_READONLY_USER
+        sync: false
+      - key: POSTGRES_READONLY_PASSWORD
+        sync: false
+      # The `insurance` tenant's database name, once it's created manually
+      # on the same instance (docs/deployment.md) -- until then, leave unset
+      # and see that doc's note on the insurance client during this pilot.
+      - key: POSTGRES_DB_INSURANCE
+        sync: false
+
+databases:
+  - name: sema-pilot-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: sema_db
+    user: sema_user

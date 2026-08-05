@@ -8,6 +8,7 @@ import "@fontsource/manrope/600.css";
 import App from "./App.tsx";
 import { LoginPage } from "./components/login/LoginPage.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { PilotAccessGate } from "./components/access/PilotAccessGate";
 
 // /login is a full-page route OUTSIDE the chat app shell (auth_login_prompt.md
 // Part 0), same "no router dependency" approach the admin panel uses (a plain
@@ -25,7 +26,11 @@ createRoot(document.getElementById("root")!).render(
         </div>
       }
     >
-      {isLoginRoute ? <LoginPage /> : <App />}
+      {/* Internal-pilot access gate (docs/deployment.md's Render section) --
+          wraps BOTH routes, since both eventually call protected /api/*
+          endpoints. A no-op (renders children immediately) when
+          SEMA_API_KEY is unset, which is every local dev environment. */}
+      <PilotAccessGate>{isLoginRoute ? <LoginPage /> : <App />}</PilotAccessGate>
     </ErrorBoundary>
   </StrictMode>,
 );

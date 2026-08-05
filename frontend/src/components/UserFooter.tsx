@@ -3,6 +3,7 @@ import { LogOut, MoreHorizontal } from "lucide-react";
 import { api, type AdminUser } from "../lib/api";
 import { usePopoverMenu } from "../hooks/usePopoverMenu";
 import { initials, pastelFor } from "../lib/avatar";
+import { clearAccessKey } from "../lib/pilotAccess";
 import { useT } from "../locales";
 import { PopoverMenu } from "./PopoverMenu";
 
@@ -64,6 +65,11 @@ export function UserFooter() {
             type="button"
             role="menuitem"
             onClick={() => {
+              // Also clears the internal-pilot access key (lib/pilotAccess.ts)
+              // -- this is the gate's "sign out / lock" action (spec: "a
+              // visible sign-out or lock action that clears the session
+              // key"). A no-op when no pilot key is stored (local dev).
+              clearAccessKey();
               window.location.href = "/login";
             }}
             className="w-full text-start flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.85rem] text-critical-fg hover:bg-critical-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition"
