@@ -40,9 +40,13 @@ services:
     dockerfilePath: ./api/Dockerfile.prod
     dockerContext: .
     healthCheckPath: /healthz
-    # Only redeploy once CI's checks pass on the branch -- never ship an
-    # internal pilot straight off a red build.
-    autoDeployTrigger: checksPass
+    # "commit", not "checksPass": this repo has no CI/status checks
+    # configured (no .github/workflows), and Render's checksPass mode never
+    # deploys at all when zero checks are ever reported on a commit --
+    # confirmed against Render's own docs, not a guess. Revisit this once
+    # CI exists; until then, "commit" is what actually makes `git push`
+    # redeploy automatically.
+    autoDeployTrigger: commit
     disk:
       name: sema-pilot-disk
       # sema_core.persist_bootstrap (run by api/Dockerfile.prod's CMD, before
