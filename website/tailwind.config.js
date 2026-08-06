@@ -11,7 +11,13 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: '#6C74F0',
+          // Was #6C74F0 (3.89:1 as white-text-on-fill and as text-on-white --
+          // fails WCAG AA 4.5:1). Now the same value as `deep` below: passes
+          // at 5.79:1, with comfortable margin (docs/website_qa_report.md
+          // Decisions needed #1). `deep` is kept as its own token too since
+          // other components reference it explicitly (text-brand-deep on
+          // light bg-brand-50 tints) -- both now resolve to the same color.
+          DEFAULT: '#4E56D6',
           hover: '#5B62DE',
           deep: '#4E56D6',
           400: '#949CFF',
