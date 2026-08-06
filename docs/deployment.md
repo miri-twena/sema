@@ -581,3 +581,40 @@ all of the following must ship first (`auth_login_prompt.md` Parts A+B):
   — `SEMA_API_KEY` must go back to being an internal/infra concern (or be
   removed entirely) once real per-user auth exists; it must never be handed
   to an external customer as "their login."
+
+## 10. Marketing website (static site)
+
+`website/` is a completely separate project from everything above — the
+public marketing site (Next.js, `output: 'export'`, bilingual en/he), not
+the product app. It has no backend, no database, and no secrets, so its
+entire deployment is the `sema-website` entry in `render.yaml`:
+
+```yaml
+- type: web
+  name: sema-website
+  runtime: static
+  rootDir: website
+  buildCommand: npm ci && npm run build
+  staticPublishPath: website/out
+```
+
+**To deploy:** Render dashboard → the same Blueprint as `sema-pilot` (or
+**New → Static Site** pointed at this repo with the same settings) → it
+picks up `sema-website` from `render.yaml` alongside the product app.
+Static sites are free on Render — no plan/region to choose (`region`
+doesn't apply to static sites at all).
+
+Nothing to configure afterward: no environment variables, no database, no
+`SEMA_PUBLIC_URL`-style chicken-and-egg step. `npm run build` was verified
+locally to produce `website/out/index.html`, `website/out/he/index.html`,
+and `website/out/404.html` — exactly what `staticPublishPath: website/out`
+expects.
+
+**Note on `rootDir` + `staticPublishPath` together:** `rootDir: website`
+is what makes `buildCommand` actually run inside `website/` (a monorepo —
+this repo's root also has the product app). `staticPublishPath` is the one
+field Render's Blueprint spec documents as an exception: it's **always**
+relative to the repo root, never to `rootDir` — so it still needs the
+`website/` prefix even though `rootDir` already established that as the
+build's working directory. Easy to get backwards; if a future deploy 404s
+on everything, check this first.

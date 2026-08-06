@@ -133,6 +133,26 @@ services:
       - key: POSTGRES_DB_INSURANCE
         value: insurance_db
 
+  # SEMA's public marketing site (website/) -- a completely separate,
+  # static-only Next.js project from the product app above: no backend, no
+  # database, no secrets, `output: 'export'` (website/next.config.mjs), so
+  # this is the whole deployment, nothing else to provision. `region`
+  # doesn't apply to static sites (Render's own docs are explicit about
+  # this), and static sites are free -- no `plan` set, so it uses Render's
+  # default rather than this file implying it's a paid resource.
+  - type: web
+    name: sema-website
+    runtime: static
+    # Monorepo: the site lives in website/, not the repo root. rootDir sets
+    # the working directory buildCommand runs in -- but staticPublishPath
+    # is DELIBERATELY still repo-root-relative (Render's Blueprint spec is
+    # explicit that this one field is the exception), so it has to repeat
+    # the "website/" prefix that rootDir already implies everywhere else.
+    rootDir: website
+    buildCommand: npm ci && npm run build
+    staticPublishPath: website/out
+    autoDeployTrigger: commit
+
 databases:
   - name: sema-pilot-db
     plan: basic-256mb

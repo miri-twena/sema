@@ -16,7 +16,9 @@ npm run dev
 npm run build
 ```
 
-Output goes to `out/`, deployable to any static host.
+Output goes to `out/`, deployable to any static host. Deployed as a Render
+Static Site (`sema-website` in the root `render.yaml`) — see
+`docs/deployment.md` section 10.
 
 ## Product screenshots (`public/screens/`)
 
