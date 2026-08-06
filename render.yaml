@@ -40,6 +40,16 @@ services:
     dockerfilePath: ./api/Dockerfile.prod
     dockerContext: .
     healthCheckPath: /healthz
+    # Without this, ANY commit anywhere in the repo redeploys sema-pilot,
+    # including a commit that only touches website/ (confirmed -- that's
+    # exactly what happened). This is the one path known to be irrelevant
+    # to this service's Docker build; not attempting to enumerate every
+    # relevant path instead (api/, sema_core/, sql/, config/, frontend/),
+    # since dockerContext is the whole repo root and genuinely could depend
+    # on any of them.
+    buildFilter:
+      ignoredPaths:
+        - website/**
     # "commit", not "checksPass": this repo has no CI/status checks
     # configured (no .github/workflows), and Render's checksPass mode never
     # deploys at all when zero checks are ever reported on a commit --
@@ -157,6 +167,12 @@ services:
     buildCommand: cd website && npm ci && npm run build
     staticPublishPath: website/out
     autoDeployTrigger: commit
+    # buildFilter only scopes WHICH commits trigger a build -- confirmed via
+    # Render's docs to be unrelated to buildCommand's working directory, so
+    # unlike rootDir (removed above), this can't reintroduce that bug.
+    buildFilter:
+      paths:
+        - website/**
 
 databases:
   - name: sema-pilot-db
