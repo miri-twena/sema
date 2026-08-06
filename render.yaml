@@ -143,13 +143,18 @@ services:
   - type: web
     name: sema-website
     runtime: static
-    # Monorepo: the site lives in website/, not the repo root. rootDir sets
-    # the working directory buildCommand runs in -- but staticPublishPath
-    # is DELIBERATELY still repo-root-relative (Render's Blueprint spec is
-    # explicit that this one field is the exception), so it has to repeat
-    # the "website/" prefix that rootDir already implies everywhere else.
-    rootDir: website
-    buildCommand: npm ci && npm run build
+    # Monorepo: the site lives in website/, not the repo root. First deploy
+    # failed with "Publish directory website/out does not exist!" -- rootDir
+    # was set expecting it to also change buildCommand's working directory,
+    # but Render's docs don't actually promise that (only that it scopes
+    # which file changes trigger a rebuild), so relying on it was the bug.
+    # buildCommand now `cd`s into website/ explicitly instead -- no
+    # rootDir, no assumption about an undocumented cwd behavior, just a
+    # buildCommand that starts at the repo root (Render's own documented
+    # default) and gets itself to the right place. staticPublishPath stays
+    # repo-root-relative either way (Render's Blueprint spec is explicit
+    # that this one field always is, regardless of rootDir).
+    buildCommand: cd website && npm ci && npm run build
     staticPublishPath: website/out
     autoDeployTrigger: commit
 
